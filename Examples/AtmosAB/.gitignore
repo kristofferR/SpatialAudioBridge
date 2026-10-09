@@ -1,0 +1,7 @@
+Media/
+DerivedData/
+AtmosAB.xcodeproj/
+*.log
+install.json
+launch.json
+*.png
