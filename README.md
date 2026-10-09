@@ -2,12 +2,24 @@
 
 A Swift library that converts demuxed **TrueHD Atmos** and **DTS:X** audio into **Apple Positional Audio Codec (APAC)** media for native Apple playback.
 
+Built on [truehdd](https://github.com/truehdd/truehdd) and [dca](https://github.com/harletty/harletty-bridge/tree/a717bae441b116485f0254603dc20a6ede65d8c6/dca), with Apple's platform APAC encoder.
+
 ```text
 compressed track → Rust decoder → spatial speaker renderer → Float32 PCM
                   → Apple APAC encoder → MP4 or fragmented MP4 / HLS
 ```
 
 This is an experimental first implementation. TrueHD objects are rendered into 7.1.4 or 9.1.6 speaker feeds. The established DTS:X height presentation is decoded and its height contribution is removed from the compatible bed before recombination. APAC then encodes those spatial feeds. This involves rendering and lossy encoding; it does not preserve the original object stream or bitstream.
+
+## Decoder dependencies
+
+The compressed-audio decoding and metadata parsing come from these upstream projects:
+
+- **[truehdd](https://github.com/truehdd/truehdd)** (`truehd` crate): TrueHD framing, parsing and decoding, including Atmos presentation PCM and object metadata. This library uses the pinned [harletty fork](https://github.com/harletty/truehdd/tree/5c8b880405946e7ff1aee884cf9988415fe2c3a9).
+- **[dca](https://github.com/harletty/harletty-bridge/tree/a717bae441b116485f0254603dc20a6ede65d8c6/dca)**: the standalone Rust DTS decoder in `harletty-bridge`. It supplies DTS-HD lossless decoding, the supported DTS:X height presentation, and the fold metadata/rendering used to remove height contributions from the compatible bed.
+- **[oamd](https://github.com/truehdd/oamd)**: Atmos object-audio metadata parsing, included through `truehd`. Its parsed positions, gains and timing drive this library's object renderer.
+
+SpatialAudioCore adds supported-metadata checks, channel routing and bed/height panning. The Swift layer provides the streaming API, Apple's APAC encoding and file/HLS output. Decoder revisions are pinned in [Cargo.toml](Rust/SpatialAudioCore/Cargo.toml), with resolved versions in [Cargo.lock](Rust/SpatialAudioCore/Cargo.lock). Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Build
 
