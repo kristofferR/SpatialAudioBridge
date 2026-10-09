@@ -9,7 +9,7 @@ import AVFoundation
 @MainActor
 public final class AtmosOutputActivator {
     private let stream: URL
-    private let player = AVQueuePlayer()
+    let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private weak var host: AVPlayer?
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
@@ -54,9 +54,6 @@ public final class AtmosOutputActivator {
         observations = []
         host = nil
         follow(nil)
-        looper?.disableLooping()
-        looper = nil
-        player.removeAllItems()
     }
 
     private func follow(_ item: AVPlayerItem?) {
@@ -71,7 +68,12 @@ public final class AtmosOutputActivator {
     }
 
     private func update() {
-        guard let host, host.timeControlStatus != .paused, let item = host.currentItem, playsAPAC(item) else {
+        guard let host, let item = host.currentItem, playsAPAC(item) else {
+            // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
+            release()
+            return
+        }
+        guard host.timeControlStatus != .paused else {
             player.pause()
             return
         }
@@ -79,6 +81,14 @@ public final class AtmosOutputActivator {
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: stream))
         }
         player.play()
+    }
+
+    private func release() {
+        guard looper != nil else { return }
+        player.pause()
+        looper?.disableLooping()
+        looper = nil
+        player.removeAllItems()
     }
 
     private nonisolated static func onMain(_ body: @escaping @MainActor @Sendable () -> Void) {
