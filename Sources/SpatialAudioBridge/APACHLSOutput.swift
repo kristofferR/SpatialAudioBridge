@@ -6,6 +6,8 @@ import CoreMedia
 public final class APACHLSOutput: @unchecked Sendable {
     public let playlistURL: URL
     public let encoderPrimingDuration: CMTime
+    /// Use apacCodecString and channelCount when authoring the host's multivariant playlist.
+    public let layout: SpatialAudioLayout
     private let directory: URL
     private let periods: Int
     private let targetDuration: Int
@@ -20,6 +22,7 @@ public final class APACHLSOutput: @unchecked Sendable {
             throw SpatialAudioError.invalidConfiguration("HLS requires a new directory and valid segment interval")
         }
         self.directory = directory
+        self.layout = configuration.layout
         self.encoderPrimingDuration = try configuration.encoderPrimingDuration()
         self.periods = syncPeriodsPerSegment
         self.targetDuration = Int(ceil(Double(configuration.syncPacketFrequency * 1024 * syncPeriodsPerSegment) / 48_000 + 0.05))

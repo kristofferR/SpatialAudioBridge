@@ -64,6 +64,7 @@ let report = try await audio.finish()
 try hls.finish()
 // Serve hls.playlistURL and its adjacent init.mp4 / .m4s files over HTTP.
 // hls.encoderPrimingDuration exposes the encoder's leading-frame offset.
+// hls.layout.apacCodecString supplies the audio CODECS entry for the master playlist.
 ```
 
 Players can also consume `.segments(onSegment:)` directly. Segment reports include timestamps and durations. Callback errors propagate to conversion. The default segment interval is two APAC sync periods, approximately 3.2 seconds at 48 kHz.
@@ -75,14 +76,14 @@ The host player owns container parsing, networking, video remuxing, the HTTP ser
 | Input / output | Status |
 |---|---|
 | TrueHD Atmos, 48 kHz, one bed, point objects | Implemented; full 58-second fixture rendered |
-| Object position, gain, activity, update offsets and ramps | Implemented |
+| Object room position, extended precision, gain, activity, elevation enable, timing and ramps | Implemented; separate bed/height angular panning |
 | DTS:X standard four-height presentation, 48 kHz | Implemented; full 95-second fixture rendered |
 | DTS:X alternate/IMAX object profiles | Explicitly rejected |
 | Atmos ISF, multiple beds and nonzero object sizes | Explicitly rejected |
-| Custom Atmos trims, screen/distance/zone rendering | Not implemented; renderer is an approximation |
+| Atmos trims, bed distribution/downmix, divergence, snap, screen/distance/zone controls | Explicitly rejected |
 | APAC 7.1.4 / 9.1.6, file / HLS fragments | Implemented; Apple encoder and decoder tested |
 | Receiver/MAT output and sustained Apple TV performance | Requires device verification |
 
-Use the host player's existing fallback when a track is unsupported. This renderer is not a Dolby/DTS reference renderer. APAC's final HDMI output depends on the device, OS and audio route.
+Use the host player's existing fallback when a track is unsupported. The [rendering model](docs/rendering.md) documents the coordinate mapping and supported metadata. This renderer is not a Dolby/DTS reference renderer. APAC's final HDMI output depends on the device, OS and audio route.
 
 Validation, fixture acquisition and integration boundaries are described in [docs/validation.md](docs/validation.md) and [docs/integration.md](docs/integration.md). The source is Apache 2.0; dependency notices are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -2,6 +2,11 @@ import Testing
 import Foundation
 @testable import SpatialAudioBridge
 
+@Test func hlsCodecStringsIncludeTheChannelBasedProfileAndLevel() {
+    #expect(SpatialAudioLayout.sevenOneFour.apacCodecString == "apac.31.03")
+    #expect(SpatialAudioLayout.nineOneSix.apacCodecString == "apac.31.04")
+}
+
 @Test func invalidConfigurationIsRejectedBeforeCreatingOutput() {
     #expect(throws: SpatialAudioError.self) {
         try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .file(URL(fileURLWithPath: "/unused.mp4")),

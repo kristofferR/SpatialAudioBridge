@@ -11,6 +11,14 @@ public enum SpatialAudioLayout: UInt32, Sendable {
     case sevenOneFour = 12
     case nineOneSix = 16
     public var channelCount: Int { Int(rawValue) }
+    /// Audio entry for the HLS variant's CODECS attribute, including profile and level.
+    /// Apple's channel-based APAC profile 31 uses level 3 through 12 channels, 4 through 24.
+    public var apacCodecString: String {
+        switch self {
+        case .sevenOneFour: "apac.31.03"
+        case .nineOneSix: "apac.31.04"
+        }
+    }
     var tag: AudioChannelLayoutTag {
         switch self {
         case .sevenOneFour: kAudioChannelLayoutTag_Atmos_7_1_4
