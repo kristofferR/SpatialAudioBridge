@@ -54,15 +54,22 @@ import Testing
     @Test func playsOnlyForItemsSelectedByThePredicate() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let apac = AVPlayerItem(url: try silence("apac"))
-        let host = AVPlayer(playerItem: AVPlayerItem(url: try silence("other")))
+        let other = AVPlayerItem(url: try silence("other"))
+        let host = AVPlayer(playerItem: other)
         host.volume = 0
         activator.attach(to: host) { $0 === apac }
         host.play()
         try await Task.sleep(for: .milliseconds(500))
         #expect(!activator.isActive)
+        #expect(activator.player.items().isEmpty)
         host.replaceCurrentItem(with: apac)
         host.play()
         #expect(await eventually { activator.isActive })
+        // Other audio must not share playback with a prerolled silent stream.
+        host.replaceCurrentItem(with: AVPlayerItem(url: try silence("other")))
+        host.play()
+        #expect(await eventually { activator.player.items().isEmpty })
+        #expect(!activator.isActive)
         activator.detach()
         #expect(!activator.isActive)
         host.pause()
