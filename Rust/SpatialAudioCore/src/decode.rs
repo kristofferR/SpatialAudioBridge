@@ -40,6 +40,10 @@ impl Core {
     }
 }
 
+/// Audio decoded before the first object metadata, at most half a second at 48 kHz.
+/// Atmos streams repeat their metadata every few tens of milliseconds.
+const MAX_HELD_FRAMES: usize = 24_000;
+
 pub struct TrueHd {
     extractor: Extractor,
     parser: Parser,
@@ -49,6 +53,8 @@ pub struct TrueHd {
     bytes: u64,
     consumed: u64,
     spatial: bool,
+    held: Vec<Vec<Vec<f32>>>,
+    held_frames: usize,
 }
 impl TrueHd {
     fn new(layout: Layout) -> Self {
@@ -61,6 +67,8 @@ impl TrueHd {
             bytes: 0,
             consumed: 0,
             spatial: false,
+            held: Vec::new(),
+            held_frames: 0,
         }
     }
     fn push(
@@ -102,23 +110,42 @@ impl TrueHd {
             if self.decoded.sampling_frequency != 48_000 {
                 return Err("The initial Atmos renderer supports 48 kHz tracks".into());
             }
-            for metadata in &self.decoded.oamd {
-                schedule_oamd(&mut self.renderer, metadata, self.decoded.channel_count)?;
-                self.spatial = true;
-            }
-            if !self.spatial {
-                return Err(
-                    "Atmos presentation has no usable object metadata at its starting sync".into(),
-                );
-            }
             let frames = self.decoded.sample_length;
-            let input: Vec<_> = (0..self.decoded.channel_count)
+            let input: Vec<Vec<f32>> = (0..self.decoded.channel_count)
                 .map(|ch| {
                     (0..frames)
                         .map(|s| self.decoded.pcm_data[s][ch] as f32 / 8_388_608.)
                         .collect()
                 })
                 .collect();
+            if !self.spatial {
+                let Some(first) = self.decoded.oamd.first() else {
+                    // A stream entered at a later major sync carries its first object metadata
+                    // a few access units in. Hold the audio until then so no samples are lost.
+                    self.held_frames += frames;
+                    if self.held_frames > MAX_HELD_FRAMES {
+                        return Err("Atmos presentation has no object metadata within 0.5 s".into());
+                    }
+                    self.held.push(input);
+                    continue;
+                };
+                // Held audio takes the first known object state.
+                set_initial_state(&mut self.renderer, first, self.decoded.channel_count)?;
+                self.spatial = true;
+                for held in std::mem::take(&mut self.held) {
+                    let frames = held.first().map_or(0, Vec::len);
+                    output(Pcm {
+                        data: self.renderer.render(&held, frames),
+                        frames,
+                        rate: self.decoded.sampling_frequency,
+                        channels: self.renderer.panner.count(),
+                    })?;
+                }
+                self.held_frames = 0;
+            }
+            for metadata in &self.decoded.oamd {
+                schedule_oamd(&mut self.renderer, metadata, self.decoded.channel_count)?;
+            }
             output(Pcm {
                 data: self.renderer.render(&input, frames),
                 frames,
@@ -139,10 +166,52 @@ impl TrueHd {
     }
 }
 
+/// Routes each channel at its first metadata block, for audio decoded before that metadata.
+fn set_initial_state(
+    renderer: &mut Renderer,
+    metadata: &ObjectAudioMetadataPayload,
+    channels: usize,
+) -> Result<(), String> {
+    let mut first = Vec::with_capacity(channels);
+    for_each_block(renderer, metadata, channels, |event| {
+        if event.block == 0 {
+            first.push((event.channel, event.gains));
+        }
+    })?;
+    for (channel, gains) in first {
+        renderer.route(channel, gains);
+    }
+    Ok(())
+}
+
 fn schedule_oamd(
     renderer: &mut Renderer,
     metadata: &ObjectAudioMetadataPayload,
     channels: usize,
+) -> Result<(), String> {
+    let mut events = Vec::new();
+    for_each_block(renderer, metadata, channels, |event| {
+        events.push(event.event)
+    })?;
+    for event in events {
+        renderer.event(event);
+    }
+    Ok(())
+}
+
+struct BlockEvent {
+    block: usize,
+    channel: usize,
+    gains: crate::render::Gains,
+    event: Event,
+}
+
+/// Validates the metadata and yields the target gains of every channel in every update block.
+fn for_each_block(
+    renderer: &Renderer,
+    metadata: &ObjectAudioMetadataPayload,
+    channels: usize,
+    mut visit: impl FnMut(BlockEvent),
 ) -> Result<(), String> {
     let program = &metadata.program_assignment;
     if program.num_isf_objects != 0 || program.bed_assignment.len() > 1 {
@@ -248,11 +317,16 @@ fn schedule_oamd(
             for g in &mut gains {
                 *g *= gain;
             }
-            renderer.event(Event {
-                sample,
+            visit(BlockEvent {
+                block: block_index,
                 channel,
                 gains,
-                ramp: timing.ramp_duration as u32,
+                event: Event {
+                    sample,
+                    channel,
+                    gains,
+                    ramp: timing.ramp_duration as u32,
+                },
             });
         }
     }

@@ -33,6 +33,8 @@ Vertical position then scales the bed ring by `cos(z × π/2)` and the height ri
 
 Position, extended precision, object gain, activity, elevation enable, update offsets and gain ramps are implemented. Elevation-disabled objects render at `z = 0`. Inactive object blocks target silence, including when they retain stale object-rendering controls.
 
+A stream entered at a later major sync, after a seek or from a server-side remux, usually carries its first object metadata a few access units in: 7.5–20 ms in measured Blu-ray streams, which then repeat it every 32 ms. The decoder holds up to 0.5 s of audio until that metadata arrives and renders it at the first metadata block's positions. Every sample is kept, so timing is unchanged. A stream without object metadata within 0.5 s is rejected.
+
 The decoder explicitly rejects active objects with nonzero size, snap, zone constraints, screen references or distance controls. It also rejects streams carrying trim metadata, bed distribution, bed downmix metadata or enabled object divergence, alongside ISF and multiple beds. Trim and bed downmix elements are rejected conservatively even if a particular element could be neutral for the requested layout. Hosts should select their existing fallback on these errors.
 
 DTS:X support remains limited to the standard four-height presentation and recognized height folds. It does not implement arbitrary moving DTS:X objects or alternate/IMAX presentations.
