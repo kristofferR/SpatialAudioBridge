@@ -14,11 +14,13 @@ For a player using VLC, mpv or another PCM pipeline, integration includes choosi
 
 The package currently requires tvOS 26. A production integration retaining older OS support will need an availability-gated packaging arrangement and the player's existing audio fallback.
 
-## Native Atmos playback example
+## Atmos output
 
-The [Atmos A/B example](../Examples/AtmosAB/README.md) records the player setup that triggered Atmos for converted TrueHD → APAC on the tested Apple TV/receiver route. It enables multichannel content on the playback/movie audio session, activates a `MPNowPlayingSession` for the main player, and plays a separate near-silent E-AC-3/JOC carrier alongside APAC. DDP plays directly without the carrier. The carrier pauses with the main track and is removed on item changes and at the end. This belongs to the host player; conversion and encoder settings are unchanged.
+APAC alone did not switch the tested Apple TV's HDMI output to Atmos. Use `AtmosOutputActivator` from the `SpatialAudioPlayback` product, which does not link the Rust core. Create it with a near-silent E-AC-3 + JOC stream and attach it to the host's `AVPlayer`. It plays that stream in a separate, unmuted player while the host plays, or is waiting to play, an item accepted by the `playsAPAC` predicate. It pauses with the host and re-evaluates on item and audio selection changes. For an HLS item that also offers other audio, return true only when the APAC rendition is selected. Call `detach()` when leaving playback.
 
-This is a measured workaround on tvOS 27.2 beta, not an Apple guarantee or proof of correct height/speaker placement. Receiver Atmos activation was confirmed by listening and receiver indication; session channel count, rendering mode and spatial-audio flags were unsuitable detectors on that system. Validate the setup on each target route and OS. The example keeps all fixture/carrier media local and out of Git.
+`AtmosOutputActivator.configureAudioSession()` applies the tested session: playback category, movie playback mode and multichannel content. The A/B example also activates an `MPNowPlayingSession` for the main player. Its launch arguments isolate each part.
+
+This is a measured workaround on tvOS 27.2 beta, not an Apple guarantee or proof of correct height/speaker placement. Receiver Atmos activation was confirmed by listening and receiver indication; session channel count, rendering mode and spatial-audio flags were unsuitable detectors on that system. Validate the setup on each target route and OS. The library does not distribute a silent Atmos stream; the host supplies one.
 
 ## Encoder priming
 
