@@ -59,7 +59,7 @@ for try await packet in demuxedAudioPackets {
 let report = try await audio.finish()
 ```
 
-Await each append. Supply only the selected track, starting at a major sync. DTS input must include both its core and DTS-HD extensions in 16-bit big-endian form. Container files such as MKV and M2TS need demuxing first. Start a new session after a seek, discontinuity or format change. Call `cancel()` when abandoning playback; task cancellation also stops conversion.
+Await each append. Supply only the selected track, starting at a major sync; TrueHD may start at any later major sync, such as one reached by a seek. DTS input must include both its core and DTS-HD extensions in 16-bit big-endian form. Container files such as MKV and M2TS need demuxing first. Start a new session after a seek, discontinuity or format change. Call `cancel()` when abandoning playback; task cancellation also stops conversion.
 
 ## Stream APAC over HLS
 
