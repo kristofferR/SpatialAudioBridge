@@ -57,3 +57,59 @@ fn truehd_chunk_boundaries_preserve_spatial_audio_and_timing() {
 fn dtsx_chunk_boundaries_preserve_spatial_audio_and_timing() {
     validate(2, "SAB_DTSX_FIXTURE");
 }
+
+/// Byte offset, and samples decoded before it, of the first major sync after `after` samples
+/// whose access unit carries no object metadata: what a seek or a server-side remux delivers.
+fn later_sync_without_metadata(data: &[u8], after: u64) -> (usize, u64, u64) {
+    use truehd::process::{
+        decode::{DecodedAccessUnit, Decoder},
+        extract::Extractor,
+        parse::Parser,
+    };
+    let mut extractor = Extractor::default();
+    let (mut parser, mut decoder, mut decoded) = (
+        Parser::default(),
+        Decoder::default(),
+        DecodedAccessUnit::default(),
+    );
+    extractor.push_bytes(data);
+    let (mut samples, mut found) = (0, None);
+    while let Some(Ok(frame)) = extractor.next() {
+        let au = parser.parse(&frame).unwrap();
+        decoder
+            .decode_presentation_into(&au, 3, &mut decoded)
+            .unwrap();
+        if decoded.is_duplicate {
+            continue;
+        }
+        if found.is_none()
+            && samples >= after
+            && au.major_sync_info.is_some()
+            && decoded.oamd.is_empty()
+        {
+            found = Some((frame.offset as usize, samples));
+        }
+        samples += decoded.sample_length as u64;
+    }
+    let (offset, before) = found.expect("a later major sync without object metadata");
+    (offset, before, samples)
+}
+
+#[test]
+#[ignore = "requires SAB_TRUEHD_FIXTURE elementary stream"]
+fn truehd_starts_at_a_later_major_sync_without_losing_samples() {
+    let data = fs::read(env::var("SAB_TRUEHD_FIXTURE").expect("set the fixture path")).unwrap();
+    let (offset, before, total) = later_sync_without_metadata(&data, 10 * 48_000);
+    let a = digest(1, &data[offset..], 4096);
+    let b = digest(1, &data[offset..], 317);
+    assert_eq!(a, b, "input chunk boundaries must not alter PCM or timing");
+    assert_eq!(
+        a.0,
+        total - before,
+        "audio before the first object metadata must be kept"
+    );
+    assert!(
+        a.2[10..].iter().any(|e| *e > 0.),
+        "height audio must survive"
+    );
+}
