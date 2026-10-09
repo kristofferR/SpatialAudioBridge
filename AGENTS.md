@@ -21,11 +21,11 @@ The host player owns demuxing, track selection, networking, video, HTTP serving,
 ## Current baseline
 
 - Experimental, with tvOS 26+ and macOS 26+ encoding requirements.
-- 48 kHz TrueHD Atmos with one bed and point objects; position, gain, activity, timed updates and ramps are implemented.
+- 48 kHz TrueHD Atmos with one bed and point objects; room position, extended precision, gain, activity, elevation enable, timed updates and ramps are implemented with separate bed/height angular panning.
 - 48 kHz DTS:X standard four-height presentation; known height folds are removed from the compatible bed before recombination.
 - APAC 7.1.4 and 9.1.6 output, including files and HLS fragments.
 - Atmos ISF, multiple beds, nonzero object sizes and alternate/IMAX DTS:X profiles are rejected.
-- Custom Atmos trims and screen/distance/zone rendering are not implemented. The renderer is an approximation, not a licensed reference renderer.
+- Atmos trim/bed-downmix metadata, bed distribution, enabled divergence and active size/snap/screen/distance/zone controls are rejected. The [rendering model](docs/rendering.md) documents the approximation; it is not a licensed reference renderer.
 
 Real fixtures have passed decoding and Apple APAC round trips. This does not establish correct receiver/MAT output, sustained Apple TV performance or host-player A/V synchronization. Keep those distinctions explicit in documentation and reports.
 
