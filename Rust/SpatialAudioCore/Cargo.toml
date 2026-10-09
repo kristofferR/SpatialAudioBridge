@@ -1,0 +1,18 @@
+[package]
+name = "spatial-audio-core"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.89"
+
+[lib]
+name = "spatial_audio_core"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+truehd = { git = "https://github.com/harletty/truehdd", rev = "5c8b880405946e7ff1aee884cf9988415fe2c3a9" }
+dca = { git = "https://github.com/harletty/harletty-bridge", rev = "a717bae441b116485f0254603dc20a6ede65d8c6" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

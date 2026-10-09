@@ -1,0 +1,4 @@
+module SpatialAudioCore {
+    header "SpatialAudioCore.h"
+    export *
+}
