@@ -18,7 +18,7 @@
 | `.decoding("Atmos presentation has no object metadata within 0.5 s")` | The stream started without object metadata; possibly damaged or not a standard Atmos stream. |
 | `.decoding("The initial Atmos renderer supports 48 kHz tracks")` | A 96 kHz or other non-48 kHz track. |
 | `.decoding("This stream is not lossless DTS:X")` | DTS core, DTS-HD High Resolution or DTS-HD MA without DTS:X. |
-| `.decoding("DTS:X … is experimental upstream and is not enabled")`, `"Unknown DTS:X presentation"` or `"…unknown bed fold…"` | An alternate or IMAX DTS:X presentation. |
+| `.decoding("Unknown DTS:X presentation")`, `"…source role does not match its presentation"` or `"…unknown bed fold…"` | A DTS:X presentation this renderer does not recognize, or metadata that does not match it. |
 | `.source("The file has no TrueHD or DTS track")` | No convertible track; check `file.audioTracks`. |
 | `.source("The file does not declare its duration")` | `APACStream` needs the duration for its VOD playlist. |
 | `.source("Could not load the video playlist")` | The video master URL failed or did not return a playlist; check its authorization. |

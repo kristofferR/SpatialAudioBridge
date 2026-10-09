@@ -51,13 +51,14 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 | TrueHD Atmos, 48 kHz, one bed, point objects | Supported, including starts at any major sync |
 | Object position, extended precision, gain, activity, elevation enable, timing and ramps | Supported; separate bed and height angular panning |
 | DTS:X standard four-height presentation, 48 kHz | Supported |
+| DTS:X known alternate and IMAX object presentations, 48 kHz lossless | Experimental: D0, D1, D3 and D4, three-component D0 and object-only routing |
 | Matroska (MKV, MKA), local or over HTTP range requests | Supported, with cue-based seeking |
 | APAC 7.1.4 and 9.1.6: MP4 files, HLS fragments, sample buffers | Supported; decoded by Apple's decoder in tests |
 | `AVPlayer` playback with on-demand conversion and seeking | Verified on Apple TV with Jellyfin |
 | `AVSampleBufferAudioRenderer` playback | Atmos and channel placement verified on Apple TV |
 | Atmos ISF, multiple beds, nonzero object sizes | Rejected |
 | Atmos trims, bed distribution/downmix, divergence, snap, screen/distance/zone controls | Rejected |
-| DTS:X alternate and IMAX presentations | Rejected |
+| Unknown DTS:X profiles, mismatched source roles, unresolved folds | Rejected |
 | M2TS and MP4 containers | Use the host's demuxer with `SpatialAudioTranscoder` |
 
 Rejected tracks fail with a clear error so the player can fall back. The [rendering model](docs/rendering.md) documents how objects are placed.
@@ -117,7 +118,7 @@ A future release can replace the local binary target with a downloadable, checks
 ## Decoder dependencies
 
 - **[truehdd](https://github.com/truehdd/truehdd)** (`truehd` crate): TrueHD framing, parsing and decoding, including Atmos presentation PCM and object metadata. This library uses the pinned [harletty fork](https://github.com/harletty/truehdd/tree/5c8b880405946e7ff1aee884cf9988415fe2c3a9).
-- **[dca](https://github.com/harletty/harletty-bridge/tree/a717bae441b116485f0254603dc20a6ede65d8c6/dca)**: the Rust DTS decoder in `harletty-bridge`, supplying DTS-HD lossless decoding, the DTS:X height presentation and the fold metadata used to remove height contributions from the compatible bed.
+- **[dca](https://github.com/harletty/harletty-bridge/tree/a717bae441b116485f0254603dc20a6ede65d8c6/dca)**: the Rust DTS decoder in `harletty-bridge`, supplying DTS-HD lossless decoding, DTS:X presentation classification and object positions, and the fold metadata used to remove spatial contributions from the compatible bed.
 - **[oamd](https://github.com/truehdd/oamd)**: Atmos object-audio metadata parsing, through `truehd`.
 
 SpatialAudioCore adds metadata checks, channel routing and bed/height panning. Revisions are pinned in [Cargo.toml](Rust/SpatialAudioCore/Cargo.toml) and [Cargo.lock](Rust/SpatialAudioCore/Cargo.lock).

@@ -203,6 +203,29 @@ impl Panner {
         let (height_gain, bed_gain) = (angle.sin(), angle.cos().max(0.));
         std::array::from_fn(|i| bed[i] * bed_gain + height[i] * height_gain)
     }
+
+    /// Polar objects use physical azimuths, with the height ring at 45 degrees.
+    /// Above that ring, power spreads towards the overhead centre. Nearer objects
+    /// spread towards room centre; distances outside the reference radius project inward.
+    pub fn polar(&self, azimuth: f32, elevation: f32, distance: f32) -> Gains {
+        let elevation = elevation.clamp(0., 90.);
+        let bed = self.bed.angular(azimuth);
+        let mut height = self.height.angular(azimuth);
+        let overhead = ((elevation - 45.) / 45.).max(0.);
+        for target in &self.height.targets {
+            height[target.channel] = (overhead / self.height.targets.len() as f32
+                + (1. - overhead) * height[target.channel].powi(2))
+            .sqrt();
+        }
+        let vertical = (elevation / 45.).min(1.) * std::f32::consts::FRAC_PI_2;
+        let (height_gain, bed_gain) = (vertical.sin(), vertical.cos().max(0.));
+        let centre = self.bed.room(0., 0.);
+        let radius = distance.clamp(0., 1.);
+        std::array::from_fn(|i| {
+            let directional = bed[i] * bed_gain + height[i] * height_gain;
+            (radius * directional.powi(2) + (1. - radius) * centre[i].powi(2)).sqrt()
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -412,6 +435,43 @@ mod tests {
                     let difference: f32 =
                         before.iter().zip(after).map(|(a, b)| (a - b).powi(2)).sum();
                     assert!(difference.sqrt() < 0.001, "{layout:?} {degree} {z}");
+                }
+            }
+        }
+    }
+    #[test]
+    fn polar_objects_keep_physical_speaker_angles_and_overhead_symmetry() {
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let p = Panner::new(layout);
+            for (azimuth, elevation, speaker) in [
+                (-30., 0., Speaker::L),
+                (30., 0., Speaker::R),
+                (0., 0., Speaker::C),
+                (-45., 45., Speaker::Tfl),
+            ] {
+                let gains = p.polar(azimuth, elevation, 1.);
+                assert!(
+                    gains
+                        .iter()
+                        .zip(p.speaker(speaker))
+                        .all(|(a, b)| (a - b).abs() < 1e-6)
+                );
+            }
+            let overhead = p.polar(15., 90., 1.);
+            assert_eq!(overhead, p.polar(-140., 90., 1.));
+            assert!(
+                p.polar(30., 0., 0.)
+                    .iter()
+                    .zip(p.object([0.; 3]))
+                    .all(|(a, b)| (a - b).abs() < 1e-6)
+            );
+            for azimuth in (-180..=180).step_by(5) {
+                for elevation in (-90..=90).step_by(5) {
+                    for distance in [0., 0.25, 1., 2.] {
+                        let gains = p.polar(azimuth as f32, elevation as f32, distance);
+                        assert!((power(&gains) - 1.).abs() < 1e-5);
+                        assert_eq!(gains[3], 0.);
+                    }
                 }
             }
         }
