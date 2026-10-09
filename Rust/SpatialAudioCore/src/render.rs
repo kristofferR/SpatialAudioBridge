@@ -1,4 +1,4 @@
-//! Speaker rendering in Apple's Atmos channel order. Objects use constant-power VBAP.
+//! Room-coordinate rendering with separate constant-power bed and height rings.
 use std::collections::VecDeque;
 
 pub const MAX_CHANNELS: usize = 16;
@@ -47,58 +47,117 @@ pub enum Speaker {
 }
 
 impl Speaker {
-    fn position(self) -> [f32; 3] {
-        let (az, el): (f32, f32) = match self {
-            Self::L => (-30., 0.),
-            Self::R => (30., 0.),
-            Self::C | Self::Lfe => (0., 0.),
-            Self::Ls => (-90., 0.),
-            Self::Rs => (90., 0.),
-            Self::Lb => (-150., 0.),
-            Self::Rb => (150., 0.),
-            Self::Lw => (-60., 0.),
-            Self::Rw => (60., 0.),
-            Self::Tfl => (-30., 45.),
-            Self::Tfr => (30., 45.),
-            Self::Tsl => (-90., 75.),
-            Self::Tsr => (90., 75.),
-            Self::Tbl => (-150., 45.),
-            Self::Tbr => (150., 45.),
-            Self::Tc => (0., 90.),
-            Self::Tfc => (0., 45.),
-        };
-        let (a, e) = (az.to_radians(), el.to_radians());
-        [a.sin() * e.cos(), a.cos() * e.cos(), e.sin()]
+    // Physical azimuth and canonical room anchor. Positive azimuth is right.
+    fn placement(self) -> (f32, [f32; 3]) {
+        match self {
+            Self::L => (-30., [-1., 1., 0.]),
+            Self::R => (30., [1., 1., 0.]),
+            Self::C | Self::Lfe => (0., [0., 1., 0.]),
+            Self::Ls => (-90., [-1., 0., 0.]),
+            Self::Rs => (90., [1., 0., 0.]),
+            Self::Lb => (-145., [-1., -1., 0.]),
+            Self::Rb => (145., [1., -1., 0.]),
+            Self::Lw => (-60., [-1., 42. / 62., 0.]),
+            Self::Rw => (60., [1., 42. / 62., 0.]),
+            Self::Tfl => (-45., [-1., 1., 1.]),
+            Self::Tfr => (45., [1., 1., 1.]),
+            Self::Tsl => (-90., [-1., 0., 1.]),
+            Self::Tsr => (90., [1., 0., 1.]),
+            Self::Tbl => (-135., [-1., -1., 1.]),
+            Self::Tbr => (135., [1., -1., 1.]),
+            Self::Tc => (0., [0., 0., 1.]),
+            Self::Tfc => (0., [0., 1., 1.]),
+        }
     }
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a.iter().zip(b).map(|(a, b)| a * b).sum()
+struct Target {
+    channel: usize,
+    azimuth: f32,
 }
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
+
+struct Ring {
+    targets: Vec<Target>,
+    height: bool,
 }
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-fn normalize(mut p: [f32; 3]) -> [f32; 3] {
-    p[2] = p[2].max(0.);
-    let n = dot(p, p).sqrt();
-    if n < 1e-6 {
-        [0., 1., 0.]
-    } else {
-        p.map(|x| x / n)
+impl Ring {
+    fn new(speakers: &[Speaker], height: bool) -> Self {
+        let mut targets: Vec<_> = speakers
+            .iter()
+            .enumerate()
+            .filter_map(|(channel, speaker)| {
+                let (azimuth, room) = speaker.placement();
+                (*speaker != Speaker::Lfe && (room[2] > 0.) == height)
+                    .then_some(Target { channel, azimuth })
+            })
+            .collect();
+        targets.sort_by(|a, b| a.azimuth.total_cmp(&b.azimuth));
+        Self { targets, height }
     }
+
+    // The last interval crosses the rear seam. Use the same interpolation there.
+    fn pair(&self, angle: f32) -> (&Target, &Target, f32) {
+        let angle = (angle + 180.).rem_euclid(360.) - 180.;
+        let next = self.targets.partition_point(|t| t.azimuth <= angle);
+        let count = self.targets.len();
+        let a = &self.targets[(next + count - 1) % count];
+        let b = &self.targets[next % count];
+        let span = (b.azimuth - a.azimuth).rem_euclid(360.);
+        let offset = (angle - a.azimuth).rem_euclid(360.);
+        (a, b, (offset / span).clamp(0., 1.))
+    }
+
+    fn angular(&self, azimuth: f32) -> Gains {
+        let (a, b, t) = self.pair(azimuth);
+        let mut gains = [0.; MAX_CHANNELS];
+        gains[a.channel] = (t * std::f32::consts::FRAC_PI_2).cos().max(0.);
+        gains[b.channel] = (t * std::f32::consts::FRAC_PI_2).sin();
+        gains
+    }
+
+    fn room(&self, x: f32, y: f32) -> Gains {
+        let radius = x.abs().max(y.abs()).clamp(0., 1.);
+        let angle = x.atan2(y).to_degrees();
+        let azimuth = if self.height {
+            angle
+        } else {
+            bed_azimuth(angle)
+        };
+        let mut gains = self.angular(azimuth);
+        // Interior positions approach equal power over the ring at room centre.
+        // This is a defined approximation, not a reference object renderer.
+        let centre_power = (1. - radius) / self.targets.len() as f32;
+        for target in &self.targets {
+            gains[target.channel] = (centre_power + radius * gains[target.channel].powi(2)).sqrt();
+        }
+        gains
+    }
+}
+
+// Keep room calibration independent of the output layout, including missing wide channels.
+fn bed_azimuth(room_angle: f32) -> f32 {
+    let anchors = [
+        (0., 0.),
+        (45., 30.),
+        (1f32.atan2(42. / 62.).to_degrees(), 60.),
+        (90., 90.),
+        (135., 145.),
+        (180., 180.),
+    ];
+    for pair in anchors.windows(2) {
+        let [(a, from), (b, to)] = [pair[0], pair[1]];
+        if room_angle.abs() <= b {
+            let t = (room_angle.abs() - a) / (b - a);
+            return room_angle.signum() * (from + t * (to - from));
+        }
+    }
+    unreachable!("atan2 produces angles within [-180, 180]")
 }
 
 pub struct Panner {
     speakers: Vec<Speaker>,
-    directions: Vec<[f32; 3]>,
-    triangles: Vec<[usize; 3]>,
+    bed: Ring,
+    height: Ring,
 }
 impl Panner {
     pub fn new(layout: Layout) -> Self {
@@ -109,38 +168,10 @@ impl Panner {
                 L, R, C, Lfe, Ls, Rs, Lb, Rb, Lw, Rw, Tfl, Tfr, Tsl, Tsr, Tbl, Tbr,
             ],
         };
-        let directions: Vec<_> = speakers.iter().map(|s| s.position()).collect();
-        let mut triangles = Vec::new();
-        for a in 0..speakers.len() {
-            for b in a + 1..speakers.len() {
-                for c in b + 1..speakers.len() {
-                    if [a, b, c].contains(&3) {
-                        continue;
-                    }
-                    let normal = cross(
-                        sub(directions[b], directions[a]),
-                        sub(directions[c], directions[a]),
-                    );
-                    let distances: Vec<_> = directions
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != 3)
-                        .map(|(_, p)| dot(normal, sub(*p, directions[a])))
-                        .collect();
-                    let determinant = dot(directions[a], cross(directions[b], directions[c]));
-                    if determinant.abs() > 1e-5
-                        && (distances.iter().all(|d| *d >= -1e-5)
-                            || distances.iter().all(|d| *d <= 1e-5))
-                    {
-                        triangles.push([a, b, c]);
-                    }
-                }
-            }
-        }
         Self {
+            bed: Ring::new(&speakers, false),
+            height: Ring::new(&speakers, true),
             speakers,
-            directions,
-            triangles,
         }
     }
     pub fn count(&self) -> usize {
@@ -152,47 +183,25 @@ impl Panner {
             result[index] = 1.;
             result
         } else {
-            self.object(speaker.position())
+            let (azimuth, room) = speaker.placement();
+            if speaker == Speaker::Tc {
+                self.height.room(0., 0.)
+            } else if room[2] > 0. {
+                self.height.angular(azimuth)
+            } else {
+                self.bed.angular(azimuth)
+            }
         }
     }
+    /// x: left/right, y: rear/front in [-1, 1]; z: bed/ceiling in [0, 1].
+    /// Below-bed positions project onto the bed plane (no floor speakers).
     pub fn object(&self, position: [f32; 3]) -> Gains {
-        let p = normalize(position);
-        let mut result = [0.; MAX_CHANNELS];
-        for (i, dir) in self.directions.iter().enumerate() {
-            if i != 3 && dot(p, *dir) > 0.99999 {
-                result[i] = 1.;
-                return result;
-            }
-        }
-        for &[a, b, c] in &self.triangles {
-            let (u, v, w) = (self.directions[a], self.directions[b], self.directions[c]);
-            let det = dot(u, cross(v, w));
-            let gains = [
-                dot(p, cross(v, w)) / det,
-                dot(u, cross(p, w)) / det,
-                dot(u, cross(v, p)) / det,
-            ];
-            if gains.iter().all(|g| *g >= -1e-5) {
-                let norm = gains.iter().map(|g| g.max(0.).powi(2)).sum::<f32>().sqrt();
-                if norm > 1e-6 {
-                    for (i, g) in [a, b, c].into_iter().zip(gains) {
-                        result[i] = g.max(0.) / norm;
-                    }
-                    return result;
-                }
-            }
-        }
-        // A point below the speaker hull is projected onto the nearest speaker.
-        let mut closest: Vec<_> = self
-            .directions
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != 3)
-            .map(|(i, d)| (i, dot(*d, p)))
-            .collect();
-        closest.sort_by(|a, b| b.1.total_cmp(&a.1));
-        result[closest[0].0] = 1.;
-        result
+        let [x, y, z] = position;
+        let bed = self.bed.room(x.clamp(-1., 1.), y.clamp(-1., 1.));
+        let height = self.height.room(x.clamp(-1., 1.), y.clamp(-1., 1.));
+        let angle = z.clamp(0., 1.) * std::f32::consts::FRAC_PI_2;
+        let (height_gain, bed_gain) = (angle.sin(), angle.cos().max(0.));
+        std::array::from_fn(|i| bed[i] * bed_gain + height[i] * height_gain)
     }
 }
 
@@ -296,19 +305,113 @@ mod tests {
         assert_eq!(g[10], 1.);
         assert_eq!(g.iter().filter(|x| **x != 0.).count(), 1);
     }
+    fn power(gains: &[f32]) -> f32 {
+        gains.iter().map(|g| g * g).sum()
+    }
     #[test]
-    fn panning_is_constant_power_across_the_upper_hemisphere() {
+    fn canonical_room_anchors_route_to_the_corresponding_channel() {
         for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
             let p = Panner::new(layout);
-            for az in (-180..180).step_by(7) {
-                for el in (0..91).step_by(5) {
-                    let (a, e) = ((az as f32).to_radians(), (el as f32).to_radians());
-                    let g = p.object([a.sin() * e.cos(), a.cos() * e.cos(), e.sin()]);
-                    assert!((g.iter().map(|x| x * x).sum::<f32>() - 1.).abs() < 1e-5);
-                    assert_eq!(g[3], 0.);
-                    if el > 75 {
-                        assert!(g[8..p.count()].iter().any(|g| *g > 0.));
+            for (speaker, position) in [
+                (Speaker::L, [-1., 1., 0.]),
+                (Speaker::R, [1., 1., 0.]),
+                (Speaker::C, [0., 1., 0.]),
+                (Speaker::Ls, [-1., 0., 0.]),
+                (Speaker::Rs, [1., 0., 0.]),
+                (Speaker::Lb, [-1., -1., 0.]),
+                (Speaker::Rb, [1., -1., 0.]),
+                (Speaker::Tfl, [-1., 1., 1.]),
+                (Speaker::Tfr, [1., 1., 1.]),
+                (Speaker::Tbl, [-1., -1., 1.]),
+                (Speaker::Tbr, [1., -1., 1.]),
+            ] {
+                let actual = p.object(position);
+                let expected = p.speaker(speaker);
+                assert!(
+                    actual
+                        .iter()
+                        .zip(expected)
+                        .all(|(a, b)| (a - b).abs() < 1e-5),
+                    "{speaker:?}"
+                );
+            }
+            if layout == Layout::NineOneSix {
+                assert!((p.object([-1., 42. / 62., 0.])[8] - 1.).abs() < 1e-5);
+                assert!((p.object([-1., 0., 1.])[12] - 1.).abs() < 1e-5);
+            }
+        }
+    }
+    #[test]
+    fn angular_midpoints_split_power_and_missing_speakers_stay_on_their_plane() {
+        let p = Panner::new(Layout::SevenOneFour);
+        let wide = p.speaker(Speaker::Lw);
+        assert!((wide[0] - 0.5f32.sqrt()).abs() < 1e-6);
+        assert!((wide[4] - 0.5f32.sqrt()).abs() < 1e-6);
+        assert_eq!(power(&wide[8..]), 0.);
+        let object_wide = p.object([-1., 42. / 62., 0.]);
+        assert!(
+            object_wide
+                .iter()
+                .zip(wide)
+                .all(|(a, b)| (a - b).abs() < 1e-6)
+        );
+        let top_side = p.speaker(Speaker::Tsl);
+        assert!((top_side[8] - 0.5f32.sqrt()).abs() < 1e-6);
+        assert!((top_side[10] - 0.5f32.sqrt()).abs() < 1e-6);
+        assert_eq!(power(&top_side[..8]), 0.);
+    }
+    #[test]
+    fn room_depth_and_height_are_preserved() {
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let p = Panner::new(layout);
+            let height_start = if layout == Layout::SevenOneFour {
+                8
+            } else {
+                10
+            };
+            let centre = p.object([0., 0., 0.]);
+            assert!((centre[2].powi(2) - 1. / (height_start - 1) as f32).abs() < 1e-6);
+            let halfway = p.object([0., 0.5, 0.]);
+            assert!(halfway[2] > centre[2] && halfway[2] < 1.);
+            let middle = p.object([0.2, -0.4, 0.5]);
+            assert!((power(&middle[..height_start]) - 0.5).abs() < 1e-6);
+            assert!((power(&middle[height_start..]) - 0.5).abs() < 1e-6);
+            assert_eq!(power(&p.object([0.2, -0.4, 1.])[..height_start]), 0.);
+            assert_eq!(power(&p.object([0.2, -0.4, -0.5])[height_start..]), 0.);
+        }
+    }
+    #[test]
+    fn room_grid_has_unit_power_and_no_lfe() {
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let p = Panner::new(layout);
+            for x in -10..=10 {
+                for y in -10..=10 {
+                    for z in 0..=10 {
+                        let g = p.object([x as f32 / 10., y as f32 / 10., z as f32 / 10.]);
+                        assert!((power(&g) - 1.).abs() < 1e-5);
+                        assert!(g.iter().all(|g| g.is_finite() && *g >= 0.));
+                        assert_eq!(g[3], 0.);
                     }
+                }
+            }
+        }
+    }
+    #[test]
+    fn angular_sweeps_are_continuous_including_the_rear_seam() {
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let p = Panner::new(layout);
+            for degree in -180..=180 {
+                for z in [0., 0.5, 1.] {
+                    let sample = |offset: f32| {
+                        let a = (degree as f32 + offset).to_radians();
+                        let radius = a.sin().abs().max(a.cos().abs());
+                        p.object([a.sin() / radius, a.cos() / radius, z])
+                    };
+                    let before = sample(-0.001);
+                    let after = sample(0.001);
+                    let difference: f32 =
+                        before.iter().zip(after).map(|(a, b)| (a - b).powi(2)).sum();
+                    assert!(difference.sqrt() < 0.001, "{layout:?} {degree} {z}");
                 }
             }
         }
