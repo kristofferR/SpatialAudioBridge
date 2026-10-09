@@ -12,7 +12,13 @@ The Swift actor rejects overlapping append/finish operations. Backpressure suspe
 
 For a player using VLC, mpv or another PCM pipeline, integration includes choosing a native AVPlayer route for this audio/video presentation. A library that produces APAC cannot make a PCM-only audio sink emit spatial HDMI audio by itself. React Native applications can wrap the Swift actor in their native playback module; the public boundary consists of data, URLs, configuration and segment callbacks.
 
-The package currently requires tvOS 26. A production integration retaining older OS support will need an availability-gated packaging arrangement and the player's existing audio fallback. No player-specific patch is included in this repository.
+The package currently requires tvOS 26. A production integration retaining older OS support will need an availability-gated packaging arrangement and the player's existing audio fallback.
+
+## Native Atmos playback example
+
+The [Atmos A/B example](../Examples/AtmosAB/README.md) records the player setup that triggered Atmos for converted TrueHD → APAC on the tested Apple TV/receiver route. It enables multichannel content on the playback/movie audio session, activates a `MPNowPlayingSession` for the main player, and plays a separate near-silent E-AC-3/JOC carrier alongside APAC. DDP plays directly without the carrier. The carrier pauses with the main track and is removed on item changes and at the end. This belongs to the host player; conversion and encoder settings are unchanged.
+
+This is a measured workaround on tvOS 27.2 beta, not an Apple guarantee or proof of correct height/speaker placement. Receiver Atmos activation was confirmed by listening and receiver indication; session channel count, rendering mode and spatial-audio flags were unsuitable detectors on that system. Validate the setup on each target route and OS. The example keeps all fixture/carrier media local and out of Git.
 
 ## Encoder priming
 
