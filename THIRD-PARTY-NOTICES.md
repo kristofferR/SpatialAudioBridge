@@ -28,4 +28,6 @@ SpatialAudioBridge uses these Rust components, pinned by `Cargo.lock`. Their ori
 
 The TrueHD decoder uses the [harletty fork of truehdd](https://github.com/harletty/truehdd/tree/5c8b880405946e7ff1aee884cf9988415fe2c3a9), commit `5c8b880405946e7ff1aee884cf9988415fe2c3a9`. DTS decoding uses the standalone [dca crate](https://github.com/harletty/harletty-bridge/tree/a717bae441b116485f0254603dc20a6ede65d8c6/dca), commit `a717bae441b116485f0254603dc20a6ede65d8c6`. Only these decoder crates are linked from their workspaces. Apple's frameworks are supplied by the operating system.
 
+The IMAX component metadata test vector in `Rust/SpatialAudioCore/src/decode.rs` is adapted from `dca/src/dcadec/xmeta.rs` at the pinned dca revision, under Apache-2.0. Its license is retained in `licenses/dca-0.8.0/LICENSE`.
+
 The speaker renderer and Swift host layer are implemented in this project. Test media is obtained separately by the person running fixture validation.

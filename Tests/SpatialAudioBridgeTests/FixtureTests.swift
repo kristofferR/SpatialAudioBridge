@@ -22,6 +22,11 @@ struct FixtureTests {
         try await validateFile(variable: "SAB_DTSX_FIXTURE", codec: .dtsX)
     }
 
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_DTSX_ALTERNATE_FIXTURE"] != nil))
+    func realAlternateDTSXProducesAPACAndSampleAccurateDuration() async throws {
+        try await validateFile(variable: "SAB_DTSX_ALTERNATE_FIXTURE", codec: .dtsX)
+    }
+
     private func validateFile(variable: String, codec: SpatialAudioCodec) async throws {
         let input = URL(fileURLWithPath: ProcessInfo.processInfo.environment[variable]!)
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("sab-\(UUID().uuidString).mp4")

@@ -22,9 +22,9 @@ The host player owns demuxing, track selection, networking, video, HTTP serving,
 
 - Experimental, with tvOS 26+ and macOS 26+ encoding requirements.
 - 48 kHz TrueHD Atmos with one bed and point objects; room position, extended precision, gain, activity, elevation enable, timed updates and ramps are implemented with separate bed/height angular panning.
-- 48 kHz DTS:X standard four-height presentation; known height folds are removed from the compatible bed before recombination.
+- 48 kHz lossless DTS:X standard four-height and known alternate object presentations; resolved spatial folds are removed from the compatible bed before recombination. Alternate profiles are experimental, with physical-angle panning and frame-length object ramps.
 - APAC 7.1.4 and 9.1.6 output, including files and HLS fragments.
-- Atmos ISF, multiple beds, nonzero object sizes and alternate/IMAX DTS:X profiles are rejected.
+- Atmos ISF, multiple beds and nonzero object sizes are rejected. Unknown DTS:X profiles, mismatched source roles and unresolved folds are rejected.
 - Atmos trim/bed-downmix metadata, bed distribution, enabled divergence and active size/snap/screen/distance/zone controls are rejected. The [rendering model](docs/rendering.md) documents the approximation; it is not a licensed reference renderer.
 
 Real fixtures have passed decoding and Apple APAC round trips. This does not establish correct receiver/MAT output, sustained Apple TV performance or host-player A/V synchronization. Keep those distinctions explicit in documentation and reports.
@@ -61,6 +61,6 @@ swift build -j 1 -Xswiftc -warnings-as-errors
 swift test -j 1 -Xswiftc -warnings-as-errors
 ```
 
-Media tests require `SAB_TRUEHD_FIXTURE` and `SAB_DTSX_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
+Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE` and `SAB_DTSX_ALTERNATE_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
 
 Keep [README.md](README.md), [docs/integration.md](docs/integration.md) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
