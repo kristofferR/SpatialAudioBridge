@@ -37,4 +37,24 @@ A stream entered at a later major sync, after a seek or from a server-side remux
 
 The decoder explicitly rejects active objects with nonzero size, snap, zone constraints, screen references or distance controls. It also rejects streams carrying trim metadata, bed distribution, bed downmix metadata or enabled object divergence, alongside ISF and multiple beds. Trim and bed downmix elements are rejected conservatively even if a particular element could be neutral for the requested layout. Hosts should select their existing fallback on these errors.
 
-DTS:X support remains limited to the standard four-height presentation and recognized height folds. It does not implement arbitrary moving DTS:X objects or alternate/IMAX presentations.
+## DTS:X presentations and polar objects
+
+The pinned `dca` decoder classifies the standard four-height presentation and six known alternate presentations. Source roles and positions come from its metadata parser; feed counts alone do not determine the rendered position.
+
+| Presentation | Object/component feeds first | Fixed height feeds last |
+|---|---|---|
+| Height | 0 | 4 |
+| ObjectD0 | 1 | 4 |
+| ObjectsD1 | 2 | 4 |
+| ObjectsD0 | 3 C/L/R components | 4 |
+| ObjectsD3 | 4 | 4 |
+| ObjectsD4 | 5 | 4 |
+| ObjectOnly | 1, over a 5.1 bed | 0 |
+
+Alternate profiles remain experimental upstream and here. The alternate marker also appears in streams labelled IMAX, but it is not sufficient to identify IMAX branding. The three-component D0 form routes each component at its declared centre/left/right position. A centre-height alternative flag does not override an object's declared position: neither output layout has a centre-height speaker.
+
+DTS:X objects use physical azimuth, elevation and distance rather than Atmos room coordinates. Physical azimuth drives each ring directly, preserving declared C/L/R angles. The height ring is assumed to sit at 45° elevation. From 0° to 45°, constant-power angular interpolation blends the bed and height rings. Above 45°, height power spreads towards equal power over the height ring, becoming independent of azimuth at 90°. Negative elevations project onto the bed. Distance is clamped to the reference radius `[0, 1]`: nearer objects blend power towards the room centre on the bed, while farther objects retain directional placement without invented distance attenuation. These choices are documented approximations, not DTS reference-renderer behavior.
+
+The first frame uses its declared position immediately. Later position changes interpolate channel gains from the previous frame's target over the decoded frame's sample count, reaching the new target at the final sample. Fixed heights route directly and do not share the object ramp.
+
+Before recombination, `dca::FoldPlan` removes every known spatial contribution from the compatible bed. `dca::FoldRenderer` resolves folds explicitly marked as rendered from object metadata using its own bed reconstruction law and timing; this is independent of the output panner. It cannot reconstruct such folds for a 5.1 reference bed, so that case remains rejected. Explicit 5.1 fold coefficients are supported. Any unresolved fold, unknown presentation, malformed metadata, PCM/metadata count mismatch or inconsistent source role fails explicitly. A presentation change requires a new session. Only lossless DTS-HD carriers at 48 kHz are supported.

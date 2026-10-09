@@ -1,4 +1,4 @@
-use crate::render::{Event, Layout, Renderer, Speaker};
+use crate::render::{Event, Gains, Layout, Renderer, Speaker};
 use truehd::{
     process::{
         decode::{DecodedAccessUnit, Decoder},
@@ -338,6 +338,8 @@ pub struct Dts {
     decoder: dca::HdDecoder,
     renderer: Renderer,
     fold_renderer: dca::FoldRenderer,
+    presentation: Option<dca::XPresentation>,
+    object_gains: [Option<Gains>; dca::MAX_SOURCES],
     seen: bool,
 }
 impl Dts {
@@ -347,6 +349,8 @@ impl Dts {
             decoder: dca::HdDecoder::new(),
             renderer: Renderer::new(layout),
             fold_renderer: dca::FoldRenderer::new(),
+            presentation: None,
+            object_gains: [None; dca::MAX_SOURCES],
             seen: false,
         }
     }
@@ -406,7 +410,7 @@ impl Dts {
         Ok(())
     }
     fn render(&mut self, frame: dca::HdFrame) -> Result<Pcm, String> {
-        if !frame.lossless || !frame.x_present {
+        if !frame.lossless || !(frame.x_present || frame.x_imax) {
             return Err("This stream is not lossless DTS:X".into());
         }
         if let Some(e) = frame.x_decode_error {
@@ -414,20 +418,65 @@ impl Dts {
         }
         let presentation =
             dca::XPresentation::detect(&frame).ok_or("Unknown DTS:X presentation")?;
-        if presentation.is_experimental() {
-            return Err(format!(
-                "DTS:X {} is experimental upstream and is not enabled",
-                presentation.layout_label()
-            ));
-        }
         let metadata = dca::XMetadata::parse(&frame.x_payload, presentation.feed_count())
             .map_err(|e| format!("DTS:X spatial metadata: {e:?}"))?;
+        self.render_spatial(frame, presentation, metadata)
+    }
+
+    fn render_spatial(
+        &mut self,
+        frame: dca::HdFrame,
+        presentation: dca::XPresentation,
+        metadata: dca::XMetadata,
+    ) -> Result<Pcm, String> {
+        if dca::XPresentation::detect(&frame) != Some(presentation) {
+            return Err("DTS:X PCM does not match its presentation".into());
+        }
+        if frame.sample_rate != 48_000 {
+            return Err("The DTS:X renderer supports 48 kHz tracks".into());
+        }
+        if self
+            .presentation
+            .is_some_and(|previous| previous != presentation)
+        {
+            return Err("DTS:X presentation changed; begin a new session".into());
+        }
+        if metadata.source_count() != presentation.feed_count() {
+            return Err("DTS:X PCM / metadata feed count mismatch".into());
+        }
+        let mut gains = Vec::with_capacity(presentation.feed_count());
+        for feed in 0..presentation.feed_count() {
+            let source = metadata
+                .source(feed)
+                .ok_or("Missing DTS:X source metadata")?;
+            let gain = match source.role {
+                dca::SourceRole::Object { position, .. }
+                    if presentation.object_feeds().contains(&feed) =>
+                {
+                    self.renderer.panner.polar(
+                        position.azimuth_degrees() as f32,
+                        position.elevation_degrees() as f32,
+                        position.distance() as f32,
+                    )
+                }
+                dca::SourceRole::Height(channel)
+                    if presentation.fixed_feeds().contains(&feed)
+                        && presentation.fixed_channels()
+                            [feed - presentation.fixed_feeds().start]
+                            == channel =>
+                {
+                    self.renderer.panner.speaker(dts_spatial_speaker(channel))
+                }
+                _ => return Err("DTS:X source role does not match its presentation".into()),
+            };
+            gains.push(gain);
+        }
         let frames = frame.bed_sample_count();
         let mut plan = dca::FoldPlan::from_metadata(&metadata);
         self.fold_renderer.apply(&mut plan, &metadata, frames);
         if plan.has_unknown() {
             return Err(
-                "DTS:X has an unknown bed fold; refusing to duplicate its height audio".into(),
+                "DTS:X has an unknown bed fold; refusing to duplicate its spatial audio".into(),
             );
         }
         let mut input = Vec::new();
@@ -459,18 +508,47 @@ impl Dts {
                 );
             }
         }
-        let heights = [Tfl, Tfr, Tbl, Tbr];
         for (feed, pcm) in frame.x_samples.iter().enumerate() {
-            self.renderer
-                .route(input.len(), self.renderer.panner.speaker(heights[feed]));
+            let target = gains[feed];
+            let channel = input.len();
+            if presentation.object_feeds().contains(&feed) {
+                let previous = self.object_gains[feed].unwrap_or(target);
+                self.renderer.route(channel, previous);
+                if previous != target {
+                    self.renderer.event(Event {
+                        sample: self.renderer.sample,
+                        channel,
+                        gains: target,
+                        ramp: frames as u32 - 1,
+                    });
+                }
+                self.object_gains[feed] = Some(target);
+            } else {
+                self.renderer.route(channel, target);
+            }
             input.push(pcm.clone());
         }
+        self.presentation = Some(presentation);
         Ok(Pcm {
             data: self.renderer.render(&input, frames),
             frames,
             rate: frame.sample_rate,
             channels: self.renderer.panner.count(),
         })
+    }
+}
+
+fn dts_spatial_speaker(channel: dca::SpatialChannel) -> Speaker {
+    match channel {
+        dca::SpatialChannel::TopFrontLeft => Speaker::Tfl,
+        dca::SpatialChannel::TopFrontRight => Speaker::Tfr,
+        dca::SpatialChannel::TopFrontCenter => Speaker::Tfc,
+        dca::SpatialChannel::TopSideLeft => Speaker::Tsl,
+        dca::SpatialChannel::TopSideRight => Speaker::Tsr,
+        dca::SpatialChannel::TopBackLeft => Speaker::Tbl,
+        dca::SpatialChannel::TopBackRight => Speaker::Tbr,
+        dca::SpatialChannel::WideLeft => Speaker::Lw,
+        dca::SpatialChannel::WideRight => Speaker::Rw,
     }
 }
 
@@ -596,5 +674,287 @@ mod metadata_tests {
         let moved = render(&metadata).unwrap();
         assert!(moved[1] > initial[1]);
         assert!(moved[2] < initial[2]);
+    }
+}
+
+#[cfg(test)]
+mod dts_tests {
+    use super::*;
+    use dca::{BedFold, SourceMetadata, SourceRole, SphericalPosition, XMetadata, XPresentation};
+
+    fn position(azimuth: i16, elevation: i16) -> SphericalPosition {
+        SphericalPosition {
+            azimuth_half_degrees: azimuth * 2,
+            elevation_half_degrees: elevation * 2,
+            distance_64ths: 64,
+        }
+    }
+
+    fn metadata(presentation: XPresentation, position: SphericalPosition) -> XMetadata {
+        let mut sources = Vec::new();
+        for _ in presentation.object_feeds() {
+            sources.push(SourceMetadata {
+                role: SourceRole::Object {
+                    position,
+                    centre_height_alternative: true,
+                },
+                fold: BedFold::Known([0.25, 0., 0., 0., 0., 0., 0., 0.]),
+            });
+        }
+        for &channel in presentation.fixed_channels() {
+            sources.push(SourceMetadata {
+                role: SourceRole::Height(channel),
+                fold: BedFold::Known([0.25, 0., 0., 0., 0., 0., 0., 0.]),
+            });
+        }
+        let mask = if presentation == XPresentation::ObjectOnly {
+            dca::REFERENCE_MASK_5_1
+        } else {
+            dca::REFERENCE_MASK_7_1
+        };
+        XMetadata::from_sources_on(&sources, mask).unwrap()
+    }
+
+    fn frame(
+        presentation: XPresentation,
+        metadata: &XMetadata,
+        amplitudes: &[f32],
+        frames: usize,
+    ) -> dca::HdFrame {
+        let mut frame = dca::HdFrame {
+            sample_rate: 48_000,
+            lossless: true,
+            x_present: presentation == XPresentation::Height,
+            x_imax: presentation != XPresentation::Height,
+            samples: vec![None; 16],
+            x_samples: amplitudes.iter().map(|&a| vec![a; frames]).collect(),
+            ..Default::default()
+        };
+        for &speaker in metadata.reference_speakers() {
+            frame.samples[speaker as usize] = Some(vec![0.; frames]);
+        }
+        for (feed, source) in metadata.sources().enumerate() {
+            if let BedFold::Known(fold) = source.fold {
+                for (&speaker, gain) in metadata.reference_speakers().iter().zip(fold) {
+                    for sample in frame.samples[speaker as usize].as_mut().unwrap() {
+                        *sample += amplitudes[feed] * gain;
+                    }
+                }
+            }
+        }
+        frame
+    }
+
+    // dca's Apache-2.0 IMAX metadata test vector, pinned at a717bae.
+    // See THIRD-PARTY-NOTICES.md for provenance and retained license.
+    const IMAX_COMPONENT_PAYLOAD: [u8; 124] = [
+        0xf1, 0x40, 0x00, 0xd0, 0x30, 0x28, 0x4b, 0x04, 0xb0, 0x20, 0x00, 0x01, 0x28, 0x06, 0x83,
+        0x3d, 0xfd, 0xe1, 0xe3, 0x3d, 0xfd, 0x91, 0xe3, 0x3d, 0xfe, 0x31, 0xe0, 0x03, 0x00, 0x08,
+        0x81, 0xf4, 0xe2, 0x1a, 0xc4, 0x04, 0x7f, 0x40, 0x25, 0xbf, 0xa0, 0x49, 0xbf, 0xa8, 0x81,
+        0xbf, 0xb1, 0x01, 0xbf, 0xa0, 0x28, 0x3f, 0x03, 0x34, 0x38, 0x8c, 0x4f, 0x00, 0xb2, 0x7c,
+        0x06, 0x08, 0x04, 0x12, 0x67, 0x02, 0x4b, 0xde, 0xf8, 0x05, 0x20, 0x00, 0x00, 0x0b, 0xb4,
+        0x08, 0x00, 0x94, 0xa6, 0x80, 0x00, 0x40, 0x00, 0x00, 0x00, 0x02, 0x34, 0x38, 0x8c, 0x4f,
+        0x00, 0xc2, 0xc6, 0x03, 0x04, 0x38, 0x00, 0xf1, 0xa3, 0x03, 0xcf, 0xef, 0x7c, 0x02, 0x9c,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xcf, 0xc4, 0x08, 0x00, 0x94, 0xa6, 0x80,
+        0x00, 0x40, 0x00, 0x00,
+    ];
+
+    #[test]
+    fn imax_marker_and_parsed_components_route_to_centre_left_right() {
+        let presentation = XPresentation::ObjectsD0;
+        let metadata = XMetadata::parse(&IMAX_COMPONENT_PAYLOAD, 7).unwrap();
+        for (feed, azimuth) in [0., -30., 30.].into_iter().enumerate() {
+            let SourceRole::Object { position, .. } = metadata.source(feed).unwrap().role else {
+                panic!("IMAX component must be an object");
+            };
+            assert_eq!(position.azimuth_degrees(), azimuth);
+            assert_eq!(position.elevation_degrees(), 0.);
+            assert_eq!(position.distance(), 1.);
+        }
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let mut frame = frame(presentation, &metadata, &[0.1, 0.2, 0.3, 0., 0., 0., 0.], 8);
+            frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
+            assert!(!frame.x_present && frame.x_imax);
+            let pcm = Dts::new(layout).render(frame).unwrap();
+            for sample in pcm.data.chunks_exact(layout.count()) {
+                for (i, value) in sample.iter().enumerate() {
+                    let expected = match i {
+                        0 => 0.2,
+                        1 => 0.3,
+                        2 => 0.1,
+                        _ => 0.,
+                    };
+                    assert!((value - expected).abs() < 1e-6, "{layout:?}: {sample:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_defined_rendered_folds_are_resolved_before_recombination() {
+        let presentation = XPresentation::ObjectD0;
+        let mut source = *metadata(presentation, position(30, 0)).source(0).unwrap();
+        source.fold = BedFold::Unknown;
+        let mut sources: Vec<_> = metadata(presentation, position(30, 0))
+            .sources()
+            .copied()
+            .collect();
+        sources[0] = source;
+        let mut metadata = XMetadata::from_sources(&sources).unwrap();
+        metadata.mark_rendered(0, true);
+        let mut plan = dca::FoldPlan::from_metadata(&metadata);
+        dca::FoldRenderer::new().apply(&mut plan, &metadata, 8);
+        assert!(!plan.has_unknown());
+        let mut frame = frame(presentation, &metadata, &[1., 0., 0., 0., 0.], 8);
+        for &speaker in metadata.reference_speakers() {
+            frame.samples[speaker as usize] = Some(vec![plan.gain(speaker as usize, 0); 8]);
+        }
+        let pcm = Dts::new(Layout::SevenOneFour)
+            .render_spatial(frame, presentation, metadata)
+            .unwrap();
+        for sample in pcm.data.as_chunks::<12>().0 {
+            for (i, value) in sample.iter().enumerate() {
+                let expected = if i == 1 { 1. } else { 0. };
+                assert!((value - expected).abs() < 1e-6, "{sample:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn all_presentations_remove_folds_and_route_objects_separately_from_heights() {
+        use XPresentation::*;
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            for presentation in [
+                Height, ObjectD0, ObjectsD1, ObjectsD0, ObjectsD3, ObjectsD4, ObjectOnly,
+            ] {
+                let metadata = metadata(presentation, position(0, 0));
+                let amplitudes: Vec<_> = (1..=presentation.feed_count())
+                    .map(|i| i as f32 / 100.)
+                    .collect();
+                let frame = frame(presentation, &metadata, &amplitudes, 8);
+                let pcm = Dts::new(layout)
+                    .render_spatial(frame, presentation, metadata)
+                    .unwrap();
+                let mut expected = vec![0.; layout.count()];
+                expected[2] = amplitudes[presentation.object_feeds()].iter().sum();
+                let height_start = if layout == Layout::SevenOneFour {
+                    8
+                } else {
+                    10
+                };
+                let height_indices = [
+                    height_start,
+                    height_start + 1,
+                    layout.count() - 2,
+                    layout.count() - 1,
+                ];
+                for (feed, index) in presentation.fixed_feeds().zip(height_indices) {
+                    expected[index] = amplitudes[feed];
+                }
+                for sample in pcm.data.chunks_exact(layout.count()) {
+                    assert!(
+                        sample
+                            .iter()
+                            .zip(&expected)
+                            .all(|(a, b)| (a - b).abs() < 1e-6),
+                        "{layout:?} {presentation:?}: {sample:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn moving_objects_ramp_over_the_frame_without_resetting_their_previous_position() {
+        let presentation = XPresentation::ObjectOnly;
+        let mut decoder = Dts::new(Layout::SevenOneFour);
+        let initial = metadata(presentation, position(0, 0));
+        decoder
+            .render_spatial(
+                frame(presentation, &initial, &[1.], 4),
+                presentation,
+                initial,
+            )
+            .unwrap();
+        let moved = metadata(presentation, position(30, 0));
+        let pcm = decoder
+            .render_spatial(frame(presentation, &moved, &[1.], 4), presentation, moved)
+            .unwrap();
+        for (i, sample) in pcm.data.as_chunks::<12>().0.iter().enumerate() {
+            let right = (i + 1) as f32 / 4.;
+            assert!((sample[1] - right).abs() < 1e-6);
+            assert!((sample[2] - (1. - right)).abs() < 1e-6);
+            assert!(sample[8..].iter().all(|g| *g == 0.));
+        }
+    }
+
+    #[test]
+    fn centre_height_alternative_does_not_override_the_declared_object_position() {
+        let presentation = XPresentation::ObjectOnly;
+        let metadata = metadata(presentation, position(0, 25));
+        let pcm = Dts::new(Layout::SevenOneFour)
+            .render_spatial(
+                frame(presentation, &metadata, &[1.], 4),
+                presentation,
+                metadata,
+            )
+            .unwrap();
+        let sample = &pcm.data[..12];
+        assert!(sample[2] > 0. && sample[8] > 0. && sample[9] > 0.);
+        assert_eq!(sample[10], 0.);
+    }
+
+    #[test]
+    fn unknown_folds_and_mismatched_roles_are_rejected() {
+        let presentation = XPresentation::ObjectOnly;
+        for (role, fold, expected) in [
+            (
+                SourceRole::Object {
+                    position: position(0, 0),
+                    centre_height_alternative: false,
+                },
+                BedFold::Unknown,
+                "unknown bed fold",
+            ),
+            (
+                SourceRole::Height(dca::SpatialChannel::TopFrontLeft),
+                BedFold::Known([0.; 8]),
+                "source role",
+            ),
+        ] {
+            let metadata = XMetadata::from_sources(&[SourceMetadata { role, fold }]).unwrap();
+            let error = Dts::new(Layout::SevenOneFour)
+                .render_spatial(
+                    frame(presentation, &metadata, &[1.], 4),
+                    presentation,
+                    metadata,
+                )
+                .err()
+                .unwrap();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn presentation_changes_require_a_new_session() {
+        let mut decoder = Dts::new(Layout::SevenOneFour);
+        let initial = metadata(XPresentation::ObjectOnly, position(0, 0));
+        decoder
+            .render_spatial(
+                frame(XPresentation::ObjectOnly, &initial, &[1.], 4),
+                XPresentation::ObjectOnly,
+                initial,
+            )
+            .unwrap();
+        let next = metadata(XPresentation::ObjectD0, position(0, 0));
+        let error = decoder
+            .render_spatial(
+                frame(XPresentation::ObjectD0, &next, &[1.; 5], 4),
+                XPresentation::ObjectD0,
+                next,
+            )
+            .err()
+            .unwrap();
+        assert!(error.contains("new session"));
     }
 }

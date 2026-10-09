@@ -9,11 +9,14 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Check | Result |
 |---|---|
 | Angular panning | Canonical anchors, equal-power midpoints, room depth, bed/height separation, unit power over a room grid and continuity across angular boundaries pass |
+| DTS:X alternate routing | All seven presentations in both layouts pass synthetic fold cleanup, role separation and physical-angle tests; object ramps and fallback errors pass |
+| IMAX three-component metadata | Upstream payload parsed and C/L/R components routed correctly in both layouts, using synthetic PCM |
 | Atmos rendering controls | Elevation disable and extended precision pass; unsupported controls produce explicit errors |
 | Full TrueHD Atmos elementary stream | 58-second fixture passes chunking, finite PCM, height-energy and truncation checks |
 | Full DTS:X Object Emulator elementary stream | 95-second fixture passes chunking, finite PCM, height-energy and truncation checks |
-| Decoder chunking | Bit-identical PCM and sample counts with 4096-byte and 317-byte chunks for both full fixtures |
-| Truncation | Removing the final compressed byte produces an error for both formats |
+| Full alternate DTS:X elementary stream | 44.426667-second Trinnov Experience fixture: 4,165 D4 frames, 1,558 distinct object positions; chunking, finite PCM, height-energy and truncation checks pass |
+| Decoder chunking | Bit-identical PCM and sample counts with 4096-byte and 317-byte chunks for all three full fixtures |
+| Truncation | Removing the final compressed byte produces an error for all three fixtures |
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
 
 ### Encoding and packaging
@@ -21,7 +24,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Check | Result |
 |---|---|
 | HLS codec metadata | Layouts expose `apac.31.03` / `apac.31.04` using Apple's published platform profile/level mapping |
-| Eight-second Atmos / DTS:X → APAC → Apple PCM decoder | APAC codec and 16-channel 9.1.6 layout confirmed, duration checked, height energy retained |
+| Eight-second Atmos / standard DTS:X / D4 DTS:X → APAC → Apple PCM decoder | APAC codec and 16-channel 9.1.6 layout confirmed, duration checked, height energy retained |
 | Atmos → 7.1.4 fragmented MP4, eight-second and full 58-second streams | 12-channel layout confirmed; continuous timestamps and playlists checked at zero and nonzero start times |
 | Fragmented encoder priming | Core Audio reports 2048 leading frames; native decoding trims them, and the full 58-second stream decodes to its source length rounded up to a whole 1024-frame packet |
 | Live encoding | Segments trail their input by less than 2 s over 30 s of TrueHD Atmos; the offline profile's first fragment needs 23.3 s of input |
@@ -73,9 +76,9 @@ In two other runs, the three quick skips back made Jellyfin abort a video segmen
 
 ## Coverage
 
-The suite includes 11 Rust unit tests, 3 Rust fixture tests and 42 Swift tests. Without fixture variables, 32 Swift tests run: configuration, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and seven need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 19 Rust unit tests, 4 Rust fixture tests and 43 Swift tests. Without fixture variables, 32 Swift tests run: configuration, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and seven need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
-HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer.
+HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 
 ## Not yet established
 
@@ -92,11 +95,12 @@ The DTS:X fixture container's first audio PTS is approximately 53 ms; its elemen
 
 ## Obtain fixtures
 
-The [Kodi sample list](https://kodi.wiki/view/Samples) provides the TrueHD Atmos Helicopter and DTS:X Object Emulator clips. Download fixtures separately, then use an existing FFmpeg installation to extract the selected compressed track:
+The [Kodi sample list](https://kodi.wiki/view/Samples) provides the TrueHD Atmos Helicopter and DTS:X Object Emulator clips. The [public demo folder linked by a MediaInfo report](https://github.com/MediaArea/MediaInfoLib/issues/2429) contains the Trinnov Experience trailer labelled DTS-X Pro used for D4 validation. That label is a file title, not proof of a distinct codec or IMAX branding. Download fixtures separately, then use an existing FFmpeg installation to extract the selected compressed track:
 
 ```sh
 ffmpeg -i "atmos-sample.mkv" -map 0:a:0 -c copy -f truehd "atmos.thd"
 ffmpeg -i "dtsx-sample.mkv" -map 0:a:0 -c copy -f dts "dtsx.dts"
+ffmpeg -i "experience-pro.mkv" -map 0:a:0 -c copy -f dts "dtsx-alternate.dts"
 ```
 
 The validated elementary streams have SHA-256 values:
@@ -104,6 +108,7 @@ The validated elementary streams have SHA-256 values:
 ```text
 Atmos: 79dd2aec46408f81f2a53da17dc5d43f24fe25bec9b61ee79b36c6e22cefcbf4
 DTS:X: 718cb0dc98f67dcf6f04778fb64ff8862fc625bb782353a6ff9d828fb05fbd69
+DTS:X D4: 5e8fc319289ab9ce5a44c7f161feb2fe497babf442185c8c965b34e1990a675c
 ```
 
 For the Matroska and streaming tests, keep the Helicopter MKV's TrueHD track in a Matroska file:
@@ -118,15 +123,17 @@ Fixture media remains local. Run full decoder checks on a development machine:
 cd Rust/SpatialAudioCore
 SAB_TRUEHD_FIXTURE="/absolute/path/atmos.thd" \
 SAB_DTSX_FIXTURE="/absolute/path/dtsx.dts" \
+SAB_DTSX_ALTERNATE_FIXTURE="/absolute/path/dtsx-alternate.dts" \
 cargo test --release --locked -- --include-ignored --test-threads=1
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Run the Apple round-trip, streaming and renderer checks on macOS. Use the full Atmos elementary stream with the MKV made from it, because one test compares the MKV's track with it byte for byte. For DTS:X, an eight-second, complete-access-unit excerpt is sufficient. The fixture suites serialize their encoder jobs.
+Run the Apple round-trip, streaming and renderer checks on macOS. Use the full Atmos elementary stream with the MKV made from it, because one test compares the MKV's track with it byte for byte. For both DTS:X fixtures, eight-second, complete-access-unit excerpts are sufficient. The fixture suites serialize their encoder jobs.
 
 ```sh
 SAB_TRUEHD_FIXTURE="/absolute/path/atmos.thd" \
 SAB_DTSX_FIXTURE="/absolute/path/dtsx-8s.dts" \
+SAB_DTSX_ALTERNATE_FIXTURE="/absolute/path/dtsx-alternate-8s.dts" \
 SAB_MKV_FIXTURE="/absolute/path/atmos-only.mkv" \
 swift test -j 1 -Xswiftc -warnings-as-errors
 ```

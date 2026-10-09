@@ -24,10 +24,10 @@ None of the surveyed open-source Apple TV players expose compressed audio packet
 
 - Experimental, with tvOS 26+ and macOS 26+ encoding requirements.
 - 48 kHz TrueHD Atmos with one bed and point objects; room position, extended precision, gain, activity, elevation enable, timed updates and ramps are implemented with separate bed/height angular panning.
-- 48 kHz DTS:X standard four-height presentation; known height folds are removed from the compatible bed before recombination.
+- 48 kHz lossless DTS:X standard four-height and known alternate object presentations; resolved spatial folds are removed from the compatible bed before recombination. Alternate profiles are experimental, with physical-angle panning and frame-length object ramps.
 - APAC 7.1.4 and 9.1.6 output, including files, HLS fragments and sample buffers. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).
 - On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K title with video and Atmos output, converting at about 3.2× real time and recovering from every scripted seek (1–14 s); `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`.
-- Atmos ISF, multiple beds, nonzero object sizes and alternate/IMAX DTS:X profiles are rejected.
+- Atmos ISF, multiple beds and nonzero object sizes are rejected. Unknown DTS:X profiles, mismatched source roles and unresolved folds are rejected.
 - Atmos trim/bed-downmix metadata, bed distribution, enabled divergence and active size/snap/screen/distance/zone controls are rejected. The [rendering model](docs/rendering.md) documents the approximation; it is not a licensed reference renderer.
 
 Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV and receiver have confirmed Atmos activation and channel placement. This does not establish the HDMI payload (MAT or otherwise), measured lip sync, full-film memory use or behavior on other devices and receivers. Keep those distinctions explicit in documentation and reports.
@@ -63,6 +63,6 @@ swift build -j 1 -Xswiftc -warnings-as-errors
 swift test -j 1 -Xswiftc -warnings-as-errors
 ```
 
-Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE` and `SAB_MKV_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
+Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE`, `SAB_DTSX_ALTERNATE_FIXTURE` and `SAB_MKV_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
 
 Keep [README.md](README.md), the guides in [docs](docs/) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
