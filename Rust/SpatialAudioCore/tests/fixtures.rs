@@ -113,3 +113,52 @@ fn truehd_starts_at_a_later_major_sync_without_losing_samples() {
         "height audio must survive"
     );
 }
+
+#[test]
+#[ignore = "requires SAB_DTSX_ALTERNATE_FIXTURE elementary stream"]
+fn alternate_dtsx_profiles_preserve_spatial_audio_and_timing() {
+    let variable = "SAB_DTSX_ALTERNATE_FIXTURE";
+    let data = fs::read(env::var(variable).expect("set the fixture path")).unwrap();
+    let mut decoder = dca::HdDecoder::new();
+    let mut offset = 0;
+    let mut presentations = std::collections::BTreeMap::new();
+    let mut positions = std::collections::BTreeSet::new();
+    while offset < data.len() {
+        let core_len = dca::parse_header(&data[offset..]).unwrap().frame_size;
+        let exss = &data[offset + core_len..];
+        let exss_len = dca::exss_substream_size(exss).unwrap();
+        match decoder.decode(&data[offset..offset + core_len], &exss[..exss_len]) {
+            Ok(frame) => {
+                let presentation = dca::XPresentation::detect(&frame).unwrap();
+                assert!(
+                    presentation.is_experimental(),
+                    "expected an alternate profile"
+                );
+                *presentations
+                    .entry(format!("{presentation:?}"))
+                    .or_insert(0) += 1;
+                let metadata =
+                    dca::XMetadata::parse(&frame.x_payload, presentation.feed_count()).unwrap();
+                for source in metadata.sources() {
+                    if let dca::SourceRole::Object { position, .. } = source.role {
+                        positions.insert((
+                            position.azimuth_half_degrees,
+                            position.elevation_half_degrees,
+                            position.distance_64ths,
+                        ));
+                    }
+                }
+            }
+            Err(dca::HdError::Pending) => (),
+            Err(error) => panic!("DTS-HD decoding: {error:?}"),
+        }
+        offset += core_len + exss_len;
+    }
+    assert!(!presentations.is_empty());
+    assert!(!positions.is_empty());
+    println!(
+        "alternate presentations={presentations:?}, distinct object positions={}",
+        positions.len()
+    );
+    validate(2, variable);
+}
