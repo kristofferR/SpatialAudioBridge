@@ -1,0 +1,35 @@
+name: AtmosAB
+options:
+  deploymentTarget:
+    tvOS: '26.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: S5Q742QZEL
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: '3'
+targets:
+  AtmosAB:
+    type: application
+    platform: tvOS
+    sources:
+      - Sources
+      - path: Media
+        type: folder
+        buildPhase: resources
+    info:
+      path: Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kristofferr.SpatialAudioBridge.AtmosAB
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Atmos A-B
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        ASSETCATALOG_COMPILER_APPICON_NAME: ''
+schemes:
+  AtmosAB:
+    build:
+      targets:
+        AtmosAB: all

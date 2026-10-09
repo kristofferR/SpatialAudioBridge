@@ -83,6 +83,8 @@ Players can also consume `.segments(onSegment:)` directly. Segment reports inclu
 
 The host player owns container parsing, networking, video remuxing, the HTTP server and A/V synchronization. Fragment timelines include encoder priming; query `encoderPrimingDuration` when aligning the native presentation and retain timing/trim metadata. Combine the audio rendition with compatible video in the host's HLS presentation. Playback through a player's software PCM output will not use native APAC spatial playback.
 
+The [Apple TV A/B example](Examples/AtmosAB/README.md) includes the player/session setup that triggered Atmos for converted TrueHD → APAC on the tested route, using a separate near-silent JOC carrier. Sample media stays local; receiver Atmos activation does not prove correct speaker placement.
+
 ## Current support
 
 | Input / output | Status |
