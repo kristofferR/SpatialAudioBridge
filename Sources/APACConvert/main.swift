@@ -3,7 +3,14 @@ import Foundation
 import AVFoundation
 
 @main struct APACConvert {
-    static func main() async throws {
+    static func main() async {
+        do { try await convert() }
+        catch {
+            FileHandle.standardError.write(Data("apac-convert: \(error)\n".utf8))
+            exit(1)
+        }
+    }
+    private static func convert() async throws {
         let args = Array(CommandLine.arguments.dropFirst())
         guard args.count == 3, let codec = ["truehd": SpatialAudioCodec.trueHDAtmos, "dtsx": .dtsX][args[0]] else {
             print("usage: apac-convert <truehd|dtsx> <demuxed-input.thd|dts> <output.mp4>")

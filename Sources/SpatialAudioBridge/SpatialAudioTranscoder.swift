@@ -3,6 +3,14 @@ import Foundation
 import UniformTypeIdentifiers
 import AudioToolbox
 
+/// AVAssetWriter permits cancellation while its asynchronous finish is pending.
+/// Only that operation is shared with the task's cancellation handler.
+private final class WriterCancellation: @unchecked Sendable {
+    private let writer: AVAssetWriter
+    init(_ writer: AVAssetWriter) { self.writer = writer }
+    func cancel() { writer.cancelWriting() }
+}
+
 private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
     let handler: @Sendable (APACSegment) throws -> Void
     private let lock = NSLock()
@@ -87,12 +95,13 @@ public actor SpatialAudioTranscoder {
             }
             guard let writer, let input, frames > 0 else { throw SpatialAudioError.decoding("The track produced no spatial PCM") }
             input.markAsFinished()
+            let cancellation = WriterCancellation(writer)
             await withTaskCancellationHandler {
                 await withCheckedContinuation { continuation in
                     writer.finishWriting { continuation.resume() }
                 }
             } onCancel: {
-                writer.cancelWriting()
+                cancellation.cancel()
             }
             try checkActive()
             guard writer.status == .completed else { throw encoderError(writer) }

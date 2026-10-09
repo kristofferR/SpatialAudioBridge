@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SpatialAudioBridge",
-    platforms: [.macOS("26.0"), .tvOS("26.0"), .iOS("26.0")],
+    platforms: [.macOS("26.0"), .tvOS("26.0")],
     products: [
         .library(name: "SpatialAudioBridge", targets: ["SpatialAudioBridge"]),
         .executable(name: "apac-convert", targets: ["APACConvert"]),

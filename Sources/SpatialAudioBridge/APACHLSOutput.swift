@@ -1,11 +1,12 @@
 import Foundation
+import CoreMedia
 
 /// Persists AVFoundation fragments and an EVENT playlist. Serve this directory over HTTP.
 /// Call finish() only after the transcoder finishes; the player owns serving and cleanup.
 public final class APACHLSOutput: @unchecked Sendable {
     public let playlistURL: URL
+    public let encoderPrimingDuration: CMTime
     private let directory: URL
-    private let configuration: APACConfiguration
     private let periods: Int
     private let targetDuration: Int
     private let lock = NSLock()
@@ -19,7 +20,7 @@ public final class APACHLSOutput: @unchecked Sendable {
             throw SpatialAudioError.invalidConfiguration("HLS requires a new directory and valid segment interval")
         }
         self.directory = directory
-        self.configuration = configuration
+        self.encoderPrimingDuration = try configuration.encoderPrimingDuration()
         self.periods = syncPeriodsPerSegment
         self.targetDuration = Int(ceil(Double(configuration.syncPacketFrequency * 1024 * syncPeriodsPerSegment) / 48_000 + 0.05))
         self.playlistURL = directory.appendingPathComponent("audio.m3u8")

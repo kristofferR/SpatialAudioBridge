@@ -36,6 +36,25 @@ public struct APACConfiguration: Sendable {
         self.startTime = startTime
         self.syncPacketFrequency = syncPacketFrequency
     }
+
+    /// Leading frames are retained in fragmented-media timelines.
+    /// Account for this offset when aligning the video rendition.
+    public func encoderPrimingDuration() throws -> CMTime {
+        let format = try pcmFormat(rate: 48_000, layout: layout)
+        var source = CMAudioFormatDescriptionGetStreamBasicDescription(format)!.pointee
+        var output = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatAPAC,
+            mFormatFlags: 0, mBytesPerPacket: 0, mFramesPerPacket: 1024, mBytesPerFrame: 0,
+            mChannelsPerFrame: UInt32(layout.channelCount), mBitsPerChannel: 0, mReserved: 0)
+        var converter: AudioConverterRef?
+        let status = AudioConverterNew(&source, &output, &converter)
+        guard status == noErr, let converter else { throw SpatialAudioError.coreMedia(status) }
+        defer { AudioConverterDispose(converter) }
+        var prime = AudioConverterPrimeInfo()
+        var size = UInt32(MemoryLayout<AudioConverterPrimeInfo>.size)
+        let primeStatus = AudioConverterGetProperty(converter, kAudioConverterPrimeInfo, &size, &prime)
+        guard primeStatus == noErr else { throw SpatialAudioError.coreMedia(primeStatus) }
+        return CMTime(value: Int64(prime.leadingFrames), timescale: 48_000)
+    }
 }
 
 public struct APACSegment: Sendable {

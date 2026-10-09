@@ -88,7 +88,9 @@ impl TrueHd {
                 .parser
                 .parse(&frame)
                 .map_err(|e| format!("TrueHD parsing: {e}"))?;
-            if let Some(sync) = &au.major_sync_info && sync.substreams < 4 {
+            if let Some(sync) = &au.major_sync_info
+                && sync.substreams < 4
+            {
                 return Err("This TrueHD stream has no Atmos presentation".into());
             }
             self.decoder
@@ -96,6 +98,9 @@ impl TrueHd {
                 .map_err(|e| format!("TrueHD decoding: {e}"))?;
             if self.decoded.is_duplicate {
                 continue;
+            }
+            if self.decoded.sampling_frequency != 48_000 {
+                return Err("The initial Atmos renderer supports 48 kHz tracks".into());
             }
             for metadata in &self.decoded.oamd {
                 schedule_oamd(&mut self.renderer, metadata, self.decoded.channel_count)?;
