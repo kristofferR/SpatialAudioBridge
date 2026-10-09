@@ -83,7 +83,20 @@ Players can also consume `.segments(onSegment:)` directly. Segment reports inclu
 
 The host player owns container parsing, networking, video remuxing, the HTTP server and A/V synchronization. Fragment timelines include encoder priming; query `encoderPrimingDuration` when aligning the native presentation and retain timing/trim metadata. Combine the audio rendition with compatible video in the host's HLS presentation. Playback through a player's software PCM output will not use native APAC spatial playback.
 
-The [Apple TV A/B example](Examples/AtmosAB/README.md) includes the player/session setup that triggered Atmos for converted TrueHD → APAC on the tested route, using a separate near-silent JOC carrier. Sample media stays local; receiver Atmos activation does not prove correct speaker placement.
+## Atmos output on Apple TV
+
+On the tested Apple TV and receiver route, APAC alone did not switch HDMI output to Atmos. Playing a separate near-silent E-AC-3 + JOC (Dolby Atmos) stream alongside it did; Native Player uses the same technique. The `SpatialAudioPlayback` product provides this as `AtmosOutputActivator`, without the Rust core:
+
+```swift
+import SpatialAudioPlayback
+
+try AtmosOutputActivator.configureAudioSession()
+let atmos = AtmosOutputActivator(silentAtmosStream: silentAtmosURL)
+// Return true when the item's selected audio is the APAC rendition.
+atmos.attach(to: player) { item in true }
+```
+
+The activator follows the host's `AVPlayer`: it plays the silent stream while APAC plays, pauses with the host and re-evaluates on item and audio selection changes. Supply the silent stream; the library does not distribute one. The [Apple TV A/B example](Examples/AtmosAB/README.md) uses this setup. Receiver Atmos activation does not prove correct speaker placement.
 
 ## Current support
 
@@ -96,7 +109,8 @@ The [Apple TV A/B example](Examples/AtmosAB/README.md) includes the player/sessi
 | Atmos ISF, multiple beds and nonzero object sizes | Explicitly rejected |
 | Atmos trims, bed distribution/downmix, divergence, snap, screen/distance/zone controls | Explicitly rejected |
 | APAC 7.1.4 / 9.1.6, file / HLS fragments | Implemented; Apple encoder and decoder tested |
-| Receiver/MAT output and sustained Apple TV performance | Requires device verification |
+| Receiver Atmos activation | One Apple TV/receiver route confirmed with `AtmosOutputActivator`; MAT content and speaker placement unverified |
+| Sustained Apple TV performance | Requires device verification |
 
 Use the host player's existing fallback when a track is unsupported. The [rendering model](docs/rendering.md) documents the coordinate mapping and supported metadata. This renderer is not a Dolby/DTS reference renderer. APAC's final HDMI output depends on the device, OS and audio route.
 

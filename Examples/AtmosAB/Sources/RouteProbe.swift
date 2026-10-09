@@ -9,7 +9,7 @@ import Foundation
         let start: Double
         let end: Double
         let position: Double
-        let carrierRate: Float
+        let silentAtmos: Bool
     }
 
     private struct ProbeFailure: LocalizedError {
@@ -35,28 +35,28 @@ import Foundation
                       playback.version == (index.isMultiple(of: 2) ? .apac : .ddp),
                       let item = playback.player.currentItem,
                       abs(item.forwardPlaybackEndTime.seconds - excerpt.end.seconds) < 0.0001,
-                      playback.carrierRate == (playback.version == .apac ? 1 : 0) else {
-                    throw ProbeFailure(message: "Unexpected sequence, endpoint or carrier at step \(index + 1).")
+                      playback.silentAtmosActive == (playback.silentAtmosEnabled && playback.version == .apac) else {
+                    throw ProbeFailure(message: "Unexpected sequence, endpoint or silent Atmos state at step \(index + 1).")
                 }
                 steps.append(AutoStep(step: index + 1, sample: playback.sample.id,
                                       version: playback.version.suffix, start: excerpt.start.seconds,
                                       end: excerpt.end.seconds, position: playback.position,
-                                      carrierRate: playback.carrierRate))
+                                      silentAtmos: playback.silentAtmosActive))
                 try JSONEncoder().encode(steps).write(to: output, options: .atomic)
-                print("AUTO PROBE OBSERVED step=\(index + 1) carrier=\(playback.carrierRate)")
+                print("AUTO PROBE OBSERVED step=\(index + 1) silentAtmos=\(playback.silentAtmosActive)")
                 if index == 0 {
                     playback.pause()
                     let pausedTime = playback.player.currentTime().seconds
                     try await Task.sleep(for: .seconds(1))
                     guard playback.autoRunning, playback.autoIndex == 0, playback.player.rate == 0,
-                          playback.carrierRate == 0, abs(playback.player.currentTime().seconds - pausedTime) < 0.01 else {
-                        throw ProbeFailure(message: "Pause advanced the excerpt or left the carrier running.")
+                          !playback.silentAtmosActive, abs(playback.player.currentTime().seconds - pausedTime) < 0.01 else {
+                        throw ProbeFailure(message: "Pause advanced the excerpt or left the silent Atmos stream running.")
                     }
                     playback.toggle()
                     print("AUTO PROBE PAUSE/RESUME PASS")
                 }
             }
-            guard playback.autoCompleted, steps.count == Sample.all.count * 2, !playback.playing, playback.carrierRate == 0 else {
+            guard playback.autoCompleted, steps.count == Sample.all.count * 2, !playback.playing, !playback.silentAtmosActive else {
                 throw ProbeFailure(message: "Auto did not complete every excerpt and stop playback.")
             }
             for index in stride(from: 0, to: steps.count, by: 2) {
@@ -70,7 +70,7 @@ import Foundation
             playback.startAuto()
             playback.stopAuto()
             try await Task.sleep(for: .seconds(1))
-            guard !playback.autoRunning, !playback.loading, playback.player.rate == 0, playback.carrierRate == 0 else {
+            guard !playback.autoRunning, !playback.loading, playback.player.rate == 0, !playback.silentAtmosActive else {
                 throw ProbeFailure(message: "Stopping preparation did not cancel playback.")
             }
             playback.startAuto()
@@ -82,7 +82,7 @@ import Foundation
             playback.stopAuto()
             let stoppedItem = playback.player.currentItem
             try await Task.sleep(for: .seconds(2))
-            guard !playback.autoRunning, !playback.loading, playback.player.rate == 0, playback.carrierRate == 0,
+            guard !playback.autoRunning, !playback.loading, playback.player.rate == 0, !playback.silentAtmosActive,
                   playback.player.currentItem === stoppedItem else {
                 throw ProbeFailure(message: "Stopping Auto did not cancel playback and advancement.")
             }
@@ -95,10 +95,10 @@ import Foundation
             }
             guard playback.player.rate > 0 else { throw ProbeFailure(message: "Manual playback did not resume after Stop Auto.") }
             try await Task.sleep(for: .seconds(2))
-            guard playback.player.rate == 0, playback.carrierRate == 0 else {
-                throw ProbeFailure(message: "Manual playback after Stop Auto did not stop the carrier at the track end.")
+            guard playback.player.rate == 0, !playback.silentAtmosActive else {
+                throw ProbeFailure(message: "Manual playback after Stop Auto did not stop the silent Atmos stream at the track end.")
             }
-            print("AUTO PROBE PASS: \(steps.count) matched 20-second excerpts; pause/resume; carrier lifecycle; preparation and playback cancellation; manual playback after Stop. \(output.path)")
+            print("AUTO PROBE PASS: \(steps.count) matched 20-second excerpts; pause/resume; silent Atmos lifecycle; preparation and playback cancellation; manual playback after Stop. \(output.path)")
         } catch {
             playback.stopAuto()
             print("AUTO PROBE FAIL: \(error.localizedDescription)")
@@ -133,10 +133,10 @@ import Foundation
                         "error": playback.error ?? "",
                         "outputChannels": playback.outputChannels,
                         "maximumChannels": AVAudioSession.sharedInstance().maximumOutputNumberOfChannels,
-                        "carrierRate": playback.carrierRate
+                        "silentAtmos": playback.silentAtmosActive
                     ]
                     states.append(state)
-                    print("ROUTE \(sample.id) \(version.suffix) second=\(second) channels=\(playback.outputChannels) carrier=\(playback.carrierRate) position=\(playback.position) status=\(playback.trackStatus) error=\(playback.error ?? "")")
+                    print("ROUTE \(sample.id) \(version.suffix) second=\(second) channels=\(playback.outputChannels) silentAtmos=\(playback.silentAtmosActive) position=\(playback.position) status=\(playback.trackStatus) error=\(playback.error ?? "")")
                 }
                 reports.append(["sample": sample.id, "version": version.suffix, "states": states])
                 try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)

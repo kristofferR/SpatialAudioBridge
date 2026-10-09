@@ -58,8 +58,7 @@ struct AutoExcerpt {
     private var operation: Task<Void, Never>?
     private var generation = UUID()
     private var wantsPlayback = false
-    private let carrier = AVQueuePlayer()
-    private var carrierLooper: AVPlayerLooper?
+    private var atmos: AtmosOutputActivator?
     private var endObserver: NSObjectProtocol?
     private var nowPlaying: MPNowPlayingSession?
     private var playOperation: Task<Void, Never>?
@@ -67,7 +66,6 @@ struct AutoExcerpt {
     init() {
         UIApplication.shared.isIdleTimerDisabled = true
         player.automaticallyWaitsToMinimizeStalling = false
-        carrier.automaticallyWaitsToMinimizeStalling = false
         observer = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 48000), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -75,14 +73,30 @@ struct AutoExcerpt {
                 self.playing = self.player.timeControlStatus == .playing
             }
         }
+        // Launch arguments isolate each part of the tested Atmos setup on a device.
+        let arguments = ProcessInfo.processInfo.arguments
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback)
-            try session.setSupportsMultichannelContent(true)
-            try session.setActive(true)
+            if arguments.contains("--plain-session") {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playback, mode: .moviePlayback)
+                try session.setActive(true)
+            } else {
+                try AtmosOutputActivator.configureAudioSession()
+            }
         } catch { self.error = error.localizedDescription }
-        nowPlaying = MPNowPlayingSession(players: [player])
-        nowPlaying?.automaticallyPublishesNowPlayingInfo = true
+        if !arguments.contains("--without-now-playing") {
+            nowPlaying = MPNowPlayingSession(players: [player])
+            nowPlaying?.automaticallyPublishesNowPlayingInfo = true
+        }
+        if !arguments.contains("--without-silent-atmos") {
+            if let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") {
+                atmos = AtmosOutputActivator(silentAtmosStream: url)
+                atmos?.attach(to: player) { [weak self] _ in self?.version == .apac }
+            } else {
+                error = "The silent Atmos stream is missing. Rebuild the app with its media."
+            }
+        }
+        print("ATMOS SETUP session=\(arguments.contains("--plain-session") ? "plain" : "multichannel") nowPlaying=\(nowPlaying != nil) silentAtmos=\(atmos != nil)")
         load(sample: sample, version: version, resume: false)
     }
 
@@ -98,7 +112,6 @@ struct AutoExcerpt {
         wantsPlayback = shouldPlay
         player.pause()
         playOperation?.cancel()
-        stopCarrier()
         playing = false
         sample = nextSample
         version = nextVersion
@@ -209,7 +222,6 @@ struct AutoExcerpt {
         operation?.cancel()
         loading = false
         pause()
-        stopCarrier()
     }
 
     private func cancelAuto() {
@@ -240,7 +252,6 @@ struct AutoExcerpt {
             autoCompleted = true
         }
         pause()
-        stopCarrier()
     }
 
     private func fail(_ message: String) {
@@ -256,7 +267,6 @@ struct AutoExcerpt {
     func pause() {
         playOperation?.cancel()
         player.pause()
-        carrier.pause()
         playing = false
         wantsPlayback = false
     }
@@ -274,29 +284,13 @@ struct AutoExcerpt {
     }
 
     private func playPreparedTrack() {
-        if version == .apac {
-            guard let url = Bundle.main.url(forResource: "silent-atmos-carrier", withExtension: "mp4", subdirectory: "Media") else {
-                fail("Atmos carrier is missing. Rebuild the app with its media.")
-                return
-            }
-            // The near-silent JOC stream activates the HDMI Atmos route independently of APAC.
-            if carrierLooper == nil {
-                carrierLooper = AVPlayerLooper(player: carrier, templateItem: AVPlayerItem(url: url))
-            }
-            carrier.play()
-        }
+        // The activator follows the player and plays the silent Atmos stream for APAC only.
         player.play()
         wantsPlayback = true
     }
 
-    private func stopCarrier() {
-        carrier.pause()
-        carrierLooper?.disableLooping()
-        carrierLooper = nil
-        carrier.removeAllItems()
-    }
-
-    var carrierRate: Float { carrier.rate }
+    var silentAtmosEnabled: Bool { atmos != nil }
+    var silentAtmosActive: Bool { atmos?.isActive ?? false }
 
     var outputChannels: Int {
         AVAudioSession.sharedInstance().outputNumberOfChannels
