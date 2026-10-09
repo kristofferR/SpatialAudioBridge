@@ -19,3 +19,8 @@ for TARGET in "${TARGETS[@]}"; do
     ARGS+=(-library "$TASK_ROOT/Rust/SpatialAudioCore/target/$TARGET/release/libspatial_audio_core.a" -headers "$HEADERS")
 done
 xcodebuild -create-xcframework "${ARGS[@]}" -output "$OUTPUT"
+if [[ -f "$TASK_ROOT/THIRD-PARTY-NOTICES.md" ]]; then
+    cp "$TASK_ROOT/THIRD-PARTY-NOTICES.md" "$ARTIFACTS/THIRD-PARTY-NOTICES.md"
+    cp "$TASK_ROOT/LICENSE" "$ARTIFACTS/LICENSE"
+    cp -R "$TASK_ROOT/licenses" "$ARTIFACTS/"
+fi
