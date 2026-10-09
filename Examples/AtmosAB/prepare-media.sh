@@ -17,14 +17,14 @@ for sample in helicopter amaze natures-fury channel-check-7.1.4; do
     fi
   done
 done
-if [[ ! -s "$SOURCE_DIR/silent-atmos-carrier.mp4" ]]; then
-  echo "Missing near-silent JOC carrier: $SOURCE_DIR/silent-atmos-carrier.mp4" >&2
+if [[ ! -s "$SOURCE_DIR/silent-atmos.mp4" ]]; then
+  echo "Missing near-silent JOC Atmos stream: $SOURCE_DIR/silent-atmos.mp4" >&2
   exit 1
 fi
 
 mkdir -p "$APP_DIR/Media"
 if [[ "$SOURCE_DIR" != "$APP_DIR/Media" ]]; then
-  for media in "$SOURCE_DIR"/*.APAC.mp4 "$SOURCE_DIR"/*.DDP.mp4 "$SOURCE_DIR/silent-atmos-carrier.mp4"; do
+  for media in "$SOURCE_DIR"/*.APAC.mp4 "$SOURCE_DIR"/*.DDP.mp4 "$SOURCE_DIR/silent-atmos.mp4"; do
     cp -c "$media" "$APP_DIR/Media/"
   done
   if [[ -f "$SOURCE_DIR/extra-samples.json" ]]; then

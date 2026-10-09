@@ -15,6 +15,7 @@ targets:
     platform: tvOS
     sources:
       - Sources
+      - path: ../../Sources/SpatialAudioPlayback
       - path: Media
         type: folder
         buildPhase: resources

@@ -10,6 +10,7 @@ The first deliverable is the library: a simple Swift API for file conversion and
 
 - `Rust/SpatialAudioCore`: compressed decoding, metadata interpretation and rendering into 7.1.4 or 9.1.6 speaker feeds. Exposes a small C ABI.
 - `Sources/SpatialAudioBridge`: Swift session management, PCM sample buffers, Apple's APAC encoder, file output and timed fragment callbacks.
+- `Sources/SpatialAudioPlayback`: AVPlayer playback-route helpers without the Rust core, including Atmos output activation.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
 - `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV device and Apple TV simulator.
 - `Tests` and the Rust tests: focused checks for spatial rendering, stream handling, timing and native APAC round trips.

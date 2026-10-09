@@ -6,12 +6,14 @@ APAC playback uses the tested Atmos setup:
 
 - Configure `AVAudioSession` for playback/movie playback, enable `supportsMultichannelContent`, and activate the session.
 - Register the main `AVPlayer` with `MPNowPlayingSession` and make that session active before playback.
-- Start a separate, unmuted `AVQueuePlayer` looping a near-silent E-AC-3/JOC carrier before starting APAC. Pause the carrier with the main player; remove it when switching items or reaching the end.
-- Play DDP directly, without the carrier.
+- Attach the library's `AtmosOutputActivator` to the main player. It loops a near-silent E-AC-3/JOC stream in a separate, unmuted player while APAC plays and pauses it with the main player.
+- Play DDP directly, without the silent stream.
 
 On the tested Apple TV and receiver route, APAC alone did not trigger Atmos. With this setup, Kris confirmed APAC and DDP both trigger Atmos and sound similar. The APAC encoder settings, media and renderer were unchanged. This observation establishes Atmos activation and an informal listening result; it does not establish correct APAC speaker placement. `AVAudioSession.outputNumberOfChannels`, `renderingMode` and `isSpatialAudioEnabled` were unsuitable Atmos detectors on the tested beta.
 
-The carrier used in that test was a 2.016-second intro from our own Deezy Helicopter conversion, with decoded compatible-bed peak around −105 dBFS. It is near-silent, not digital zero. The example requires a supplied carrier; no sample media or Native Player assets are distributed here.
+The silent stream used in that test was a 2.016-second intro from our own Deezy Helicopter conversion, with decoded compatible-bed peak around −105 dBFS. It is near-silent, not digital zero. The example requires a supplied stream; no sample media or Native Player assets are distributed here.
+
+Launch arguments isolate each part of the setup: `--plain-session` omits multichannel content from the audio session, `--without-now-playing` skips `MPNowPlayingSession`, and `--without-silent-atmos` plays APAC alone. The app prints the active combination at launch. Pass them in the Xcode scheme or after the bundle identifier in `xcrun devicectl device process launch`.
 
 ## Use
 
@@ -30,7 +32,7 @@ helicopter.APAC.mp4             helicopter.DDP.mp4
 amaze.APAC.mp4                  amaze.DDP.mp4
 natures-fury.APAC.mp4           natures-fury.DDP.mp4
 channel-check-7.1.4.APAC.mp4     channel-check-7.1.4.DDP.mp4
-silent-atmos-carrier.mp4
+silent-atmos.mp4
 ```
 
 Then install on a paired Apple TV:
@@ -46,6 +48,6 @@ Additional pairs are appended from `Media/extra-samples.json`, a JSON array of `
 
 ## Validation
 
-The source matches the local app built and installed on an Apple TV 4K (2nd generation), tvOS 27.2 beta, on 2026-10-10. A complete Auto device run played all eight excerpts in the requested order with matching timestamps, the carrier running only for APAC, and playback stopping after the last pair. Stopping during preparation and playback also passed. Later pause/resume validation was interrupted by remote use; pause/resume has not completed an unattended device check. Source media remains the previously validated conversion from the original worktree baseline.
+The source matches the local app built and installed on an Apple TV 4K (2nd generation), tvOS 27.2 beta, on 2026-10-10. A complete Auto device run played all eight excerpts in the requested order with matching timestamps, the silent Atmos stream running only for APAC, and playback stopping after the last pair. Stopping during preparation and playback also passed. Later pause/resume validation was interrupted by remote use; pause/resume has not completed an unattended device check. Source media remains the previously validated conversion from the original worktree baseline.
 
 For the focused playback probe, launch with `--auto-probe`; stdout reports each seek and endpoint plus the final check result. `--probe --all-pairs` runs the older route observation probe. Its channel-count readings must not be treated as proof of Atmos output.
