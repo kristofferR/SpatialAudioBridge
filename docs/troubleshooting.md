@@ -22,7 +22,7 @@
 | `.source("The file has no TrueHD or DTS track")` | No convertible track; check `file.audioTracks`. |
 | `.source("The file does not declare its duration")` | `APACStream` needs the duration for its VOD playlist. |
 | `.source("Could not load the video playlist")` | The video master URL failed or did not return a playlist; check its authorization. |
-| `.source(…)` from `HTTPByteSource` | The server rejected the request or ignored the range. It must answer range requests with status 206. |
+| `.source(…)` from `HTTPByteSource` | The server rejected the request or ignored the range. Server errors (5xx), timeouts and lost connections arrive as `URLError` instead. It must answer range requests with status 206. |
 
 Jellyfin 12.2 returns 401 for the older `api_key` query parameter; use `ApiKey` or a header.
 
@@ -34,7 +34,7 @@ Jellyfin 12.2 returns 401 for the older `api_key` query parameter; use `ApiKey` 
 | −12889 "No response for media file" on `seg<N>.m4s` | Conversion did not deliver the segment in time. Check `conversionSpeed`; below about 1.2, the device, the network or the server cannot keep up. |
 | −12889 on video segments | The media server is slow to remux, often right after a seek. `AVPlayer` may pause or stop requesting media; see below. |
 | −12880 "Can not proceed after removing variants" | `AVPlayer` gave up on every variant, usually after the first segment of a seek timed out. With a media server's transcoding variants offered, it may first have switched to one of them; offer only the stream-copy variant with `includesVideoVariant`. |
-| HTTP 500 for `seg<N>.m4s` | Conversion failed, usually from unsupported metadata partway through the track. Failures other than network errors end the stream, so later requests fail too: fail the item and fall back to the host's audio path. After a network failure, the next request starts a new run. |
+| HTTP 500 for `seg<N>.m4s` | Conversion failed, usually from unsupported metadata, malformed Matroska data or a jump in the track's timestamps partway through. Such failures end the stream, so later requests fail too: fail the item and fall back to the host's audio path. After a lost connection or a server error, the next request starts a new run. |
 | HTTP 503 for `seg<N>.m4s` | A later request restarted conversion elsewhere, such as the next scrub position. Expected while scrubbing. |
 | HTTP 410 | The stream was stopped; requests that arrive afterwards are refused. |
 

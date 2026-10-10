@@ -83,7 +83,7 @@ Seek the player as usual. Segments lie on a fixed grid, so every conversion run 
 - Segments already converted are served at once: the lookahead ahead of the playhead, and the last 20 segments (about 64 s) behind it, so skipping back over recent audio is immediate.
 - Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 1 s apart on Apple TV 4K (2nd generation). The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s.
 - While scrubbing, `AVPlayer` requests a segment at each intermediate position. Each restarts conversion, and requests a later restart replaced are answered with status 503 at once.
-- A gap or reset in the track's own timestamps ends the current run, because conversion times audio by its samples. The next request past it starts a new run, which keeps the audio aligned with the video.
+- A gap or reset in the track's own timestamps ends the stream with an error. Conversion times audio by its samples, so it cannot keep audio aligned past the jump; the host falls back as for any other conversion failure.
 
 After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7 s and long jumps after 11–14 s. Skips within already converted audio resumed after about 1 s.
 

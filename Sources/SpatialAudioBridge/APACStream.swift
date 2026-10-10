@@ -94,7 +94,8 @@ public final class APACStream: Sendable {
             }
             let rendition = HLSPlaylists.rendition(name: options.renditionName, language: track.language,
                                                    channels: configuration.layout.channelCount)
-            let rewritten = HLSPlaylists.master(rewriting: text, baseURL: videoMaster, rendition: rendition,
+            // Relative URIs follow the playlist's final location after any redirect.
+            let rewritten = HLSPlaylists.master(rewriting: text, baseURL: response.url ?? videoMaster, rendition: rendition,
                                                 codec: configuration.layout.apacCodecString, bitRate: configuration.bitRate,
                                                 includesVariant: options.includesVideoVariant)
             guard rewritten.contains("#EXT-X-STREAM-INF:") else {
@@ -319,15 +320,11 @@ actor StreamEngine {
     }
 
     /// Throws a failure that ends the stream, recording one the current run has just reported.
-    /// Only a source failure, such as a network error, may succeed on a new run; every other
-    /// failure would repeat with each restart, so it ends the stream.
+    /// Transport failures, such as a dropped connection or a server error, may succeed on a new run.
+    /// A `SpatialAudioError`, including malformed container data, would repeat with every restart,
+    /// so it ends the stream.
     private func checkFailure() throws {
-        if failure == nil, let run, let error = store.failure(run: run.id), let spatial = error as? SpatialAudioError {
-            switch spatial {
-            case .source: break
-            case .decoding, .encoding, .invalidConfiguration, .invalidState, .coreMedia: failure = spatial
-            }
-        }
+        if failure == nil, let run, let error = store.failure(run: run.id) as? SpatialAudioError { failure = error }
         if let failure { throw failure }
     }
 
@@ -360,11 +357,12 @@ actor StreamEngine {
                 var previous: CMTime?
                 for try await packet in file.packets(of: track, from: start) {
                     try Task.checkCancellation()
-                    // The transcoder times audio by its samples, so a gap or reset in the track's
-                    // timestamps ends the run; a request past it starts a new one aligned to the gap.
+                    // The transcoder times audio by its samples, so past a gap or reset in the track's
+                    // timestamps the audio would drift from the video. Every run that reaches it would
+                    // stop there again, so the stream ends and the host falls back.
                     if let previous, !Self.continues(from: previous, to: packet.time) {
-                        log.info("Timestamp discontinuity at \(packet.time.seconds) s; run ends")
-                        break
+                        throw SpatialAudioError.source(String(format: "The audio timestamps jump from %.3f to %.3f s",
+                                                              previous.seconds, packet.time.seconds))
                     }
                     previous = packet.time
                     if transcoder == nil {
