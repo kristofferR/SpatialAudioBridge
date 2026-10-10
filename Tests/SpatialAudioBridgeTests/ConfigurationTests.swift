@@ -7,6 +7,16 @@ import Foundation
     #expect(SpatialAudioLayout.nineOneSix.apacCodecString == "apac.31.04")
 }
 
+@Test func defaultBitRateFollowsTheLayoutUntilSet() {
+    var configuration = APACConfiguration()
+    #expect(configuration.bitRate == 3_072_000)
+    configuration.layout = .nineOneSix
+    #expect(configuration.bitRate == 4_096_000)
+    configuration.bitRate = 2_000_000
+    configuration.layout = .sevenOneFour
+    #expect(configuration.bitRate == 2_000_000)
+}
+
 @Test func invalidConfigurationIsRejectedBeforeCreatingOutput() {
     #expect(throws: SpatialAudioError.self) {
         try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .file(URL(fileURLWithPath: "/unused.mp4")),

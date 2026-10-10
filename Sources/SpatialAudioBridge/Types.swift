@@ -41,8 +41,13 @@ public struct APACConfiguration: Sendable {
     public var layout: SpatialAudioLayout
     /// Gain before encoding. No automatic normalization or clipping is applied.
     public var gainDB: Float
-    /// Total APAC bit rate in bits per second. Defaults to 256 kbit/s per channel, at most 4.096 Mbit/s.
-    public var bitRate: Int
+    /// Total APAC bit rate in bits per second. Unless set, 256 kbit/s per channel of `layout`, at most
+    /// 4.096 Mbit/s.
+    public var bitRate: Int {
+        get { explicitBitRate ?? min(layout.channelCount * 256_000, 4_096_000) }
+        set { explicitBitRate = newValue }
+    }
+    private var explicitBitRate: Int?
     /// Presentation time of the first output sample. Fragment timestamps start here, less the
     /// encoder priming.
     public var startTime: CMTime
@@ -63,7 +68,7 @@ public struct APACConfiguration: Sendable {
                 liveEncoding: Bool = false) {
         self.layout = layout
         self.gainDB = gainDB
-        self.bitRate = bitRate ?? min(layout.channelCount * 256_000, 4_096_000)
+        explicitBitRate = bitRate
         self.startTime = startTime
         inputStartTime = nil
         self.syncPacketFrequency = syncPacketFrequency
