@@ -32,12 +32,24 @@ Jellyfin 12.2 returns 401 for the older `api_key` query parameter; use `ApiKey` 
 |---|---|
 | −12318 "Segment exceeds specified bandwidth for variant" on video segments | The server's master understates its bitrate. Jellyfin declares 128 kbit/s for a 4K remux. Harmless on a fast network. |
 | −12889 "No response for media file" on `seg<N>.m4s` | Conversion did not deliver the segment in time. Check `conversionSpeed`; below about 1.2, the device, the network or the server cannot keep up. |
-| −12889 on video segments | The media server is slow to remux, often right after a seek. |
+| −12889 on video segments | The media server is slow to remux, often right after a seek. `AVPlayer` may pause or stop requesting media; see below. |
+| −12880 "Can not proceed after removing variants" | `AVPlayer` gave up on every variant, usually after the first segment of a seek timed out. With a media server's transcoding variants offered, it may first have switched to one of them; offer only the stream-copy variant with `includesVideoVariant`. |
 | HTTP 500 for `seg<N>.m4s` | Conversion failed, usually from unsupported metadata partway through the track. The next request starts a new run. |
+| HTTP 503 for `seg<N>.m4s` | A later request restarted conversion elsewhere, such as the next scrub position. Expected while scrubbing. |
+
+The stream's own log, subsystem `SpatialAudioBridge`, category `APACStream`, shows each request, restart and wait time. See [Monitor](avplayer.md#monitor).
 
 ## Playback stalls
 
-Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to 9.1.6 at about 2.6×. A seek outside the converted range needs about 2 s before its first segment. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate. Choosing `.sevenOneFour` lowers the APAC bit rate but not the decoding work.
+Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to 9.1.6 at about 3.2×. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate. Choosing `.sevenOneFour` lowers the APAC bit rate and encoding work.
+
+## Seeks take several seconds
+
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, and each segment that is not yet converted costs about 1 s on Apple TV 4K (2nd generation). Titles with long keyframe intervals, whose stream-copy video segments are long, therefore take longest: 6–14 s with 10.4-second segments. Skips within the last minute of played audio, or within the lookahead, resume in about 1 s. See [seeking](avplayer.md#seeking-and-synchronization).
+
+## Playback stays waiting after rapid seeks
+
+Three quick skips back made Jellyfin restart its remux twice within two seconds and abort a video segment mid-response (`The response has already started` in its log). `AVPlayer` then waited indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. Replace the item at the same position: [StreamPlayer](../Examples/StreamPlayer/README.md) does so after 20 s of waiting, though that recovery has not yet been observed on a device. A player's own stall handling can do the same.
 
 ## Other audio stutters
 

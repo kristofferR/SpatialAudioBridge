@@ -77,9 +77,14 @@ A player cannot wait 23 s for a seek, so `APACStream` and `SpatialAudioRenderer`
 ## Concurrency, bounds and failure
 
 - `SpatialAudioTranscoder` and `SpatialAudioRenderer` are actors. They accept one operation at a time and suspend the caller while the asset writer or audio renderer is full, so memory stays bounded however fast the source delivers.
-- `APACStream` runs one conversion at a time, paced to `lookahead` segments (default 6, or 19.2 s) ahead of the newest request. It keeps segments from two before the newest request up to lookahead + 2 after it: at most 11 segments, about 18 MB at the default 9.1.6 bit rate.
+- `APACStream` runs one conversion at a time, paced to `lookahead` segments (default 6, or 19.2 s) ahead of the newest request. It keeps segments from `keptBehind` (default 20) before the newest request up to lookahead + 2 after it: at most 29 segments, about 48 MB at the default 9.1.6 bit rate.
+- A request waits for the current run only if the run will reach it within about two segments; otherwise it restarts conversion there, since a new run delivers its first segment in about two segments' conversion time. A request that a later restart superseded is answered with status 503 at once.
 - Every decoding, encoding or callback failure ends its session. `APACStream` reports a failed run to the waiting segment request as an HTTP error and starts a new run on the next request. Task cancellation stops conversion.
 - The Matroska reader fetches the file in 2 MiB windows and reads clusters in order, so a remote file's video bytes are transferred too. On a local network this costs about the file's bitrate.
+
+## Where the time goes
+
+Apple's APAC encoder was about 85% of the conversion work in a macOS profile; TrueHD decoding and rendering were small by comparison. `AVAssetWriter` runs the encoder on one thread per session, at about 3.2 times real time on Apple TV 4K (2nd generation) for 9.1.6, in Debug and Release builds alike. `SpatialAudioRenderer` sets the encoder's medium quality tier, which matched the default high tier on real Atmos content and encodes 1.25 to 1.5 times as fast. `AVAssetWriter` ignores that setting for APAC, so `APACStream` and file conversion encode at the default tier.
 
 ## Boundaries
 

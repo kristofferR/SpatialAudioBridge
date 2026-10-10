@@ -26,6 +26,8 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Fragmented encoder priming | Core Audio reports 2048 leading frames; native decoding trims them, and the full 58-second stream decodes to its source length rounded up to a whole 1024-frame packet |
 | Live encoding | Segments trail their input by less than 2 s over 30 s of TrueHD Atmos; the offline profile's first fragment needs 23.3 s of input |
 | `AudioConverter` encoder | Sixteen distinct tones survive a 9.1.6 APAC round trip, each correlating above 0.98 with its own channel and below 0.1 with its neighbour |
+| Encoder quality tiers | On 20 s of a film, all 16 channels active: high 47.0 dB and medium 48.4 dB signal-to-error, low 43.0 dB; on the height-only fixture, high and medium 60.9–61.0 dB, low 18.8 dB. Medium encoded 1.25–1.5× as fast as high, low 3×. `AVAssetWriter` ignored the setting |
+| Conversion profile | In a macOS profile, Apple's APAC encoder was about 85% of conversion work. After moving PCM scaling to Accelerate, Debug and Release builds convert at the same speed |
 
 ### Sources and streaming
 
@@ -48,22 +50,41 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Atmos activation with `AVSampleBufferAudioRenderer` | Atmos only with the activator; a 7.1.4 channel check played every speaker in its place, including the heights |
 | A/B Auto playback | Eight matched 20-second excerpts completed in pair order; silent Atmos stream only during APAC, stop after the final pair, preparation/playback cancellation pass |
 | Activator and Dolby Digital Plus | Direct Dolby Digital Plus no longer stutters once the activator unloads its stream for non-APAC items |
-| `APACStream` with Jellyfin | A 4K HDR10 remux with TrueHD Atmos played from 7:00 with stream-copied HEVC video and Atmos on the receiver; ready 2.4–2.5 s after launch, converting at 2.6–2.7× real time |
-| Sustained `APACStream` playback | After the pacing fix, 16 minutes without a stall; before it, playback stopped after 111 s when a dropped segment was requested |
+| `APACStream` with Jellyfin | A 4K HDR10 title with TrueHD Atmos played with stream-copied HEVC video and Atmos on the receiver; stream ready 2.0–2.5 s and playing 4–5 s after launch; about 1 s of conversion per 3.2-second segment, in Debug and Release builds alike |
+| Sustained `APACStream` playback | After the pacing fix, no stalls in 37 minutes of steady playback; before it, playback stopped after 111 s when a dropped segment was requested. Available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes |
+| Seeks with `AVPlayer` | Before the restart rule changed, a long scrub failed the item (`-12880`) and skips back waited up to 30 s. Afterwards, a scripted test of eight skips, scrubs and jumps recovered every time; times below |
+| `SpatialAudioRenderer` on device | Renderer mode read the title from Jellyfin, started the synchronizer 1.47 s after launch and reported `.rendering` with the silent Atmos stream playing |
 | Activator lifecycle | The silent stream follows host play/pause, plays only for accepted items, follows a synchronizer, stops on detach and reports an unplayable stream (macOS) |
+
+Scripted seeks on the Release build, from 55:06 into the Jellyfin title, whose stream-copy video segments last 10.4 s. Each seek was issued as a remote does, without waiting for the previous one, and timed until playback moved past the target:
+
+| Seek | Resumed after |
+|---|---|
+| Skip forward 10 s, within converted audio | 1.1 s |
+| Skip back 10 s, before the first converted segment | 6.8 s |
+| Three skips back 10 s, 0.3 s apart | 6.2 s |
+| Scrub forward 2 min, twelve steps 0.17 s apart | 13.6 s |
+| Scrub back 1 min, six steps | 12.2 s |
+| Jump forward 10 min | 13.7 s |
+| Jump back 5 min | 13.3 s |
+| Two 1-minute jumps forward, 0.5 s apart | 11.9 s |
+
+In two other runs, the three quick skips back made Jellyfin abort a video segment mid-response, after which `AVPlayer` waited without requesting anything more; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks).
 
 ## Coverage
 
-The suite includes 11 Rust unit tests, 3 Rust fixture tests and 28 Swift tests. Without fixture variables, 19 Swift tests run: configuration, playlists, the loopback server, synthetic Matroska files, the encoder round trip and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and six need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 11 Rust unit tests, 3 Rust fixture tests and 31 Swift tests. Without fixture variables, 22 Swift tests run: configuration, playlists and variant filtering, the loopback server, the stream's restart rule and cache window, synthetic Matroska files, the encoder round trip and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and six need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer.
 
 ## Not yet established
 
 - Correct speaker placement beyond the channel check and informal listening, and the HDMI payload (MAT or otherwise).
-- Lip sync with dialogue, measured rather than observed, and seek recovery times on Apple TV.
-- Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
+- Lip sync with dialogue, measured rather than observed.
+- Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
+- Memory use over a full film, Wi-Fi playback, titles with short keyframe intervals, and other Apple TV models and receivers.
 - Plex and Emby sources.
+- Rendered peaks: a film's front height channel reached +4 dBFS before encoding; objects summing into one speaker can exceed full scale.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.
 

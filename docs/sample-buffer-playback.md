@@ -47,6 +47,10 @@ Each packet's timestamp is shifted back by the encoder priming, so decoded audio
 
 ## Device results
 
-On an Apple TV 4K (2nd generation) with tvOS 27.2 beta, APAC played through `AVSampleBufferAudioRenderer` switched the receiver to Dolby Atmos only while `AtmosOutputActivator` ran, and a channel check placed every channel correctly, including the heights. That test fed APAC from a converted file. The [StreamPlayer](../Examples/StreamPlayer/README.md) example's renderer mode runs this API end to end from an MKV.
+On an Apple TV 4K (2nd generation) with tvOS 27.2 beta, APAC played through `AVSampleBufferAudioRenderer` switched the receiver to Dolby Atmos only while `AtmosOutputActivator` ran, and a channel check placed every channel correctly, including the heights. That test fed APAC from a converted file.
+
+The [StreamPlayer](../Examples/StreamPlayer/README.md) example's renderer mode then ran this API end to end, reading the MKV from Jellyfin: the synchronizer started 1.47 s after launch, the renderer reported `.rendering` and the silent Atmos stream played. Receiver output was not checked by listening in that run.
+
+`SpatialAudioRenderer` encodes with Apple's medium quality tier, which matched the default tier on real Atmos content and encodes 1.25 to 1.5 times as fast.
 
 On macOS, the same renderer rejected TrueHD packets as an unsupported format (`fmt?`) while playing 16-channel APAC, so the conversion is what makes this path possible.

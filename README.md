@@ -65,10 +65,11 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 
 | Measure | Result |
 |---|---|
-| Open the file and convert the first segment | 2.4–2.5 s |
-| Conversion speed | 2.6–2.7× real time |
+| Open the file and convert the first segment | 2.0–2.5 s |
+| Conversion speed | About 3.2× real time: 1 s per 3.2-second segment |
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; without it, no Atmos |
-| Sustained playback | 16 minutes without a stall |
+| Steady playback | No stalls over 37 minutes; no memory growth |
+| Seeks | Every skip, scrub and jump recovered: about 1 s within converted audio, 6–14 s elsewhere on a title with 10.4-second keyframe intervals |
 
 ## Documentation
 
