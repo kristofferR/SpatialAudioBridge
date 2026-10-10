@@ -1,5 +1,9 @@
 import CoreMedia
 import Foundation
+import os
+
+/// Segment requests, restarts and wait times; visible in Console under this subsystem.
+private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream")
 
 /// Plays a Matroska file's TrueHD Atmos or DTS:X track through AVPlayer as an APAC HLS rendition.
 ///
@@ -206,14 +210,26 @@ actor StreamEngine {
         guard (0..<segmentCount).contains(index) else { throw StreamError.outOfRange }
         requested = index
         store.keep(around: index, ahead: lookahead)
-        if let data = store.segment(index) { return data }
+        if let data = store.segment(index) {
+            log.debug("seg\(index) from cache")
+            return data
+        }
         // Restart behind the run, at a segment it passed but no longer holds, or beyond what it
         // will reach soon; otherwise wait for it.
         let reach = max(run?.start ?? -1, store.highest) + lookahead + 1
         if run == nil || index < run!.start || index <= store.highest || index > reach || store.ended(run: run!.id) {
+            log.info("seg\(index) restarts conversion; run started at \(self.run?.start ?? -1), converted \(self.store.highest)")
             startRun(at: index)
         }
-        return try await wait { $0.segment(index) }
+        let waited = ContinuousClock.now
+        do {
+            let data = try await wait { $0.segment(index) }
+            log.info("seg\(index) after \(Int((ContinuousClock.now - waited) / .milliseconds(1))) ms")
+            return data
+        } catch {
+            log.error("seg\(index) failed after \(Int((ContinuousClock.now - waited) / .milliseconds(1))) ms: \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     func stop() {
