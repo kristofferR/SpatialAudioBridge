@@ -57,7 +57,8 @@ enum HLSPlaylists {
                 }
                 output.append("#EXT-X-STREAM-INF:" + attributes)
                 expectsURI = true
-            } else if line.hasPrefix("#EXT-X-I-FRAME-STREAM-INF:") || line.hasPrefix("#EXT-X-SESSION-DATA:") {
+            } else if line.hasPrefix("#"), attribute("URI", in: line) != nil {
+                // I-frame and trick-play image playlists, session data and keys.
                 output.append(replacingURI(in: line, baseURL))
             } else {
                 output.append(line)
