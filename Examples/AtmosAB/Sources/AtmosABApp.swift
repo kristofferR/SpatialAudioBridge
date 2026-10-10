@@ -27,15 +27,60 @@ struct Sample: Identifiable, Hashable, Decodable {
 }
 
 enum Version: String, CaseIterable {
+    case baseline = "Baseline APAC"
     case apac = "TrueHD → APAC 9.1.6"
     case ddp = "DDP Atmos (Deezy)"
-    var suffix: String { self == .apac ? "APAC" : "DDP" }
+    var suffix: String {
+        switch self {
+        case .baseline: "APAC-baseline"
+        case .apac: "APAC"
+        case .ddp: "DDP"
+        }
+    }
+    var isAPAC: Bool { self != .ddp }
+
+    /// The baseline, an APAC conversion from an earlier library build, is offered when every
+    /// sample has one. Auto mode then becomes a blind comparison against the DDP reference.
+    static let available: [Version] = {
+        let hasBaseline = Sample.all.allSatisfy {
+            Bundle.main.url(forResource: "\($0.id).\(Version.baseline.suffix)", withExtension: "mp4", subdirectory: "Media") != nil
+        }
+        return hasBaseline ? allCases : [.apac, .ddp]
+    }()
 }
 
 struct AutoExcerpt {
     let sample: Sample
     let start: CMTime
     var end: CMTime { start + CMTime(seconds: 20, preferredTimescale: 48000) }
+}
+
+/// One playback in Auto mode. Blind steps are labelled Reference, X and Y.
+struct AutoStep {
+    let excerpt: Int
+    let version: Version
+    let label: String
+}
+
+enum Verdict: String, CaseIterable {
+    case x = "X"
+    case y = "Y"
+    case same = "No difference"
+}
+
+/// The listener's answer to which of X and Y sounded closer to the reference.
+struct BlindResult {
+    let sample: Sample
+    let x: Version
+    let y: Version
+    let verdict: Verdict
+    var closer: Version? {
+        switch verdict {
+        case .x: x
+        case .y: y
+        case .same: nil
+        }
+    }
 }
 
 @MainActor @Observable final class Playback {
@@ -52,7 +97,12 @@ struct AutoExcerpt {
     private(set) var autoRunning = false
     private(set) var autoCompleted = false
     private(set) var autoIndex = 0
+    /// Set after the last blind step of an excerpt, until the listener answers or replays it.
+    private(set) var awaitingVerdict = false
+    private(set) var results: [BlindResult] = []
+    let blind = Version.available.contains(.baseline)
     private var autoExcerpts: [AutoExcerpt] = []
+    private(set) var autoSteps: [AutoStep] = []
     private var autoPreparation: Task<Void, Never>?
     private var autoGeneration = UUID()
     private var observer: Any?
@@ -93,7 +143,7 @@ struct AutoExcerpt {
         if !arguments.contains("--without-silent-atmos") {
             if let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") {
                 atmos = AtmosOutputActivator(silentAtmosStream: url)
-                atmos?.attach(to: player) { [weak self] _ in self?.version == .apac }
+                atmos?.attach(to: player) { [weak self] _ in self?.version.isAPAC == true }
             } else {
                 setupError = "The silent Atmos stream is missing. Rebuild the app with its media."
             }
@@ -177,9 +227,19 @@ struct AutoExcerpt {
         }
     }
 
+    var autoStep: AutoStep? {
+        guard autoRunning, autoSteps.indices.contains(autoIndex) else { return nil }
+        return autoSteps[autoIndex]
+    }
+
     var autoExcerpt: AutoExcerpt? {
-        guard autoRunning, autoExcerpts.indices.contains(autoIndex / 2) else { return nil }
-        return autoExcerpts[autoIndex / 2]
+        autoStep.map { autoExcerpts[$0.excerpt] }
+    }
+
+    /// What the player shows for the current version; blind steps hide which APAC plays.
+    var versionLabel: String {
+        if blind, let step = autoStep { return step.label }
+        return version.rawValue
     }
 
     func startAuto() {
@@ -188,13 +248,14 @@ struct AutoExcerpt {
         loading = true
         autoRunning = true
         autoIndex = 0
+        results = []
         let token = autoGeneration
         autoPreparation = Task { [weak self] in
             do {
                 var excerpts: [AutoExcerpt] = []
                 for sample in Sample.all {
                     var sharedDuration = Double.infinity
-                    for version in Version.allCases {
+                    for version in Version.available {
                         guard let url = Bundle.main.url(forResource: "\(sample.id).\(version.suffix)", withExtension: "mp4", subdirectory: "Media") else {
                             throw NSError(domain: "AtmosAB", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sample file is missing: \(sample.name) \(version.suffix)."])
                         }
@@ -211,7 +272,17 @@ struct AutoExcerpt {
                 }
                 guard let self, !Task.isCancelled, self.autoGeneration == token, self.autoRunning else { return }
                 self.autoExcerpts = excerpts
-                self.playAutoExcerpt()
+                self.autoSteps = excerpts.indices.flatMap { index -> [AutoStep] in
+                    guard self.blind else {
+                        return [AutoStep(excerpt: index, version: .apac, label: "TrueHD → APAC"),
+                                AutoStep(excerpt: index, version: .ddp, label: "DDP")]
+                    }
+                    let (x, y) = Bool.random() ? (Version.apac, Version.baseline) : (.baseline, .apac)
+                    return [AutoStep(excerpt: index, version: .ddp, label: "Reference"),
+                            AutoStep(excerpt: index, version: x, label: "X"),
+                            AutoStep(excerpt: index, version: y, label: "Y")]
+                }
+                self.playAutoStep()
             } catch {
                 guard let self, !Task.isCancelled, self.autoGeneration == token else { return }
                 self.fail(error.localizedDescription)
@@ -232,28 +303,60 @@ struct AutoExcerpt {
         autoGeneration = UUID()
         autoRunning = false
         autoCompleted = false
+        awaitingVerdict = false
         autoExcerpts = []
+        autoSteps = []
         player.currentItem?.forwardPlaybackEndTime = .invalid
     }
 
-    private func playAutoExcerpt() {
-        guard let excerpt = autoExcerpt else { return }
-        loadTrack(sample: excerpt.sample, version: autoIndex.isMultiple(of: 2) ? .apac : .ddp,
-                  at: excerpt.start, resume: true, end: excerpt.end)
+    private func playAutoStep() {
+        guard let step = autoStep, let excerpt = autoExcerpt else { return }
+        loadTrack(sample: excerpt.sample, version: step.version, at: excerpt.start, resume: true, end: excerpt.end)
     }
 
     private func trackEnded() {
-        if autoRunning, autoExcerpt != nil {
+        if autoRunning, let step = autoStep {
             print("AUTO END step=\(autoIndex + 1) sample=\(sample.id) version=\(version.suffix) actual=\(player.currentTime().seconds)")
-            if autoIndex + 1 < autoExcerpts.count * 2 {
-                autoIndex += 1
-                playAutoExcerpt()
+            let next = autoIndex + 1
+            if blind, !autoSteps.indices.contains(next) || autoSteps[next].excerpt != step.excerpt {
+                // Ask which of X and Y was closer to the reference before moving on.
+                awaitingVerdict = true
+            } else if autoSteps.indices.contains(next) {
+                autoIndex = next
+                playAutoStep()
                 return
+            } else {
+                cancelAuto()
+                autoCompleted = true
             }
+        }
+        pause()
+    }
+
+    func answer(_ verdict: Verdict) {
+        guard awaitingVerdict, let step = autoStep else { return }
+        let blindSteps = autoSteps.filter { $0.excerpt == step.excerpt && $0.version.isAPAC }
+        let result = BlindResult(sample: autoExcerpts[step.excerpt].sample, x: blindSteps[0].version,
+                                 y: blindSteps[1].version, verdict: verdict)
+        results.append(result)
+        print("BLIND RESULT sample=\(result.sample.id) x=\(result.x.suffix) y=\(result.y.suffix) verdict=\(verdict.rawValue) closer=\(result.closer?.suffix ?? "none")")
+        awaitingVerdict = false
+        if autoSteps.indices.contains(autoIndex + 1) {
+            autoIndex += 1
+            playAutoStep()
+        } else {
             cancelAuto()
             autoCompleted = true
         }
-        pause()
+    }
+
+    /// Plays the current excerpt's reference, X and Y again before answering.
+    func replayExcerpt() {
+        guard awaitingVerdict, let step = autoStep,
+              let first = autoSteps.firstIndex(where: { $0.excerpt == step.excerpt }) else { return }
+        awaitingVerdict = false
+        autoIndex = first
+        playAutoStep()
     }
 
     private func fail(_ message: String) {
@@ -262,7 +365,7 @@ struct AutoExcerpt {
     }
 
     func toggle() {
-        guard !loading else { return }
+        guard !loading, !awaitingVerdict else { return }
         if wantsPlayback { pause() } else { startPlayback() }
     }
 
@@ -323,6 +426,7 @@ struct ComparisonView: View {
         case sample(String)
         case version(Version)
         case auto
+        case verdict(Verdict?)
     }
 
     @State private var playback = Playback()
@@ -332,7 +436,7 @@ struct ComparisonView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 60) {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Atmos A/B").font(.largeTitle.bold())
+                Text(playback.blind ? "Atmos A/B/C" : "Atmos A/B").font(.largeTitle.bold())
                 Button {
                     if playback.autoRunning { playback.stopAuto() } else { playback.startAuto() }
                 } label: {
@@ -344,6 +448,17 @@ struct ComparisonView: View {
                     if direction == .right { focused = .version(playback.version) }
                 }
                 AutoStatusView(playback: playback)
+                if playback.awaitingVerdict {
+                    Text("Which was closer to the reference?").font(.headline)
+                    ForEach(Verdict.allCases, id: \.self) { verdict in
+                        Button(verdict.rawValue) { playback.answer(verdict) }
+                            .frame(width: 330, alignment: .leading)
+                            .focused($focused, equals: .verdict(verdict))
+                    }
+                    Button("Replay excerpt") { playback.replayExcerpt() }
+                        .frame(width: 330, alignment: .leading)
+                        .focused($focused, equals: .verdict(nil))
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         ForEach(Sample.all) { sample in
@@ -368,29 +483,33 @@ struct ComparisonView: View {
             .focusSection()
             VStack(alignment: .leading, spacing: 20) {
                 Text(playback.sample.name).font(.largeTitle)
-                Label("\(playback.trackStatus): \(playback.version.rawValue)", systemImage: playback.playing ? "speaker.wave.2.fill" : "pause.circle")
+                Label("\(playback.trackStatus): \(playback.versionLabel)", systemImage: playback.playing ? "speaker.wave.2.fill" : "pause.circle")
                     .font(.title2)
                 HStack(spacing: 24) {
-                    ForEach(Version.allCases, id: \.self) { version in
+                    let versions = Version.available
+                    ForEach(versions, id: \.self) { version in
+                        // Blind Auto hides which APAC version is playing.
+                        let selected = playback.version == version && !(playback.blind && playback.autoRunning)
                         Button { playback.load(sample: playback.sample, version: version) } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
-                                    .opacity(playback.version == version ? 1 : 0)
+                                    .opacity(selected ? 1 : 0)
                                 Text(version.rawValue)
                             }
                         }
                             .overlay {
                                 Capsule()
-                                    .stroke(playback.version == version ? Color.green : Color.clear, lineWidth: 3)
+                                    .stroke(selected ? Color.green : Color.clear, lineWidth: 3)
                             }
-                            .accessibilityAddTraits(playback.version == version ? .isSelected : [])
+                            .accessibilityAddTraits(selected ? .isSelected : [])
                             .focused($focused, equals: .version(version))
                             .onMoveCommand { direction in
+                                let index = versions.firstIndex(of: version) ?? 0
                                 if direction == .left {
-                                    focused = version == .apac ? .sample(playback.sample.id) : .version(.apac)
-                                } else if direction == .right && version == .apac {
-                                    focused = .version(.ddp)
+                                    focused = index == 0 ? .sample(playback.sample.id) : .version(versions[index - 1])
+                                } else if direction == .right, index + 1 < versions.count {
+                                    focused = .version(versions[index + 1])
                                 }
                             }
                     }
@@ -417,12 +536,18 @@ struct ComparisonView: View {
                 }
                 Text("Switching keeps the position and play/pause state. There is a short switching gap.").font(.callout).foregroundStyle(.secondary)
                 Text("APAC is our rendering of the TrueHD source. DDP Atmos is Deezy’s conversion of the same source.").font(.callout).foregroundStyle(.secondary)
+                if playback.blind {
+                    Text("Baseline APAC comes from an earlier library build. Auto plays the DDP reference, then both APAC versions as X and Y in random order.").font(.callout).foregroundStyle(.secondary)
+                }
                 Text("Output: \(playback.route) • Keep Apple TV audio on Auto with Dolby Atmos enabled.").font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .focusSection()
         }
         .padding(48)
         .onPlayPauseCommand { playback.toggle() }
+        .onChange(of: playback.awaitingVerdict) { _, awaiting in
+            if awaiting { focused = .verdict(.x) }
+        }
         .task {
             if ProcessInfo.processInfo.arguments.contains("--probe") { await RouteProbe.run(playback: playback) }
             if ProcessInfo.processInfo.arguments.contains("--auto-probe") { await RouteProbe.runAuto(playback: playback) }
@@ -440,15 +565,24 @@ private struct AutoStatusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let excerpt = playback.autoExcerpt {
-                Text("Pair \(playback.autoIndex / 2 + 1) of \(Sample.all.count) • \(playback.version == .apac ? "TrueHD → APAC" : "DDP")")
+            if let step = playback.autoStep, let excerpt = playback.autoExcerpt {
+                Text("\(playback.blind ? "Excerpt" : "Pair") \(step.excerpt + 1) of \(Sample.all.count) • \(step.label)")
                 Text("\(Int(min(20, max(0, playback.position - excerpt.start.seconds)))) / 20 seconds")
                     .monospacedDigit()
                 ProgressView(value: min(20, max(0, playback.position - excerpt.start.seconds)), total: 20)
             } else if playback.autoRunning {
                 Text("Preparing Auto mode…")
+            } else if playback.autoCompleted, playback.blind {
+                let closer = { (version: Version) in playback.results.filter { $0.closer == version }.count }
+                Text("Blind comparison complete")
+                Text("New closer: \(closer(.apac)) • Baseline closer: \(closer(.baseline)) • No difference: \(playback.results.filter { $0.closer == nil }.count)")
+                ForEach(playback.results, id: \.sample.id) { result in
+                    Text("\(result.sample.name): X \(result.x == .apac ? "new" : "baseline"), picked \(result.verdict.rawValue)")
+                }
             } else if playback.autoCompleted {
                 Text("Auto complete • All \(Sample.all.count) pairs played")
+            } else if playback.blind {
+                Text("Reference, X and Y for 20 seconds each, all \(Sample.all.count) excerpts.")
             } else {
                 Text("20 seconds per format, all \(Sample.all.count) pairs.")
             }

@@ -22,20 +22,22 @@ import Foundation
         do {
             playback.startAuto()
             var steps: [AutoStep] = []
-            let deadline = Date().addingTimeInterval(Double(Sample.all.count * 48 + 30))
+            let perExcerpt = playback.blind ? 3 : 2
+            let deadline = Date().addingTimeInterval(Double(Sample.all.count * perExcerpt * 24 + 30))
             while playback.autoRunning, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(250))
                 if let error = playback.error { throw ProbeFailure(message: error) }
-                guard playback.playing, !playback.loading, let excerpt = playback.autoExcerpt,
+                if playback.awaitingVerdict { playback.answer(.same) }
+                guard playback.playing, !playback.loading, let step = playback.autoStep, let excerpt = playback.autoExcerpt,
                       playback.position >= excerpt.start.seconds + 1,
                       steps.last?.step != playback.autoIndex + 1 else { continue }
                 let index = playback.autoIndex
                 guard index == steps.count,
-                      playback.sample == Sample.all[index / 2],
-                      playback.version == (index.isMultiple(of: 2) ? .apac : .ddp),
+                      playback.sample == Sample.all[step.excerpt],
+                      playback.version == step.version,
                       let item = playback.player.currentItem,
                       abs(item.forwardPlaybackEndTime.seconds - excerpt.end.seconds) < 0.0001,
-                      playback.silentAtmosActive == (playback.silentAtmosEnabled && playback.version == .apac) else {
+                      playback.silentAtmosActive == (playback.silentAtmosEnabled && playback.version.isAPAC) else {
                     throw ProbeFailure(message: "Unexpected sequence, endpoint or silent Atmos state at step \(index + 1).")
                 }
                 steps.append(AutoStep(step: index + 1, sample: playback.sample.id,
@@ -56,12 +58,12 @@ import Foundation
                     print("AUTO PROBE PAUSE/RESUME PASS")
                 }
             }
-            guard playback.autoCompleted, steps.count == Sample.all.count * 2, !playback.playing, !playback.silentAtmosActive else {
+            guard playback.autoCompleted, steps.count == Sample.all.count * perExcerpt, !playback.playing, !playback.silentAtmosActive else {
                 throw ProbeFailure(message: "Auto did not complete every excerpt and stop playback.")
             }
-            for index in stride(from: 0, to: steps.count, by: 2) {
-                guard steps[index].start == steps[index + 1].start,
-                      steps[index].end == steps[index + 1].end,
+            for index in stride(from: 0, to: steps.count, by: perExcerpt) {
+                let group = steps[index..<index + perExcerpt]
+                guard group.allSatisfy({ $0.start == steps[index].start && $0.end == steps[index].end }),
                       abs(steps[index].end - steps[index].start - 20) < 0.0001 else {
                     throw ProbeFailure(message: "The paired excerpts differ.")
                 }
@@ -109,7 +111,7 @@ import Foundation
         var reports: [[String: Any]] = []
         let output = URL.cachesDirectory.appendingPathComponent("route-probe.json")
         let cases: [(Sample, Version)] = ProcessInfo.processInfo.arguments.contains("--all-pairs")
-            ? Sample.all.flatMap { sample in Version.allCases.map { (sample, $0) } }
+            ? Sample.all.flatMap { sample in Version.available.map { (sample, $0) } }
             : [(Sample.all[0], .apac), (Sample.all[0], .ddp), (Sample.all[0], .apac)]
         do {
             for (sample, version) in cases {
