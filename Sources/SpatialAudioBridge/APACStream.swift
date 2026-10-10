@@ -27,6 +27,9 @@ public final class APACStream: Sendable {
         public var renditionName = "Spatial Audio"
         /// Segments converted ahead of the latest request, each about 3.2 seconds.
         public var lookahead = 6
+        /// Segments kept behind the latest request, so skipping back plays from memory. Each
+        /// segment holds about 1.6 MB at the default bit rate.
+        public var keptBehind = 20
         /// How long a segment request waits for conversion before failing.
         public var segmentTimeout: Duration = .seconds(30)
 
@@ -65,7 +68,8 @@ public final class APACStream: Sendable {
                                   segmentFrames: segmentFrames,
                                   priming: Int64(try configuration.encoderPrimingDuration().value),
                                   totalFrames: Int64((duration.seconds * 48_000).rounded(.up)),
-                                  lookahead: max(1, options.lookahead), timeout: options.segmentTimeout)
+                                  lookahead: max(1, options.lookahead), keptBehind: max(2, options.keptBehind),
+                                  timeout: options.segmentTimeout)
         var master: String?
         if let videoMaster {
             var request = URLRequest(url: videoMaster)
@@ -143,6 +147,8 @@ public final class APACStream: Sendable {
             }
         } catch StreamError.outOfRange {
             return .notFound()
+        } catch StreamError.superseded {
+            return .init(status: 503, body: Data("A later request moved conversion elsewhere\n".utf8))
         } catch StreamError.timedOut {
             return .init(status: 504, body: Data("Conversion did not keep up\n".utf8))
         } catch {
@@ -153,6 +159,8 @@ public final class APACStream: Sendable {
 
 enum StreamError: Error {
     case outOfRange
+    /// Conversion restarted elsewhere for a later request, so this segment will not arrive soon.
+    case superseded
     case timedOut
 }
 
@@ -169,6 +177,7 @@ actor StreamEngine {
     private let segmentFrames: Int64
     private let priming: Int64
     private let lookahead: Int
+    private let keptBehind: Int
     private let timeout: Duration
     private let store = SegmentStore()
     private var run: Run?
@@ -181,7 +190,7 @@ actor StreamEngine {
     }
 
     init(file: MatroskaFile, track: MatroskaAudioTrack, codec: SpatialAudioCodec, configuration: APACConfiguration,
-         segmentFrames: Int64, priming: Int64, totalFrames: Int64, lookahead: Int, timeout: Duration) {
+         segmentFrames: Int64, priming: Int64, totalFrames: Int64, lookahead: Int, keptBehind: Int, timeout: Duration) {
         self.file = file
         self.track = track
         self.codec = codec
@@ -190,6 +199,7 @@ actor StreamEngine {
         self.priming = priming
         self.totalFrames = totalFrames
         self.lookahead = lookahead
+        self.keptBehind = keptBehind
         self.timeout = timeout
     }
 
@@ -203,27 +213,24 @@ actor StreamEngine {
     func initialization() async throws -> Data {
         if let data = store.initialization { return data }
         if run == nil { startRun(at: requested) }
-        return try await wait { $0.initialization }
+        return try await wait(until: { $0.initialization })
     }
 
     func segment(_ index: Int) async throws -> Data {
         guard (0..<segmentCount).contains(index) else { throw StreamError.outOfRange }
         requested = index
-        store.keep(around: index, ahead: lookahead)
+        store.keep(around: index, behind: keptBehind, ahead: lookahead)
         if let data = store.segment(index) {
             log.debug("seg\(index) from cache")
             return data
         }
-        // Restart behind the run, at a segment it passed but no longer holds, or beyond what it
-        // will reach soon; otherwise wait for it.
-        let reach = max(run?.start ?? -1, store.highest) + lookahead + 1
-        if run == nil || index < run!.start || index <= store.highest || index > reach || store.ended(run: run!.id) {
+        if !waitsForRun(index) {
             log.info("seg\(index) restarts conversion; run started at \(self.run?.start ?? -1), converted \(self.store.highest)")
             startRun(at: index)
         }
         let waited = ContinuousClock.now
         do {
-            let data = try await wait { $0.segment(index) }
+            let data = try await wait(until: { $0.segment(index) }, while: { waitsForRun(index) })
             log.info("seg\(index) after \(Int((ContinuousClock.now - waited) / .milliseconds(1))) ms")
             return data
         } catch {
@@ -245,12 +252,27 @@ actor StreamEngine {
     /// The highest segment the current run has produced.
     var converted: Int { store.highest }
 
-    private func wait(for value: (SegmentStore) -> Data?) async throws -> Data {
+    /// Whether the current run will deliver segment `index` sooner than a new run would.
+    private func waitsForRun(_ index: Int) -> Bool {
+        guard let run else { return false }
+        return Self.waits(for: index, runStart: run.start, converted: store.highest, ended: store.ended(run: run.id))
+    }
+
+    /// A new run delivers its first segment in about two segments' conversion time, while each
+    /// segment after the converted one costs one more. AVPlayer abandons a seek whose first segment
+    /// takes longer than about 3 s, so wait only up to two segments past the converted point;
+    /// restart behind the run, past that, or at a segment the run passed but no longer holds.
+    static func waits(for index: Int, runStart: Int, converted: Int, ended: Bool) -> Bool {
+        !ended && index >= runStart && index > converted && index <= max(runStart + 1, converted + 2)
+    }
+
+    private func wait(until value: (SegmentStore) -> Data?, while wanted: () -> Bool = { true }) async throws -> Data {
         let deadline = ContinuousClock.now + timeout
         while true {
             if let data = value(store) { return data }
             if let run, let failure = store.failure(run: run.id) { throw failure }
-            if let run, store.ended(run: run.id) { throw StreamError.outOfRange }
+            // A later request restarted conversion elsewhere; the player has moved on.
+            guard wanted() else { throw StreamError.superseded }
             guard ContinuousClock.now < deadline else { throw StreamError.timedOut }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -377,9 +399,9 @@ final class SegmentStore: @unchecked Sendable {
     func failure(run: UUID) -> (any Error)? { lock.withLock { ends[run] ?? nil } }
 
     /// Keeps segments near the playback position and drops the rest.
-    func keep(around index: Int, ahead: Int) {
+    func keep(around index: Int, behind: Int, ahead: Int) {
         lock.withLock {
-            window = max(0, index - 2)..<(index + ahead + 3)
+            window = max(0, index - behind)..<(index + ahead + 3)
             segments = segments.filter { window.contains($0.key) }
         }
     }
