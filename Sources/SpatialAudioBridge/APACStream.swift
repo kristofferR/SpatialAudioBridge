@@ -63,8 +63,12 @@ public final class APACStream: Sendable {
                 ?? file.audioTracks.first(where: { $0.codec != nil }), let codec = track.codec else {
             throw SpatialAudioError.source("The file has no TrueHD or DTS track")
         }
-        guard let duration = file.duration, duration.seconds > 0 else {
+        // A malformed duration may be infinite or too long to count in frames.
+        guard let duration = file.duration, duration.seconds > 0, duration.seconds < 1e9 else {
             throw SpatialAudioError.source("The file does not declare its duration")
+        }
+        guard startTime.isNumeric else {
+            throw SpatialAudioError.invalidConfiguration("The start time must be finite")
         }
         var configuration = options.configuration
         guard (3...600).contains(configuration.syncPacketFrequency) else {
@@ -171,6 +175,8 @@ public final class APACStream: Sendable {
             return .init(status: 503, body: Data("A later request moved conversion elsewhere\n".utf8))
         } catch StreamError.timedOut {
             return .init(status: 504, body: Data("Conversion did not keep up\n".utf8))
+        } catch StreamError.stopped {
+            return .init(status: 410, body: Data("The stream has stopped\n".utf8))
         } catch {
             return .init(status: 500, body: Data("\(error)\n".utf8))
         }
@@ -182,6 +188,7 @@ enum StreamError: Error {
     /// Conversion restarted elsewhere for a later request, so this segment will not arrive soon.
     case superseded
     case timedOut
+    case stopped
 }
 
 /// Converts and caches segments, restarting conversion where playback needs it.
@@ -202,8 +209,14 @@ actor StreamEngine {
     private let store = SegmentStore()
     private var run: Run?
     private var requested = 0
+    /// Segments that requests are waiting for, one entry per request.
+    private var waiting: [Int] = []
     /// A decoding or encoding failure, which ends the stream so the host can fall back.
     private var failure: (any Error)?
+    private var stopped = false
+
+    /// The furthest segment playback wants: the latest request, or a waiting one further ahead.
+    private var demand: Int { max(requested, waiting.max() ?? requested) }
 
     private struct Run {
         let id: UUID
@@ -228,11 +241,13 @@ actor StreamEngine {
     var segmentCount: Int { Int((totalFrames + segmentFrames - 1) / segmentFrames) }
 
     nonisolated func index(at time: CMTime) -> Int {
-        let frame = Int64((max(time.seconds, 0) * 48_000).rounded(.down))
+        let seconds = min(max(time.seconds, 0), Double(totalFrames) / 48_000)
+        let frame = Int64((seconds * 48_000).rounded(.down))
         return Int(min(frame, totalFrames - 1) / segmentFrames)
     }
 
     func initialization() async throws -> Data {
+        guard !stopped else { throw StreamError.stopped }
         try checkFailure()
         if let data = store.initialization { return data }
         if run == nil { startRun(at: requested) }
@@ -241,9 +256,10 @@ actor StreamEngine {
 
     func segment(_ index: Int) async throws -> Data {
         guard (0..<segmentCount).contains(index) else { throw StreamError.outOfRange }
+        guard !stopped else { throw StreamError.stopped }
         try checkFailure()
         requested = index
-        store.keep(around: index, behind: keptBehind, ahead: lookahead)
+        store.keep(around: index, behind: keptBehind, ahead: demand - index + lookahead)
         if let data = store.segment(index) {
             log.debug("seg\(index) from cache")
             return data
@@ -253,6 +269,8 @@ actor StreamEngine {
             startRun(at: index)
         }
         let waited = ContinuousClock.now
+        waiting.append(index)
+        defer { if let entry = waiting.firstIndex(of: index) { waiting.remove(at: entry) } }
         do {
             let data = try await wait(until: { $0.segment(index) }, while: { waitsForRun(index) })
             log.info("seg\(index) after \(Int((ContinuousClock.now - waited) / .milliseconds(1))) ms")
@@ -263,7 +281,9 @@ actor StreamEngine {
         }
     }
 
+    /// Ends conversion for good; requests already on their way are refused.
     func stop() {
+        stopped = true
         run?.task.cancel()
         run = nil
     }
@@ -307,6 +327,7 @@ actor StreamEngine {
         let deadline = ContinuousClock.now + timeout
         while true {
             if let data = value(store) { return data }
+            guard !stopped else { throw StreamError.stopped }
             try checkFailure()
             if let run, let failure = store.failure(run: run.id) { throw failure }
             // A later request restarted conversion elsewhere; the player has moved on.
@@ -355,11 +376,11 @@ actor StreamEngine {
         run = Run(id: id, start: index, task: task)
     }
 
-    /// Holds the run while it is `lookahead` segments ahead of the latest request.
+    /// Holds the run while it is `lookahead` segments ahead of what playback wants.
     private func paceRun(_ id: UUID) async {
-        guard run?.id == id, store.highest >= requested + lookahead else { return }
+        guard run?.id == id, store.highest >= demand + lookahead else { return }
         store.holding(true, run: id)
-        while run?.id == id, !Task.isCancelled, store.highest >= requested + lookahead {
+        while run?.id == id, !Task.isCancelled, store.highest >= demand + lookahead {
             try? await Task.sleep(for: .milliseconds(50))
         }
         store.holding(false, run: id)

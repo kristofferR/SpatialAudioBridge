@@ -219,6 +219,24 @@ struct APACStreamFixtureTests {
         await stream.stop()
     }
 
+    /// A request served from the cache must not hold conversion back from a request waiting further ahead.
+    @Test func cachedRequestsKeepConvertingForAWaitingRequest() async throws {
+        var options = APACStream.Options()
+        options.lookahead = 2
+        options.segmentTimeout = .seconds(10)
+        let stream = try await APACStream.start(file: try await open(), options: options)
+        let base = stream.audioPlaylistURL.deletingLastPathComponent()
+        // Conversion holds at segment 2, close enough for a request for segment 4 to wait.
+        while await stream.engine.converted < 2 { try await Task.sleep(for: .milliseconds(50)) }
+        async let ahead = get(base.appendingPathComponent("seg4.m4s"))
+        try await Task.sleep(for: .milliseconds(100))
+        _ = try await get(base.appendingPathComponent("seg1.m4s"))
+        _ = try await ahead
+        await stream.stop()
+        // A stopped stream refuses requests that were already on their way.
+        await #expect(throws: StreamError.self) { try await stream.engine.segment(5) }
+    }
+
     @Test func avPlayerPlaysAndSeeksTheStream() async throws {
         let stream = try await APACStream.start(file: try await open())
         let player = AVPlayer(url: stream.audioPlaylistURL)
