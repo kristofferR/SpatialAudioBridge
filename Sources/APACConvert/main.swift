@@ -48,9 +48,13 @@ import AVFoundation
         if let header = ProcessInfo.processInfo.environment["SAB_HTTP_HEADER"], let colon = header.firstIndex(of: ":") {
             headers[String(header[..<colon])] = header[header.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
-        let base: any MediaByteSource = input.hasPrefix("http")
-            ? HTTPByteSource(url: URL(string: input)!, headers: headers)
-            : FileByteSource(url: URL(fileURLWithPath: input))
+        let base: any MediaByteSource
+        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+            guard let url = URL(string: input) else { throw SpatialAudioError.source("Malformed URL: \(input)") }
+            base = HTTPByteSource(url: url, headers: headers)
+        } else {
+            base = FileByteSource(url: URL(fileURLWithPath: input))
+        }
         let source = CountingSource(base: base)
         let opened = Date()
         let file = try await MatroskaFile.open(source)
@@ -58,8 +62,9 @@ import AVFoundation
             print("track \(track.number): \(track.codecID) \(track.channels)ch \(track.language ?? "-") \(track.name ?? "")\(track.isDefault ? " default" : "")")
         }
         let track = try option("--track").map { number in
-            guard let track = file.audioTracks.first(where: { $0.number == UInt64(number) }) else {
-                throw SpatialAudioError.source("No audio track \(Int(number))")
+            guard number >= 1, number.rounded() == number, number <= Double(UInt64.max),
+                  let track = file.audioTracks.first(where: { $0.number == UInt64(number) }) else {
+                throw SpatialAudioError.source("No audio track \(number)")
             }
             return track
         } ?? file.audioTracks.first { $0.codec != nil && $0.isDefault } ?? file.audioTracks.first { $0.codec != nil }
