@@ -44,6 +44,10 @@ SAB_DEVELOPMENT_TEAM="YOUR_TEAM_ID" ./build-and-install.sh "DEVICE_ID" "/path/to
 
 Or run `./prepare-media.sh "/path/to/prepared/media"`, generate with `xcodegen generate`, and open the generated project in Xcode. Builds use one job. Media, extra manifests, generated projects, build products and device logs are ignored by Git.
 
+### Blind comparison against a baseline
+
+To compare a library change, also supply `<id>.APAC-baseline.mp4` for every sample, converted with the earlier build. Match its level to the new conversion, for example by giving the baseline the same gain, so only the change under test differs. The app then offers a third version, and Auto mode becomes a blind test. For each excerpt it plays the DDP reference, then both APAC versions as X and Y in random order, and asks which was closer to the reference. **Replay excerpt** plays all three again. At the end it reveals each assignment and the tally, and prints a `BLIND RESULT` line per excerpt to the device log. With the near-silent stream running for both APAC versions, nothing but the audio tells X and Y apart.
+
 Additional pairs are appended from `Media/extra-samples.json`, a JSON array of `{"id":"movie-id","name":"Movie name"}` entries. Each entry uses `Media/<id>.APAC.mp4` and `Media/<id>.DDP.mp4`. Auto includes every listed pair for 40 seconds per pair plus switching gaps, and requires at least 20 seconds in both files. Keep private movie names and media in the ignored manifest and Media folder.
 
 ## Validation
