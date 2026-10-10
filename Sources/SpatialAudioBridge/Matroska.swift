@@ -190,6 +190,7 @@ final class PacketReader {
     private let file: MatroskaFile
     private let track: MatroskaAudioTrack
     private let target: Int64
+    private let targetIsNumeric: Bool
     private let window: ByteWindow
     private var started = false
     private var seeking = true
@@ -201,13 +202,17 @@ final class PacketReader {
     init(file: MatroskaFile, track: MatroskaAudioTrack, target: CMTime) {
         self.file = file
         self.track = track
-        self.target = Int64((max(target.seconds, 0) * 1e9 / Double(file.timestampScale)).rounded(.down))
+        // A non-finite time fails on the first read; a time past about 30 years is clamped to fit.
+        targetIsNumeric = target.isNumeric
+        let seconds = targetIsNumeric ? min(max(target.seconds, 0), 1e9) : 0
+        self.target = Int64((seconds * 1e9 / Double(file.timestampScale)).rounded(.down))
         window = ByteWindow(source: file.source, length: file.length, chunk: 2 * 1024 * 1024)
     }
 
     func next() async throws -> MatroskaPacket? {
         if !started {
             started = true
+            guard targetIsNumeric else { throw SpatialAudioError.invalidConfiguration("The seek time must be finite") }
             if let unsupported = track.unsupportedEncoding {
                 throw SpatialAudioError.source("Matroska track \(track.number) is \(unsupported)")
             }

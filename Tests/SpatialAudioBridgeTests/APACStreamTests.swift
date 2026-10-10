@@ -60,6 +60,24 @@ import Testing
     #expect(!master.contains("avc1"))
 }
 
+@Test func masterPlaylistAddsNoCodecsToAVariantWithout() {
+    let upstream = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=42000000\nmain.m3u8\n"
+    let master = HLSPlaylists.master(rewriting: upstream, baseURL: URL(string: "http://server/master.m3u8")!,
+                                     rendition: HLSPlaylists.rendition(name: "Atmos", language: nil, channels: 16),
+                                     codec: "apac.31.04", bitRate: 4_096_000)
+    #expect(!master.contains("CODECS"))
+    #expect(master.contains("AUDIO="))
+}
+
+/// The transcoder times audio by its samples, so a gap or reset in packet times must end a run.
+@Test func timestampGapsAndResetsBreakContinuity() {
+    func at(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1000) }
+    #expect(StreamEngine.continues(from: at(10), to: at(10)))
+    #expect(StreamEngine.continues(from: at(10), to: at(10.04)))
+    #expect(!StreamEngine.continues(from: at(10), to: at(11)))
+    #expect(!StreamEngine.continues(from: at(10), to: at(0)))
+}
+
 /// After a seek, AVPlayer allows about 3 s for the first segment and requests every scrub
 /// position; only segments the current run will reach within about two conversions are worth waiting for.
 @Test func requestsWaitOnlyForSegmentsTheRunReachesSoon() {
