@@ -55,7 +55,21 @@ pub struct TrueHd {
     spatial: bool,
     held: Vec<Vec<Vec<f32>>>,
     held_frames: usize,
+    /// Dialogue normalisation gain signalled at the latest major sync, and the gain applied
+    /// at the end of the previous access unit.
+    dialogue: f32,
+    level: Option<f32>,
 }
+
+/// The attenuation a native decoder applies so that dialogue plays at −31 dBFS.
+fn dialogue_gain(norm: u8) -> f32 {
+    if (1..=31).contains(&norm) {
+        10f32.powf((f32::from(norm) - 31.) / 20.)
+    } else {
+        1.
+    }
+}
+
 impl TrueHd {
     fn new(layout: Layout) -> Self {
         Self {
@@ -69,6 +83,8 @@ impl TrueHd {
             spatial: false,
             held: Vec::new(),
             held_frames: 0,
+            dialogue: 1.,
+            level: None,
         }
     }
     fn push(
@@ -101,6 +117,13 @@ impl TrueHd {
             {
                 return Err("This TrueHD stream has no Atmos presentation".into());
             }
+            if let Some(extra) = au
+                .major_sync_info
+                .as_ref()
+                .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
+            {
+                self.dialogue = dialogue_gain(extra.sixteench_dialogue_norm);
+            }
             self.decoder
                 .decode_presentation_into(&au, 3, &mut self.decoded)
                 .map_err(|e| format!("TrueHD decoding: {e}"))?;
@@ -111,10 +134,16 @@ impl TrueHd {
                 return Err("The initial Atmos renderer supports 48 kHz tracks".into());
             }
             let frames = self.decoded.sample_length;
+            // A changed dialogue level ramps over one access unit.
+            let (from, to) = (self.level.unwrap_or(self.dialogue), self.dialogue);
+            self.level = Some(to);
             let input: Vec<Vec<f32>> = (0..self.decoded.channel_count)
                 .map(|ch| {
                     (0..frames)
-                        .map(|s| self.decoded.pcm_data[s][ch] as f32 / 8_388_608.)
+                        .map(|s| {
+                            let gain = from + (to - from) * (s + 1) as f32 / frames as f32;
+                            self.decoded.pcm_data[s][ch] as f32 / 8_388_608. * gain
+                        })
                         .collect()
                 })
                 .collect();
@@ -670,6 +699,13 @@ mod metadata_tests {
         let diverged = render(&metadata).unwrap();
         assert!((diverged[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
         assert!(diverged[2] < 1e-6);
+    }
+
+    #[test]
+    fn dialogue_normalisation_attenuates_like_a_native_decoder() {
+        assert_eq!(dialogue_gain(31), 1.);
+        assert!((20. * dialogue_gain(27).log10() + 4.).abs() < 1e-5);
+        assert_eq!(dialogue_gain(0), 1.);
     }
 
     #[test]

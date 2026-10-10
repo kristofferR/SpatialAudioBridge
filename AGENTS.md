@@ -23,7 +23,7 @@ None of the surveyed open-source Apple TV players expose compressed audio packet
 ## Current baseline
 
 - Experimental, with tvOS 26+ and macOS 26+ encoding requirements.
-- 48 kHz TrueHD Atmos with one bed; objects follow the ETSI TS 103 448 source panner, including size, divergence, snap, zones, trim, gain, activity, timed updates and ramps.
+- 48 kHz TrueHD Atmos with one bed; objects follow the ETSI TS 103 448 source panner, including size, divergence, snap, zones, trim, gain, activity, timed updates and ramps, and TrueHD dialogue normalisation is applied.
 - 48 kHz lossless DTS:X standard four-height and known alternate object presentations; resolved spatial folds are removed from the compatible bed before recombination. Alternate profiles are experimental, with physical-angle panning and frame-length object ramps.
 - APAC 7.1.4 and 9.1.6 output, including files, HLS fragments and sample buffers. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).
 - On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K title with video and Atmos output, converting at about 3.2× real time and recovering from every scripted seek (1–14 s); `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`.
