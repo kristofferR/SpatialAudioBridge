@@ -43,6 +43,36 @@ import Testing
     #expect(lines.contains(#"#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=7480,RESOLUTION=320x132,CODECS="jpeg",URI="http://server:8096/videos/42/Trickplay/320/tiles.m3u8?x=1""#))
 }
 
+/// After a seek, AVPlayer allows about 3 s for the first segment and requests every scrub
+/// position; only segments the current run will reach within about two conversions are worth waiting for.
+@Test func requestsWaitOnlyForSegmentsTheRunReachesSoon() {
+    // A fresh run at 10 has converted nothing yet.
+    #expect(StreamEngine.waits(for: 10, runStart: 10, converted: -1, ended: false))
+    #expect(StreamEngine.waits(for: 11, runStart: 10, converted: -1, ended: false))
+    #expect(!StreamEngine.waits(for: 12, runStart: 10, converted: -1, ended: false))
+    #expect(!StreamEngine.waits(for: 9, runStart: 10, converted: -1, ended: false))
+    // A run that has converted through 15.
+    #expect(StreamEngine.waits(for: 17, runStart: 10, converted: 15, ended: false))
+    #expect(!StreamEngine.waits(for: 18, runStart: 10, converted: 15, ended: false))
+    #expect(!StreamEngine.waits(for: 14, runStart: 10, converted: 15, ended: false), "passed and dropped: restart")
+    #expect(!StreamEngine.waits(for: 16, runStart: 10, converted: 15, ended: true))
+}
+
+@Test func segmentStoreKeepsRecentSegmentsBehindTheRequest() {
+    let store = SegmentStore()
+    let run = UUID()
+    store.begin(run: run)
+    for index in 0..<40 {
+        store.deliver(APACSegment(kind: .media, data: Data([UInt8(index)]), startTime: CMTime(value: Int64(index) * 153_600, timescale: 48_000),
+                                  duration: CMTime(value: 153_600, timescale: 48_000)), run: run, segmentFrames: 153_600)
+    }
+    store.keep(around: 30, behind: 20, ahead: 6)
+    #expect(store.segment(9) == nil)
+    #expect(store.segment(10) != nil)
+    #expect(store.segment(38) != nil)
+    #expect(store.segment(39) == nil)
+}
+
 @Test func loopbackServerAnswersGetsRangesAndUnknownPaths() async throws {
     let body = Data((0..<100).map { UInt8($0) })
     let server = try await LoopbackServer { path in
