@@ -32,6 +32,10 @@ public final class APACStream: Sendable {
         public var keptBehind = 20
         /// How long a segment request waits for conversion before failing.
         public var segmentTimeout: Duration = .seconds(30)
+        /// Chooses which of the video master's variants to offer, given each variant's playlist URL.
+        /// Media servers often add transcoding fallbacks, which AVPlayer switches to when a segment
+        /// is slow; Jellyfin's stream-copy variant is the one with `AllowVideoStreamCopy=true`.
+        public var includesVideoVariant: @Sendable (URL) -> Bool = { _ in true }
 
         public init() {}
     }
@@ -81,8 +85,13 @@ public final class APACStream: Sendable {
             }
             let rendition = HLSPlaylists.rendition(name: options.renditionName, language: track.language,
                                                    channels: configuration.layout.channelCount)
-            master = HLSPlaylists.master(rewriting: text, baseURL: videoMaster, rendition: rendition,
-                                         codec: configuration.layout.apacCodecString, bitRate: configuration.bitRate)
+            let rewritten = HLSPlaylists.master(rewriting: text, baseURL: videoMaster, rendition: rendition,
+                                                codec: configuration.layout.apacCodecString, bitRate: configuration.bitRate,
+                                                includesVariant: options.includesVideoVariant)
+            guard rewritten.contains("#EXT-X-STREAM-INF:") else {
+                throw SpatialAudioError.source("The video playlist has no variant to play")
+            }
+            master = rewritten
         }
         let token = UUID().uuidString.lowercased()
         let media = HLSPlaylists.media(totalFrames: engine.totalFrames, segmentFrames: segmentFrames, rate: 48_000)
