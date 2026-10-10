@@ -9,7 +9,7 @@ TrueHD Atmos / DTS:X ─▶ decode ─▶ render objects to 7.1.4 / 9.1.6 ─▶
 ```
 
 > [!NOTE]
-> Experimental. Tested end to end on an Apple TV 4K (2nd generation) with tvOS 27.2 beta, an Atmos receiver and Jellyfin. The renderer approximates object placement; it is not a Dolby or DTS reference renderer. See [validation](docs/validation.md) for what is and is not established.
+> Experimental. Tested end to end on an Apple TV 4K (2nd generation) with tvOS 27.2 beta, an Atmos receiver and Jellyfin. Atmos objects follow Dolby's published consumer renderer specification (ETSI TS 103 448), but this is not a licensed Dolby or DTS renderer. See [validation](docs/validation.md) for what is and is not established.
 
 ## Quick start
 
@@ -48,16 +48,16 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 
 | Input / output | Status |
 |---|---|
-| TrueHD Atmos, 48 kHz, one bed, point objects | Supported, including starts at any major sync |
-| Object position, extended precision, gain, activity, elevation enable, timing and ramps | Supported; separate bed and height angular panning |
+| TrueHD Atmos, 48 kHz, one bed | Supported, including starts at any major sync |
+| Atmos object position, size, divergence, snap, zones, trim, gain, activity, timing and ramps | Supported; ETSI TS 103 448 source panner |
 | DTS:X standard four-height presentation, 48 kHz | Supported |
 | DTS:X known alternate and IMAX object presentations, 48 kHz lossless | Experimental: D0, D1, D3 and D4, three-component D0 and object-only routing |
 | Matroska (MKV, MKA), local or over HTTP range requests | Supported, with cue-based seeking |
 | APAC 7.1.4 and 9.1.6: MP4 files, HLS fragments, sample buffers | Supported; decoded by Apple's decoder in tests |
 | `AVPlayer` playback with on-demand conversion and seeking | Verified on Apple TV with Jellyfin |
 | `AVSampleBufferAudioRenderer` playback | Atmos and channel placement verified on Apple TV |
-| Atmos ISF, multiple beds, nonzero object sizes | Rejected |
-| Atmos trims, bed distribution/downmix, divergence, snap, screen/distance/zone controls | Rejected |
+| Atmos ISF, multiple beds, bed distribution or downmix metadata | Rejected |
+| Atmos objects outside the room, warped positions | Rejected |
 | Unknown DTS:X profiles, mismatched source roles, unresolved folds | Rejected |
 | M2TS and MP4 containers | Use the host's demuxer with `SpatialAudioTranscoder` |
 

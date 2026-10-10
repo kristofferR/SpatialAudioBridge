@@ -1,11 +1,11 @@
-use crate::render::{Event, Gains, Layout, Renderer, Speaker};
+use crate::render::{Event, Gains, Layout, Object, Renderer, Speaker};
 use truehd::{
     process::{
         decode::{DecodedAccessUnit, Decoder},
         extract::Extractor,
         parse::Parser,
     },
-    structs::oamd::ObjectAudioMetadataPayload,
+    structs::oamd::{ObjectAudioMetadataPayload, TrimElement},
     utils::errors::ExtractError,
 };
 
@@ -220,24 +220,12 @@ fn for_each_block(
     if program.b_bed_chan_distribute {
         return Err("Atmos bed channel distribution is not yet supported".into());
     }
-    if metadata.trim_element.is_some() {
-        return Err("Atmos trim metadata is not yet supported".into());
-    }
     if metadata.bed_object_element.is_some() {
         return Err("Atmos bed downmix metadata is not yet supported".into());
     }
-    if metadata
-        .extended_object_element
-        .as_ref()
-        .is_some_and(|extended| {
-            extended
-                .object_div_block
-                .iter()
-                .flatten()
-                .any(|block| block.b_object_divergence)
-        })
-    {
-        return Err("Atmos object divergence is not yet supported".into());
+    let trim = metadata.trim_element.as_ref();
+    if trim.is_some_and(|trim| trim.warp_mode != 0) {
+        return Err("Atmos warped object positions are not yet supported".into());
     }
     let element = metadata
         .object_element
@@ -258,6 +246,7 @@ fn for_each_block(
         .map(|b| b.to_index_vec())
         .unwrap_or_default();
     let positions = metadata.get_damf_pos();
+    let divergence = metadata.extended_object_element.as_ref();
     use Speaker::*;
     let bed_speakers = [
         L, R, C, Lfe, Ls, Rs, Lb, Rb, Tfl, Tfr, Tsl, Tsr, Tbl, Tbr, Lw, Rw, Lfe,
@@ -278,36 +267,40 @@ fn for_each_block(
                 let index = *beds.get(channel).ok_or("Atmos bed assignment mismatch")?;
                 renderer
                     .panner
-                    .speaker(*bed_speakers.get(index).ok_or("Unknown Atmos bed speaker")?)
+                    .bed(*bed_speakers.get(index).ok_or("Unknown Atmos bed speaker")?)
             } else {
-                let pos = positions
+                let [x, y, z] = *positions
                     .get(channel)
                     .and_then(|v| v.get(block_index))
                     .ok_or("Missing Atmos object position")?;
-                if pos.iter().any(|x| !x.is_finite()) {
+                if [x, y, z].iter().any(|x| !x.is_finite()) {
                     return Err("Invalid Atmos object position".into());
                 }
                 let info = &block.object_render_info;
-                if info.object_size.iter().any(|s| *s != 0.) {
-                    return Err("Atmos objects with nonzero size are not yet supported".into());
-                }
-                if info.b_object_snap {
-                    return Err("Atmos object snap is not yet supported".into());
-                }
-                if info.zone_constraints_idx != 0 {
-                    return Err("Atmos object zone constraints are not yet supported".into());
-                }
-                if info.b_object_use_screen_ref {
-                    return Err("Atmos screen-referenced objects are not yet supported".into());
-                }
                 if info.b_object_distance_specified {
-                    return Err("Atmos object distance rendering is not yet supported".into());
+                    return Err("Atmos objects outside the room are not yet supported".into());
                 }
-                let mut position = pos.map(|v| v as f32);
-                if !info.b_enable_elevation {
-                    position[2] = 0.;
+                if info.zone_constraints_idx > 5 {
+                    return Err("Reserved Atmos zone constraint".into());
                 }
-                renderer.panner.object(position)
+                let object = renderer.panner.preprocess(Object {
+                    // From DAMF coordinates to TS 103 448 room coordinates.
+                    position: [x / 2. + 0.5, 0.5 - y / 2., z].map(|v| v as f32),
+                    size: info.object_size.map(|s| s as f32),
+                    divergence: divergence
+                        .and_then(|e| e.object_div_block.get(channel)?.get(block_index))
+                        .filter(|d| d.b_object_divergence)
+                        .map_or(0., |d| d.object_divergence as f32),
+                    // Screen anchoring assumes the screen spans the front pair, which leaves
+                    // positions unchanged, but still disables snap (TS 103 448 clause 5.1.2.2).
+                    snap: info.b_object_snap && !info.b_object_use_screen_ref,
+                    zone: info.zone_constraints_idx,
+                    elevation: info.b_enable_elevation,
+                });
+                let mut gains = renderer.panner.object(&object);
+                let trim = trim_gain(trim, channel, object.position);
+                gains.iter_mut().for_each(|g| *g *= trim);
+                gains
             };
             let gain = if block.b_object_not_active || block.object_basic_info.object_gain == -128 {
                 0.
@@ -331,6 +324,29 @@ fn for_each_block(
         }
     }
     Ok(())
+}
+
+/// Trim gain of an object at a preprocessed position (TS 103 448 clause 5.3). Both layouts use
+/// trim configuration 8, where the default trim is 0 dB and the centre trim does not apply.
+/// TS 103 448 has no balance control, so balance metadata is ignored.
+fn trim_gain(trim: Option<&TrimElement>, object: usize, [_, y, z]: [f32; 3]) -> f32 {
+    let Some(trim) = trim else { return 1. };
+    if trim.global_trim_mode != 2 || trim.b_disable_trim.get(object) == Some(&true) {
+        return 1.;
+    }
+    match &trim.trims[8] {
+        Some(custom) if !custom.b_default_trim && !custom.b_disable_trim => {
+            let surround = custom.trim_surround.unwrap_or(0.) as f32;
+            let height = custom.trim_height.unwrap_or(0.) as f32;
+            let front_to_back = if y >= 0.5 {
+                surround
+            } else {
+                surround * 2. * y
+            };
+            10f32.powf((front_to_back + height * z.abs()) / 20.)
+        }
+        _ => 1.,
+    }
 }
 
 pub struct Dts {
@@ -559,6 +575,7 @@ mod metadata_tests {
     use truehd::structs::oamd::{
         BlockUpdateInfo, ExtendedObjectElement, ExtendedPrecisionPositionBlock, MDUpdateInfo,
         ObjectBasicInfo, ObjectDivergenceBlock, ObjectElement, ObjectInfoBlock, ObjectRenderInfo,
+        Trim,
     };
 
     fn point() -> ObjectAudioMetadataPayload {
@@ -608,16 +625,89 @@ mod metadata_tests {
     }
 
     #[test]
+    fn object_controls_reach_the_panner() {
+        let rendered = |set: fn(&mut ObjectRenderInfo)| {
+            let mut metadata = point();
+            set(&mut block(&mut metadata).object_render_info);
+            render(&metadata).unwrap()
+        };
+        // Screen-only zone: a rear-left object plays from the front left.
+        let zoned = rendered(|i| {
+            i.pos3d = [0., 1., 0.];
+            i.zone_constraints_idx = 4;
+        });
+        assert_eq!(zoned[0], 1.);
+        // Snap moves a nearby object onto the left speaker, unless it is screen-anchored.
+        let snapped = rendered(|i| {
+            i.pos3d = [0.1, 0.05, 0.];
+            i.b_object_snap = true;
+        });
+        assert_eq!(snapped[0], 1.);
+        let anchored = rendered(|i| {
+            i.pos3d = [0.1, 0.05, 0.];
+            i.b_object_snap = true;
+            i.b_object_use_screen_ref = true;
+        });
+        assert!(anchored[0] < 1. && anchored[2] > 0.);
+        // Size spreads the room centre beyond the side pair.
+        let sized = rendered(|i| {
+            i.pos3d = [0.5, 0.5, 0.];
+            i.object_size = [0.5; 3];
+        });
+        assert!(sized.iter().filter(|g| **g > 0.05).count() > 2);
+        // Full divergence of a centre object plays from the front pair.
+        let mut metadata = point();
+        block(&mut metadata).object_render_info.pos3d = [0.5, 0., 0.];
+        metadata.extended_object_element = Some(ExtendedObjectElement {
+            b_obj_div_block: true,
+            object_div_block: vec![vec![ObjectDivergenceBlock {
+                b_object_divergence: true,
+                object_divergence: 1.,
+                ..Default::default()
+            }]],
+            ..Default::default()
+        });
+        let diverged = render(&metadata).unwrap();
+        assert!((diverged[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        assert!(diverged[2] < 1e-6);
+    }
+
+    #[test]
+    fn custom_trim_attenuates_surround_and_height_positions() {
+        let mut metadata = point();
+        block(&mut metadata).object_render_info.pos3d = [0., 1., 1.];
+        let mut trims: [Option<Trim>; 9] = Default::default();
+        trims[8] = Some(Trim {
+            b_default_trim: false,
+            trim_surround: Some(-6.),
+            trim_height: Some(-3.),
+            ..Default::default()
+        });
+        metadata.trim_element = Some(TrimElement {
+            global_trim_mode: 2,
+            trims,
+            ..Default::default()
+        });
+        let peak =
+            |m: &ObjectAudioMetadataPayload| render(m).unwrap().into_iter().fold(0., f32::max);
+        assert!((peak(&metadata) - 10f32.powf(-9. / 20.)).abs() < 1e-6);
+        let trim = metadata.trim_element.as_mut().unwrap();
+        trim.b_disable_trim = vec![true];
+        assert_eq!(peak(&metadata), 1.);
+        let trim = metadata.trim_element.as_mut().unwrap();
+        trim.b_disable_trim.clear();
+        trim.trims[8] = Some(Trim::default());
+        assert_eq!(peak(&metadata), 1.);
+    }
+
+    #[test]
     fn unsupported_object_controls_fail_explicitly() {
-        let cases: [Control<ObjectRenderInfo>; 5] = [
-            ("size", |i| i.object_size[0] = 0.1),
-            ("snap", |i| i.b_object_snap = true),
-            ("zone", |i| i.zone_constraints_idx = 1),
-            ("screen", |i| i.b_object_use_screen_ref = true),
-            ("distance", |i| {
+        let cases: [Control<ObjectRenderInfo>; 2] = [
+            ("outside the room", |i| {
                 i.b_object_distance_specified = true;
                 i.distance_factor = Some(2.);
             }),
+            ("zone", |i| i.zone_constraints_idx = 6),
         ];
         for (name, set) in cases {
             let mut metadata = point();
@@ -630,22 +720,16 @@ mod metadata_tests {
 
     #[test]
     fn unsupported_program_controls_fail_explicitly() {
-        let cases: [Control<ObjectAudioMetadataPayload>; 4] = [
+        let cases: [Control<ObjectAudioMetadataPayload>; 3] = [
             ("distribution", |m| {
                 m.program_assignment.b_bed_chan_distribute = true
             }),
-            ("trim", |m| m.trim_element = Some(Default::default())),
             ("downmix", |m| {
                 m.bed_object_element = Some(Default::default())
             }),
-            ("divergence", |m| {
-                m.extended_object_element = Some(ExtendedObjectElement {
-                    b_obj_div_block: true,
-                    object_div_block: vec![vec![ObjectDivergenceBlock {
-                        b_object_divergence: true,
-                        object_divergence: 0.5,
-                        ..Default::default()
-                    }]],
+            ("warped", |m| {
+                m.trim_element = Some(TrimElement {
+                    warp_mode: 1,
                     ..Default::default()
                 })
             }),
