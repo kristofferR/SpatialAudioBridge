@@ -89,7 +89,7 @@ import AVFoundation
                 transcoder = try SpatialAudioTranscoder(codec: codec, destination: .file(output),
                                                         configuration: configuration)
             }
-            try await transcoder!.append(packet.data)
+            try await transcoder!.append(packet.data, time: packet.time)
         }
         guard let transcoder else { throw SpatialAudioError.source("The track has no audio after the start time") }
         let report = try await transcoder.finish()
