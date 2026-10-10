@@ -26,7 +26,10 @@ let stream = try await APACStream.start(file: file, videoMaster: serverHLSURL, s
 let atmos = AtmosOutputActivator(silentAtmosStream: silentAtmosURL)
 atmos.attach(to: player)
 player.replaceCurrentItem(with: AVPlayerItem(url: stream.masterPlaylistURL!))
+await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
 player.play()
+// Keep both for as long as playback lasts: releasing either stops it.
+(self.stream, self.atmos) = (stream, atmos)
 ```
 
 The stream reads the MKV's TrueHD or DTS track over HTTP range requests, converts it on demand, and serves it from the loopback interface as an HLS audio rendition beside the server's video. Seeking works anywhere: segments from every conversion run share one timeline with the video. If the track cannot be converted, `start` throws and the player falls back to its usual path.

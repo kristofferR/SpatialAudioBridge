@@ -33,11 +33,11 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 
 | Check | Result |
 |---|---|
-| Matroska reader | Synthetic files cover track metadata, header stripping, all lacing modes, block groups, cues through the seek head and seeking to the last sync at or before the target |
+| Matroska reader | Synthetic files cover track metadata, header stripping, all lacing modes, block groups, cues and metadata found through the seek head, seeking to the last sync at or before the target, seeking into a laced block and rejecting malformed lacing |
 | Real Matroska file | The Helicopter MKV's TrueHD track is byte-identical to the FFmpeg extraction; a 30-second seek starts at a sync within 0.1 s |
 | Matroska over HTTP | From Jellyfin, 8-second conversions from 10:00 succeeded for one TrueHD Atmos and two DTS:X 4K remuxes; seeks reached a sync 21–64 ms before the target |
 | `APACStream` segment grid | Every segment starts at N × 153,600 frames and lasts 153,600 frames, including after jumps forward and back; a restarted segment correlates above 0.99 with the continuous one after the priming |
-| `APACStream` pacing | Conversion holds at the lookahead while no requests arrive, then serves later segments without restarting |
+| `APACStream` pacing | Conversion holds at the lookahead while no requests arrive, then serves later segments without restarting; a request served from the cache does not hold back one waiting further ahead |
 | `APACStream` with `AVPlayer` | macOS `AVPlayer` plays the audio playlist and continues after an exact seek to 0:40 |
 | Playlist rewriting and loopback server | Video masters keep absolute URIs, subtitles and I-frame and image playlists; the server answers GET, HEAD, byte ranges and unknown paths |
 | `SpatialAudioRenderer` | From a 20-second seek into the MKV fixture, macOS renders APAC and the synchronizer advances |
@@ -73,7 +73,7 @@ In two other runs, the three quick skips back made Jellyfin abort a video segmen
 
 ## Coverage
 
-The suite includes 11 Rust unit tests, 3 Rust fixture tests and 32 Swift tests. Without fixture variables, 23 Swift tests run: configuration, playlists and variant filtering, the loopback server, the stream's restart rule, cache window and run endings, synthetic Matroska files, the encoder round trip and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and six need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 11 Rust unit tests, 3 Rust fixture tests and 37 Swift tests. Without fixture variables, 27 Swift tests run: configuration, playlists and variant filtering, the loopback server, the stream's restart rule, cache window and run endings, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and seven need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer.
 
@@ -122,10 +122,10 @@ cargo test --release --locked -- --include-ignored --test-threads=1
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Run the Apple round-trip, streaming and renderer checks on macOS. Eight-second, complete-access-unit excerpts are sufficient for the elementary-stream tests and produce multiple HLS segments. The fixture suites serialize their encoder jobs.
+Run the Apple round-trip, streaming and renderer checks on macOS. Use the full Atmos elementary stream with the MKV made from it, because one test compares the MKV's track with it byte for byte. For DTS:X, an eight-second, complete-access-unit excerpt is sufficient. The fixture suites serialize their encoder jobs.
 
 ```sh
-SAB_TRUEHD_FIXTURE="/absolute/path/atmos-8s.thd" \
+SAB_TRUEHD_FIXTURE="/absolute/path/atmos.thd" \
 SAB_DTSX_FIXTURE="/absolute/path/dtsx-8s.dts" \
 SAB_MKV_FIXTURE="/absolute/path/atmos-only.mkv" \
 swift test -j 1 -Xswiftc -warnings-as-errors
