@@ -1,6 +1,7 @@
-import Foundation
-import CoreMedia
+import Accelerate
 import AudioToolbox
+import CoreMedia
+import Foundation
 
 func pcmFormat(rate: Int, layout: SpatialAudioLayout) throws -> CMAudioFormatDescription {
     var asbd = AudioStreamBasicDescription(
@@ -19,19 +20,27 @@ func pcmFormat(rate: Int, layout: SpatialAudioLayout) throws -> CMAudioFormatDes
     return format
 }
 
-func pcmSampleBuffer(_ samples: [Float], frames: Int, format: CMAudioFormatDescription,
-                     time: CMTime, rate: Int) throws -> CMSampleBuffer {
+/// Writes `samples` scaled by `gain` into a new sample buffer and returns it with the scaled
+/// samples' peak magnitude. Accelerate keeps this fast in unoptimized builds too.
+func pcmSampleBuffer(_ samples: ArraySlice<Float>, gain: Float, frames: Int, format: CMAudioFormatDescription,
+                     time: CMTime, rate: Int) throws -> (buffer: CMSampleBuffer, peak: Float) {
     let size = samples.count * MemoryLayout<Float>.size
     var block: CMBlockBuffer?
     let status = CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
-        memoryBlock: nil, blockLength: size, blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil, offsetToData: 0, dataLength: size, flags: 0, blockBufferOut: &block)
+        memoryBlock: nil, blockLength: size, blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+        offsetToData: 0, dataLength: size, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
     guard status == noErr, let block else { throw SpatialAudioError.coreMedia(status) }
-    let copyStatus = samples.withUnsafeBytes { bytes in
-        CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: block,
-                                      offsetIntoDestination: 0, dataLength: size)
+    var data: UnsafeMutablePointer<CChar>?
+    let pointerStatus = CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil,
+                                                    totalLengthOut: nil, dataPointerOut: &data)
+    guard pointerStatus == noErr, let data else { throw SpatialAudioError.coreMedia(pointerStatus) }
+    let output = UnsafeMutableRawPointer(data).bindMemory(to: Float.self, capacity: samples.count)
+    var peak: Float = 0
+    samples.withUnsafeBufferPointer { input in
+        var gain = gain
+        vDSP_vsmul(input.baseAddress!, 1, &gain, output, 1, vDSP_Length(input.count))
+        vDSP_maxmgv(output, 1, &peak, vDSP_Length(input.count))
     }
-    guard copyStatus == noErr else { throw SpatialAudioError.coreMedia(copyStatus) }
     var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(rate)),
                                    presentationTimeStamp: time, decodeTimeStamp: .invalid)
     var sample: CMSampleBuffer?
@@ -40,7 +49,7 @@ func pcmSampleBuffer(_ samples: [Float], frames: Int, format: CMAudioFormatDescr
         sampleTimingEntryCount: 1, sampleTimingArray: &timing,
         sampleSizeEntryCount: 0, sampleSizeArray: nil, sampleBufferOut: &sample)
     guard createStatus == noErr, let sample else { throw SpatialAudioError.coreMedia(createStatus) }
-    return sample
+    return (sample, peak)
 }
 
 func layoutData(_ layout: SpatialAudioLayout) -> Data {
