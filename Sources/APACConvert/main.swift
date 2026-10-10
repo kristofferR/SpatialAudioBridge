@@ -4,8 +4,8 @@ import AVFoundation
 
 @main struct APACConvert {
     static let usage = """
-    usage: apac-convert <truehd|dtsx> <demuxed-input.thd|dts> <output.mp4>
-           apac-convert mkv <input.mkv|https://…> <output.mp4> [--track N] [--start seconds] [--duration seconds]
+    usage: apac-convert <truehd|dtsx> <demuxed-input.thd|dts> <output.mp4> [--layout 7.1.4|9.1.6]
+           apac-convert mkv <input.mkv|https://…> <output.mp4> [--track N] [--start seconds] [--duration seconds] [--layout 7.1.4|9.1.6]
 
     For HTTP sources, set SAB_HTTP_HEADER to a header such as "Authorization: …".
     """
@@ -23,11 +23,14 @@ import AVFoundation
         guard args.count >= 3 else { print(usage); return }
         let start = Date()
         let output = URL(fileURLWithPath: args[2])
+        let options = Array(args.dropFirst(3))
         let report: APACConversionReport
         if args[0] == "mkv" {
-            report = try await convertMatroska(input: args[1], output: output, options: Array(args.dropFirst(3)))
-        } else if let codec = ["truehd": SpatialAudioCodec.trueHDAtmos, "dtsx": .dtsX][args[0]], args.count == 3 {
-            report = try await APACTrackConverter.convert(elementaryStream: URL(fileURLWithPath: args[1]), codec: codec, output: output)
+            report = try await convertMatroska(input: args[1], output: output, options: options)
+        } else if let codec = ["truehd": SpatialAudioCodec.trueHDAtmos, "dtsx": .dtsX][args[0]],
+                  options.isEmpty || options.first == "--layout" && options.count == 2 {
+            report = try await APACTrackConverter.convert(elementaryStream: URL(fileURLWithPath: args[1]), codec: codec, output: output,
+                                                          configuration: APACConfiguration(layout: try layout(options)))
         } else {
             print(usage)
             return
@@ -37,6 +40,16 @@ import AVFoundation
         let descriptions = try await audio.first?.load(.formatDescriptions) ?? []
         let formats = descriptions.map { String(format: "%08x", CMFormatDescriptionGetMediaSubType($0)) }.joined(separator: ",")
         print("APAC \(report.layout.channelCount) channels, \(report.sampleRate) Hz, \(report.sampleFrames) frames, \(report.duration)s; peak=\(report.peakPCM); elapsed=\(Date().timeIntervalSince(start))s; codec=\(formats)")
+    }
+
+    /// The `--layout` option, or the library's default layout without it.
+    private static func layout(_ options: [String]) throws -> SpatialAudioLayout {
+        guard let index = options.firstIndex(of: "--layout") else { return APACConfiguration().layout }
+        switch options.indices.contains(index + 1) ? options[index + 1] : "" {
+        case "7.1.4": return .sevenOneFour
+        case "9.1.6": return .nineOneSix
+        default: throw SpatialAudioError.invalidConfiguration("--layout needs 7.1.4 or 9.1.6")
+        }
     }
 
     /// Converts one Matroska audio track, optionally from a start time, reporting seek cost.
@@ -84,7 +97,7 @@ import AVFoundation
             if transcoder == nil {
                 print("first packet at \(String(format: "%.3f", packet.time.seconds))s (sync \(packet.isSyncPoint)) after \(String(format: "%.2f", Date().timeIntervalSince(seekStarted)))s, \((source.bytes - seekBytes) / 1024) KiB read")
                 // Decoding starts at the sync point; output starts exactly at the requested time.
-                var configuration = APACConfiguration(startTime: target)
+                var configuration = APACConfiguration(layout: try layout(options), startTime: target)
                 configuration.inputStartTime = packet.time
                 transcoder = try SpatialAudioTranscoder(codec: codec, destination: .file(output),
                                                         configuration: configuration)
