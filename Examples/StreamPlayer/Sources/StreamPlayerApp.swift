@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import os
 import SpatialAudioBridge
 import SpatialAudioPlayback
 import SwiftUI
@@ -63,19 +64,40 @@ import SwiftUI
         }
     }
 
-    /// Prints playback state every five seconds for device diagnostics.
+    /// Prints playback state every five seconds, and each wait for media with its duration, for
+    /// device diagnostics.
     private func report() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
+        var status = player.timeControlStatus
+        var changed = ContinuousClock.now
+        for tick in 1... {
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
+            if player.timeControlStatus != status {
+                let now = ContinuousClock.now
+                log(String(format: "%@ → %@ after %.2f s at t=%.1f", Self.name(status), Self.name(player.timeControlStatus),
+                           (now - changed) / .seconds(1), player.currentTime().seconds))
+                (status, changed) = (player.timeControlStatus, now)
+            }
+            guard tick % 20 == 0 else { continue }
             let item = player.currentItem
             // Only the file name: server URLs can carry credentials.
             let errors = item?.errorLog()?.events.suffix(2).map {
                 "\($0.errorStatusCode) \($0.uri.flatMap(URL.init(string:))?.lastPathComponent ?? "-") \($0.errorComment ?? "")"
             } ?? []
             let speed = await stream?.conversionSpeed ?? 0
-            log(String(format: "t=%.1f rate=%.1f item=%d silentAtmos=%@ conversion=%.2fx errors=%@", player.currentTime().seconds,
-                       player.rate, item?.status.rawValue ?? -1, atmos?.isActive == true ? "on" : "off", speed,
+            log(String(format: "t=%.1f rate=%.1f item=%d silentAtmos=%@ conversion=%.2fx available=%d MB errors=%@",
+                       player.currentTime().seconds, player.rate, item?.status.rawValue ?? -1,
+                       atmos?.isActive == true ? "on" : "off", speed, os_proc_available_memory() / 1_000_000,
                        errors.joined(separator: " | ")))
+        }
+    }
+
+    private static func name(_ status: AVPlayer.TimeControlStatus) -> String {
+        switch status {
+        case .paused: "paused"
+        case .waitingToPlayAtSpecifiedRate: "waiting"
+        case .playing: "playing"
+        @unknown default: "unknown"
         }
     }
 
