@@ -59,7 +59,20 @@ for try await packet in demuxedAudioPackets {
 let report = try await audio.finish()
 ```
 
-Await each append. Supply only the selected track, starting at a major sync; TrueHD may start at any later major sync, such as one reached by a seek. DTS input must include both its core and DTS-HD extensions in 16-bit big-endian form. Container files such as MKV and M2TS need demuxing first. Start a new session after a seek, discontinuity or format change. Call `cancel()` when abandoning playback; task cancellation also stops conversion.
+Await each append. Supply only the selected track, starting at a major sync; TrueHD may start at any later major sync, such as one reached by a seek. DTS input must include both its core and DTS-HD extensions in 16-bit big-endian form.
+
+Players without access to compressed packets can read an MKV directly, locally or over HTTP range requests, such as a media server's direct-play URL:
+
+```swift
+let file = try await MatroskaFile.open(HTTPByteSource(url: directPlayURL, headers: authorization))
+let track = file.audioTracks.first { $0.codec != nil && $0.isDefault }!
+for try await packet in file.packets(of: track, from: seekTime) {
+    // The first packet is the last sync point at or before seekTime, with its container time.
+    try await audio.append(packet.data)
+}
+```
+
+M2TS and MP4 sources still need the host's demuxer. Start a new session after a seek, discontinuity or format change. Call `cancel()` when abandoning playback; task cancellation also stops conversion.
 
 ## Stream APAC over HLS
 
