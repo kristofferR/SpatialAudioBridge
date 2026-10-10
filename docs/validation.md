@@ -18,6 +18,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Decoder chunking | Bit-identical PCM and sample counts with 4096-byte and 317-byte chunks for all three full fixtures |
 | Truncation | Removing the final compressed byte produces an error for all three fixtures |
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
+| Rendered peaks | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
 
 ### Encoding and packaging
 
@@ -30,6 +31,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Live encoding | Segments trail their input by less than 2 s over 30 s of TrueHD Atmos; the offline profile's first fragment needs 23.3 s of input |
 | `AudioConverter` encoder | Sixteen distinct tones survive a 9.1.6 APAC round trip, each correlating above 0.98 with its own channel and below 0.1 with its neighbour |
 | Encoder quality tiers | On 20 s of a film, all 16 channels active: high 47.0 dB and medium 48.4 dB signal-to-error, low 43.0 dB; on the height-only fixture, high and medium 60.9–61.0 dB, low 18.8 dB. Medium encoded 1.25–1.5× as fast as high on a synthetic 16-channel signal and 1.06–1.17× on Atmos content (lowest process CPU of repeated runs on a busy Mac), low 3×. `AVAssetWriter` ignored the setting; its packets were bit-identical to `AudioConverter` at medium, Core Audio's default, with the live and offline profiles |
+| Samples above full scale | 9.1.6 tones at +4, +6 and +12 dBFS kept their level within 0.1 dB through the APAC encoder and Apple's float decoder |
 | Encoder input batching | Passing PCM to `AudioConverter` once a packet's worth is pending, instead of once per 40-frame TrueHD access unit, cut encoding CPU by about 20% with identical packets |
 | Conversion profile | In a macOS profile, Apple's APAC encoder was about 85% of conversion work. After moving PCM scaling to Accelerate, Debug and Release builds convert at the same speed |
 
@@ -89,7 +91,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, titles with short keyframe intervals, and other Apple TV models and receivers.
 - Plex and Emby sources.
-- Rendered peaks: a film's front height channel reached +4 dBFS before encoding; objects summing into one speaker can exceed full scale.
+- Whether the playback output clips rendered peaks above full scale. APAC preserves them; one 20-second film excerpt reached +4 dBFS in a height channel, while 38 minutes of another film stayed below −0.2 dBFS. See [levels](rendering.md#levels).
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.
 
@@ -128,6 +130,12 @@ SAB_DTSX_FIXTURE="/absolute/path/dtsx.dts" \
 SAB_DTSX_ALTERNATE_FIXTURE="/absolute/path/dtsx-alternate.dts" \
 cargo test --release --locked -- --include-ignored --test-threads=1
 cargo clippy --all-targets --locked -- -D warnings
+```
+
+The `render` example reports each rendered channel's peak and the samples above full scale; write to `/dev/null` to measure a whole film:
+
+```sh
+cargo run --release --locked --example render -- truehd film.thd /dev/null 7.1.4
 ```
 
 Run the Apple round-trip, streaming and renderer checks on macOS. Use the full Atmos elementary stream with the MKV made from it, because one test compares the MKV's track with it byte for byte. For both DTS:X fixtures, eight-second, complete-access-unit excerpts are sufficient. The fixture suites serialize their encoder jobs.
