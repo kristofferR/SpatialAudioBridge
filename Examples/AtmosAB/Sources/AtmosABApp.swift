@@ -7,6 +7,14 @@ import UIKit
 struct Sample: Identifiable, Hashable, Decodable {
     let id: String
     let name: String
+    /// What the app lists and Auto plays. A layout comparison leaves out the static channel check and
+    /// starts with the object path test, rendered by the Rust crate's `object_path` example, when bundled.
+    static let listed: [Sample] = {
+        guard Version.compareLayouts else { return all }
+        let test = Bundle.main.url(forResource: "object-path.APAC", withExtension: "mp4", subdirectory: "Media") == nil
+            ? [] : [Sample(id: "object-path", name: "Object path: ear level, then overhead")]
+        return test + all.filter { !$0.id.hasPrefix("channel-check") }
+    }()
     static let all: [Sample] = {
         let originals = [
             Sample(id: "helicopter", name: "Helicopter"),
@@ -28,6 +36,7 @@ struct Sample: Identifiable, Hashable, Decodable {
 
 enum Version: String, CaseIterable {
     case apac = "APAC"
+    case apac916 = "APAC 9.1.6"
     case baseline = "Old APAC"
     case ddp = "DD+ Atmos"
     case pcm = "PCM 7.1"
@@ -35,28 +44,34 @@ enum Version: String, CaseIterable {
         switch self {
         case .baseline: "APAC-baseline"
         case .apac: "APAC"
+        case .apac916: "APAC-9.1.6"
         case .ddp: "DDP"
         case .pcm: "PCM"
         }
     }
     var detail: String {
         switch self {
-        case .apac: "TrueHD rendered to APAC 9.1.6 by this build"
-        case .baseline: "TrueHD rendered to APAC 9.1.6 by an earlier build"
+        case .apac: "TrueHD rendered to APAC by this build"
+        case .apac916: "TrueHD rendered to APAC 9.1.6 by this build"
+        case .baseline: "TrueHD rendered to APAC by an earlier build"
         case .ddp: "Deezy’s Dolby Digital Plus Atmos conversion of the same source"
         case .pcm: "The TrueHD track’s own 7.1 mix as PCM, as other players output it, without heights"
         }
     }
-    var isAPAC: Bool { self == .baseline || self == .apac }
+    var isAPAC: Bool { self == .baseline || self == .apac || self == .apac916 }
+
+    /// `--compare-layouts`: blind Auto compares this build's default 7.1.4 render with its 9.1.6
+    /// render, without a reference; see `Sample.listed` for the samples.
+    static let compareLayouts = ProcessInfo.processInfo.arguments.contains("--compare-layouts")
 
     /// Plain PCM is uncompressed LPCM in QuickTime; FLAC in MP4 failed on the tested Apple TV.
     func url(for sample: Sample) -> URL? {
         Bundle.main.url(forResource: "\(sample.id).\(suffix)", withExtension: self == .pcm ? "mov" : "mp4", subdirectory: "Media")
     }
 
-    /// APAC and DD+ are always offered. The baseline, an APAC conversion from an earlier
-    /// library build, and plain PCM are offered when every sample has one. With a baseline,
-    /// Auto mode becomes a blind comparison against the DD+ reference.
+    /// APAC and DD+ are always offered. The 9.1.6 render, the baseline (an APAC conversion from
+    /// an earlier library build) and plain PCM are offered when every sample has one. With a
+    /// baseline, Auto mode becomes a blind comparison against the DD+ reference.
     static let available: [Version] = allCases.filter { version in
         version == .apac || version == .ddp || Sample.all.allSatisfy { version.url(for: $0) != nil }
     }
@@ -68,7 +83,7 @@ struct AutoExcerpt {
     var end: CMTime { start + CMTime(seconds: 20, preferredTimescale: 48000) }
 }
 
-/// One playback in Auto mode. Blind steps are labelled Reference, X and Y.
+/// One playback in Auto mode. Blind steps are labelled X and Y, after an optional Reference.
 struct AutoStep {
     let excerpt: Int
     let version: Version
@@ -81,7 +96,7 @@ enum Verdict: String, CaseIterable {
     case same = "No difference"
 }
 
-/// The listener's answer to which of X and Y sounded closer to the reference.
+/// The listener's answer to which of X and Y sounded closer to the reference, or better without one.
 struct BlindResult {
     let sample: Sample
     let x: Version
@@ -98,7 +113,7 @@ struct BlindResult {
 
 @MainActor @Observable final class Playback {
     let player = AVPlayer()
-    var sample = Sample.all[0]
+    var sample = Sample.listed[0]
     var version = Version.apac
     var position = 0.0
     var duration = 0.0
@@ -113,9 +128,17 @@ struct BlindResult {
     /// Set after the last blind step of an excerpt, until the listener answers or replays it.
     private(set) var awaitingVerdict = false
     private(set) var results: [BlindResult] = []
-    let blind = Version.available.contains(.baseline)
+    /// The version blind Auto compares with this build's render: its 9.1.6 render when
+    /// comparing layouts, otherwise the baseline. Without one, Auto is not blind.
+    let challenger: Version? = [Version.compareLayouts ? .apac916 : .baseline].first { Version.available.contains($0) }
+    var blind: Bool { challenger != nil }
+    /// Blind Auto plays the DD+ reference before X and Y, except when comparing layouts.
+    let reference: Version? = Version.compareLayouts ? nil : .ddp
+    let autoSamples = Sample.listed
+    /// The versions each Auto excerpt plays.
+    var autoVersions: [Version] { challenger.map { (reference.map { [$0] } ?? []) + [.apac, $0] } ?? Version.available }
     /// Blind Auto plays the reference, X and Y; otherwise every available version plays in turn.
-    var stepsPerExcerpt: Int { blind ? 3 : Version.available.count }
+    var stepsPerExcerpt: Int { blind ? (reference == nil ? 2 : 3) : Version.available.count }
     private var autoExcerpts: [AutoExcerpt] = []
     private(set) var autoSteps: [AutoStep] = []
     private var autoPreparation: Task<Void, Never>?
@@ -265,12 +288,13 @@ struct BlindResult {
         autoIndex = 0
         results = []
         let token = autoGeneration
+        let samples = autoSamples, versions = autoVersions
         autoPreparation = Task { [weak self] in
             do {
                 var excerpts: [AutoExcerpt] = []
-                for sample in Sample.all {
+                for sample in samples {
                     var sharedDuration = Double.infinity
-                    for version in Version.available {
+                    for version in versions {
                         guard let url = version.url(for: sample) else {
                             throw NSError(domain: "AtmosAB", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sample file is missing: \(sample.name) \(version.suffix)."])
                         }
@@ -288,13 +312,12 @@ struct BlindResult {
                 guard let self, !Task.isCancelled, self.autoGeneration == token, self.autoRunning else { return }
                 self.autoExcerpts = excerpts
                 self.autoSteps = excerpts.indices.flatMap { index -> [AutoStep] in
-                    guard self.blind else {
+                    guard let challenger = self.challenger else {
                         return Version.available.map { AutoStep(excerpt: index, version: $0, label: $0.rawValue) }
                     }
-                    let (x, y) = Bool.random() ? (Version.apac, Version.baseline) : (.baseline, .apac)
-                    return [AutoStep(excerpt: index, version: .ddp, label: "Reference"),
-                            AutoStep(excerpt: index, version: x, label: "X"),
-                            AutoStep(excerpt: index, version: y, label: "Y")]
+                    let (x, y) = Bool.random() ? (Version.apac, challenger) : (challenger, .apac)
+                    return (self.reference.map { [AutoStep(excerpt: index, version: $0, label: "Reference")] } ?? [])
+                        + [AutoStep(excerpt: index, version: x, label: "X"), AutoStep(excerpt: index, version: y, label: "Y")]
                 }
                 self.playAutoStep()
             } catch {
@@ -333,7 +356,7 @@ struct BlindResult {
             print("AUTO END step=\(autoIndex + 1) sample=\(sample.id) version=\(version.suffix) actual=\(player.currentTime().seconds)")
             let next = autoIndex + 1
             if blind, !autoSteps.indices.contains(next) || autoSteps[next].excerpt != step.excerpt {
-                // Ask which of X and Y was closer to the reference before moving on.
+                // Ask which of X and Y was closer to the reference, or better, before moving on.
                 awaitingVerdict = true
             } else if autoSteps.indices.contains(next) {
                 autoIndex = next
@@ -364,7 +387,7 @@ struct BlindResult {
         }
     }
 
-    /// Plays the current excerpt's reference, X and Y again before answering.
+    /// Plays the current excerpt's steps again before answering.
     func replayExcerpt() {
         guard awaitingVerdict, let step = autoStep,
               let first = autoSteps.firstIndex(where: { $0.excerpt == step.excerpt }) else { return }
@@ -432,7 +455,11 @@ struct BlindResult {
 }
 
 @main struct AtmosABApp: App {
-    var body: some Scene { WindowGroup { ComparisonView() } }
+    var body: some Scene {
+        WindowGroup {
+            if ProcessInfo.processInfo.arguments.contains("--output-probe") { OutputProbeView() } else { ComparisonView() }
+        }
+    }
 }
 
 struct ComparisonView: View {
@@ -450,7 +477,7 @@ struct ComparisonView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 60) {
             VStack(alignment: .leading, spacing: 24) {
-                Text(playback.blind ? "Atmos A/B/C" : "Atmos A/B").font(.largeTitle.bold())
+                Text(playback.blind && playback.reference != nil ? "Atmos A/B/C" : "Atmos A/B").font(.largeTitle.bold())
                 Button {
                     if playback.autoRunning { playback.stopAuto() } else { playback.startAuto() }
                 } label: {
@@ -463,7 +490,7 @@ struct ComparisonView: View {
                 }
                 AutoStatusView(playback: playback)
                 if playback.awaitingVerdict {
-                    Text("Which was closer to the reference?").font(.headline)
+                    Text(playback.reference == nil ? "Which sounded better?" : "Which was closer to the reference?").font(.headline)
                     ForEach(Verdict.allCases, id: \.self) { verdict in
                         Button(verdict.rawValue) { playback.answer(verdict) }
                             .frame(width: 330, alignment: .leading)
@@ -475,7 +502,7 @@ struct ComparisonView: View {
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        ForEach(Sample.all) { sample in
+                        ForEach(Sample.listed) { sample in
                             Button { playback.load(sample: sample, version: playback.version) } label: {
                                 HStack {
                                     Text(sample.name)
@@ -553,8 +580,10 @@ struct ComparisonView: View {
                     }.disabled(playback.loading || playback.autoRunning)
                 }
                 Text("Switching keeps the position and play/pause state. There is a short switching gap.").font(.callout).foregroundStyle(.secondary)
-                if playback.blind {
-                    Text("Auto plays the DD+ reference, then both APAC versions as X and Y in random order.").font(.callout).foregroundStyle(.secondary)
+                if let challenger = playback.challenger {
+                    let order = "\(Version.apac.rawValue) and \(challenger.rawValue) as X and Y in random order"
+                    Text(playback.reference == nil ? "Auto plays \(order)." : "Auto plays the DD+ reference, then \(order).")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
                 Text("Output: \(playback.route) • Keep Apple TV audio on Auto with Dolby Atmos enabled.").font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -588,25 +617,25 @@ private struct AutoStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let step = playback.autoStep, let excerpt = playback.autoExcerpt {
-                Text("Excerpt \(step.excerpt + 1) of \(Sample.all.count) • \(step.label)")
+                Text("Excerpt \(step.excerpt + 1) of \(playback.autoSamples.count) • \(step.label)")
                 Text("\(Int(min(20, max(0, playback.position - excerpt.start.seconds)))) / 20 seconds")
                     .monospacedDigit()
                 ProgressView(value: min(20, max(0, playback.position - excerpt.start.seconds)), total: 20)
             } else if playback.autoRunning {
                 Text("Preparing Auto mode…")
-            } else if playback.autoCompleted, playback.blind {
-                let closer = { (version: Version) in playback.results.filter { $0.closer == version }.count }
+            } else if playback.autoCompleted, let challenger = playback.challenger {
+                let picked = { (version: Version?) in playback.results.filter { $0.closer == version }.count }
                 Text("Blind comparison complete")
-                Text("APAC closer: \(closer(.apac)) • Old APAC closer: \(closer(.baseline)) • No difference: \(playback.results.filter { $0.closer == nil }.count)")
+                Text("\(Version.apac.rawValue): \(picked(.apac)) • \(challenger.rawValue): \(picked(challenger)) • No difference: \(picked(nil))")
                 ForEach(playback.results, id: \.sample.id) { result in
                     Text("\(result.sample.name): X was \(result.x.rawValue), picked \(result.verdict.rawValue)")
                 }
             } else if playback.autoCompleted {
-                Text("Auto complete • All \(Sample.all.count) excerpts played")
+                Text("Auto complete • All \(playback.autoSamples.count) excerpts played")
             } else if playback.blind {
-                Text("Reference, X and Y for 20 seconds each, all \(Sample.all.count) excerpts.")
+                Text("\(playback.reference == nil ? "X and Y" : "Reference, X and Y") for 20 seconds each, all \(playback.autoSamples.count) excerpts.")
             } else {
-                Text("20 seconds per version, all \(Sample.all.count) excerpts.")
+                Text("20 seconds per version, all \(playback.autoSamples.count) excerpts.")
             }
         }
         .font(.callout)

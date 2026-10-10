@@ -23,7 +23,7 @@ import Foundation
             playback.startAuto()
             var steps: [AutoStep] = []
             let perExcerpt = playback.stepsPerExcerpt
-            let deadline = Date().addingTimeInterval(Double(Sample.all.count * perExcerpt * 24 + 30))
+            let deadline = Date().addingTimeInterval(Double(playback.autoSamples.count * perExcerpt * 24 + 30))
             while playback.autoRunning, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(250))
                 if let error = playback.error { throw ProbeFailure(message: error) }
@@ -33,7 +33,7 @@ import Foundation
                       steps.last?.step != playback.autoIndex + 1 else { continue }
                 let index = playback.autoIndex
                 guard index == steps.count,
-                      playback.sample == Sample.all[step.excerpt],
+                      playback.sample == playback.autoSamples[step.excerpt],
                       playback.version == step.version,
                       let item = playback.player.currentItem,
                       abs(item.forwardPlaybackEndTime.seconds - excerpt.end.seconds) < 0.0001,
@@ -58,7 +58,7 @@ import Foundation
                     print("AUTO PROBE PAUSE/RESUME PASS")
                 }
             }
-            guard playback.autoCompleted, steps.count == Sample.all.count * perExcerpt, !playback.playing, !playback.silentAtmosActive else {
+            guard playback.autoCompleted, steps.count == playback.autoSamples.count * perExcerpt, !playback.playing, !playback.silentAtmosActive else {
                 throw ProbeFailure(message: "Auto did not complete every excerpt and stop playback.")
             }
             for index in stride(from: 0, to: steps.count, by: perExcerpt) {

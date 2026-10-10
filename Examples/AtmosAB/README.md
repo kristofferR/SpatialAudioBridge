@@ -1,6 +1,6 @@
 # Atmos A/B for Apple TV
 
-Small tvOS 26+ player for comparing matched TrueHD → APAC 9.1.6 and Deezy DDP Atmos files. All audio is bundled; no server is needed. AVPlayer plays the converted APAC file, not raw TrueHD.
+Small tvOS 26+ player for comparing matched TrueHD → APAC and Deezy DDP Atmos files. All audio is bundled; no server is needed. AVPlayer plays the converted APAC file, not raw TrueHD.
 
 APAC playback uses the tested Atmos setup:
 
@@ -57,10 +57,46 @@ ffmpeg -i film.thd -af "channelmap=map=FL-FL|FR-FR|FC-FC|LFE-LFE|SL-SL|SR-SR|BL-
 
 To compare a library change, also supply `<id>.APAC-baseline.mp4` for every sample, converted with the earlier build. Match its level to the new conversion so only the change under test differs, or loudness alone will tell X and Y apart. If the builds process level differently, compensate the baseline with `APACConfiguration.gainDB`: TrueHD dialogue normalisation, for example, attenuates newer conversions by 31 dB less the signalled dialogue level, so a baseline from an earlier build needs that attenuation too. Then compare the two conversion reports' `peakPCM`. The app then offers a third version, and Auto mode becomes a blind test. For each excerpt it plays the DDP reference, then both APAC versions as X and Y in random order, and asks which was closer to the reference. **Replay excerpt** plays all three again. At the end it reveals each assignment and the tally, and prints a `BLIND RESULT` line per excerpt to the device log. With the near-silent stream running for both APAC versions, nothing but the audio tells X and Y apart.
 
+### Layout comparison
+
+To compare speaker layouts, also supply `<id>.APAC-9.1.6.mp4` for every sample, made with `apac-convert … --layout 9.1.6`; `<id>.APAC.mp4` uses the converter's default 7.1.4. Launch with `--compare-layouts`. Auto then plays both renders of each excerpt as X and Y in random order, without the DDP reference or the channel check, and asks which sounded better.
+
+With `object-path.APAC.mp4` and `object-path.APAC-9.1.6.mp4` in the media folder, a synthetic test comes first: one pink-noise object circles the room at ear level for 10 s, through the wide positions, then overhead, through the top middles. Both renders share the same noise, so only the panning differs. Make them with the Rust crate's `object_path` example:
+
+```sh
+for layout in 7.1.4 9.1.6; do
+  cargo run --release --manifest-path ../../Rust/SpatialAudioCore/Cargo.toml --example object_path -- $layout object-path-$layout.f32le
+done
+swift make-test-media.swift encode 7.1.4 object-path-7.1.4.f32le object-path.APAC.mp4
+swift make-test-media.swift encode 9.1.6 object-path-9.1.6.f32le object-path.APAC-9.1.6.mp4
+```
+
 Additional pairs are appended from `Media/extra-samples.json`, a JSON array of `{"id":"movie-id","name":"Movie name"}` entries. Each entry uses `Media/<id>.APAC.mp4` and `Media/<id>.DDP.mp4`. Auto includes every listed pair for 40 seconds per pair plus switching gaps, and requires at least 20 seconds in both files. Keep private movie names and media in the ignored manifest and Media folder.
+
+## Output probe
+
+Launch with `--output-probe` to play a channel sweep instead of the comparison screen. The probe shows the playing channel in large type and prints the route, the output unit's channel count and layout, and the session's current and preferred hardware formats as `OUTPUT PROBE STATE` lines at each step. Make the sweeps, ten seconds of pulsed pink noise per channel, and add them to the media folder:
+
+```sh
+swift make-test-media.swift sweep 9.1.6 channel-sweep-9.1.6.APAC.mp4
+swift make-test-media.swift sweep 7.1.4 channel-sweep-7.1.4.APAC.mp4
+```
+
+| Argument | Effect |
+|---|---|
+| `--sweep=7.1.4` | Play the 7.1.4 sweep; the default is 9.1.6 |
+| `--sections=Lw,Rw` | Play only these channels, once each |
+| `--start=SECONDS` | Start the whole sweep here |
+| `--atmos=none` | Play without the near-silent Atmos stream |
+| `--atmos=mat` | Request MAT Atmos output through private `AVAudioSession` API instead of the stream; for experiments only |
+| `--atmos=channels --channels=12` | Request that many output channels with the public API instead |
+| `--no-playback` | Report the state after the request without playing |
+| `--label=TEXT` | Replace the header, for blind comparisons |
 
 ## Validation
 
 The source matches the local app built and installed on an Apple TV 4K (2nd generation), tvOS 27.2 beta, on 2026-10-10. A complete Auto device run played all eight excerpts in the requested order with matching timestamps, the silent Atmos stream running only for APAC, and playback stopping after the last pair. Stopping during preparation and playback also passed. Later pause/resume validation was interrupted by remote use; pause/resume has not completed an unattended device check. Source media remains the previously validated conversion from the original worktree baseline.
+
+The output probe and the layout comparison ran on the same Apple TV with a Samsung HW-Q990C soundbar on 2026-10-10; see [validation](../../docs/validation.md#playback-on-apple-tv) for the results.
 
 For the focused playback probe, launch with `--auto-probe`; stdout reports each seek and endpoint plus the final check result. `--probe --all-pairs` runs the older route observation probe. Its channel-count readings must not be treated as proof of Atmos output.

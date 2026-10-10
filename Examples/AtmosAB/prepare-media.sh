@@ -24,11 +24,11 @@ fi
 
 mkdir -p "$APP_DIR/Media"
 if [[ "$SOURCE_DIR" != "$APP_DIR/Media" ]]; then
-  # Baseline APAC and PCM files are optional; each is offered when every sample has one.
+  # Baseline APAC, 9.1.6 APAC and PCM files are optional; each is offered when every sample has one.
   # With a baseline for every sample, Auto runs a blind A/B/C test.
   shopt -s nullglob
-  rm -f "$APP_DIR/Media"/*.APAC-baseline.mp4 "$APP_DIR/Media"/*.PCM.mp4 "$APP_DIR/Media"/*.PCM.mov
-  for media in "$SOURCE_DIR"/*.APAC.mp4 "$SOURCE_DIR"/*.APAC-baseline.mp4 "$SOURCE_DIR"/*.PCM.mov "$SOURCE_DIR"/*.DDP.mp4 "$SOURCE_DIR/silent-atmos.mp4"; do
+  rm -f "$APP_DIR/Media"/*.APAC-baseline.mp4 "$APP_DIR/Media"/*.APAC-9.1.6.mp4 "$APP_DIR/Media"/*.PCM.mp4 "$APP_DIR/Media"/*.PCM.mov
+  for media in "$SOURCE_DIR"/*.APAC.mp4 "$SOURCE_DIR"/*.APAC-baseline.mp4 "$SOURCE_DIR"/*.APAC-9.1.6.mp4 "$SOURCE_DIR"/*.PCM.mov "$SOURCE_DIR"/*.DDP.mp4 "$SOURCE_DIR/silent-atmos.mp4"; do
     cp -c "$media" "$APP_DIR/Media/"
   done
   if [[ -f "$SOURCE_DIR/extra-samples.json" ]]; then
