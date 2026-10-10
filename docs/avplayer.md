@@ -74,7 +74,13 @@ The master rewrite removes the server's audio renditions, replaces audio codecs 
 
 ## Seeking and synchronization
 
-Seek the player as usual. A segment request inside the converted range is served at once. A request outside it starts a new conversion run at that segment, which arrives once the run converts 3.2 s of audio and the encoder's 1.6 s live delay. Segments lie on a fixed grid, so every run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
+Seek the player as usual. Segments lie on a fixed grid, so every conversion run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
+
+- Segments already converted are served at once: the lookahead ahead of the playhead, and the last 20 segments (about 64 s) behind it, so skipping back over recent audio is immediate.
+- Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 1 s apart on Apple TV 4K (2nd generation). The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s.
+- While scrubbing, `AVPlayer` requests a segment at each intermediate position. Each restarts conversion, and requests a later restart replaced are answered with status 503 at once.
+
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7 s and long jumps after 11–14 s. Skips within already converted audio resumed after about 1 s.
 
 Pass the intended start position as `startTime`, so the first segment is ready when `AVPlayer` asks for it, and seek exactly (`toleranceBefore: .zero`) before playing.
 
@@ -85,15 +91,28 @@ var options = APACStream.Options()
 options.configuration = APACConfiguration(layout: .sevenOneFour) // 12 channels at 3.072 Mbit/s
 options.renditionName = "Dolby Atmos (Spatial Audio)"
 options.lookahead = 6              // segments converted ahead of the newest request
+options.keptBehind = 20            // played segments kept for skipping back
 options.segmentTimeout = .seconds(30)
+// Offer only the server's stream-copy variant, never its transcoding fallbacks.
+options.includesVideoVariant = { $0.query?.contains("AllowVideoStreamCopy=true") == true }
 let stream = try await APACStream.start(file: file, videoMaster: videoMaster, options: options)
 ```
 
-The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 9.1.6 layout uses 4.096 Mbit/s. A larger `lookahead` buffers more conversion ahead at about 1.6 MB per segment.
+The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 9.1.6 layout uses 4.096 Mbit/s, about 1.6 MB per segment, so the defaults keep at most about 50 MB of converted audio.
+
+`includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
 
 ## Monitor
 
 `await stream.conversionSpeed` reports seconds of audio converted per second of work since the latest start or seek, excluding time spent waiting for the player. Below about 1.2, playback will stall. `AVPlayerItem.errorLog()` names the failing segment; see [troubleshooting](troubleshooting.md) for common entries.
+
+The stream logs each segment request, restart and wait time to the unified log under subsystem `SpatialAudioBridge`, category `APACStream`. View them in Console, or set `OS_ACTIVITY_DT_MODE=enable` in the app's environment to mirror them to its standard error:
+
+```text
+[APACStream] seg1023 restarts conversion; run started at -1, converted -1
+[APACStream] seg1023 after 1879 ms
+[APACStream] seg1024 after 1253 ms
+```
 
 A track can also carry unsupported metadata partway through. The failed run returns an HTTP error for its segment, and `AVPlayer` reports a stall or item failure. Treat a failed item as a reason to fall back.
 
@@ -103,8 +122,11 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 
 | Measure | Result |
 |---|---|
-| `MatroskaFile.open` and `APACStream.start` at 7:00 | 2.4–2.5 s |
-| Conversion speed | 2.6–2.7× real time, steady |
+| `MatroskaFile.open` and `APACStream.start` | 2.0–2.5 s |
+| Launch to playing | 4–5 s |
+| Conversion | About 1 s per 3.2-second segment, 3.2× real time; Debug and Release alike |
+| Memory | No growth: available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes |
+| Seeks | Recovered from every skip, scrub and jump in a scripted test; times above |
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; video and audio played together |
 
 ## Limits
