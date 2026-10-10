@@ -83,18 +83,39 @@ In three of six runs, the three quick skips back left `AVPlayer` waiting without
 
 On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted test from 20:00 resumed scrubs and jumps in 5.1–8.2 s and three skips back in 6.8 s; skips within converted audio took 0.7–0.9 s. Its first segments after restarts took 3.0–3.5 s and `AVPlayer` logged three −12889 timeouts without failing a seek: the reader transfers the video too, about 85 MB for the 7 s of file a restart's first segment needs.
 
-### Atmos metadata census
+### Library census
 
-`examples/census.rs` reports which object metadata controls a TrueHD stream uses, where the renderer first rejects it and the rendered peaks in both layouts. It accepts a stream starting mid-access-unit, so FFmpeg can cut windows from a film. It ran on three 60-second windows (at 20%, 50% and 80%) from each of 16 TrueHD Atmos titles in the Jellyfin library, from *Ben-Hur* (1959) to *Project Hail Mary* (2026), plus the four Dolby demo fixtures:
+`examples/census.rs` reports which object metadata controls a TrueHD stream uses, or which DTS:X presentation, object positions and bed folds a DTS stream carries. For both, it reports where the renderer first rejects the stream and the rendered peaks in both layouts. It accepts a TrueHD stream starting mid-access-unit, so FFmpeg can cut windows from a film:
 
-| Finding | Result |
+```sh
+# A 60-second window from 30:00; use -f dts for a DTS track.
+ffmpeg -ss 1800 -t 60 -i "$URL" -map 0:a:0 -c copy -f truehd - |
+  cargo run --release --example census --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -
+```
+
+The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. On 2026-10-10 the census ran over HTTP on every TrueHD Atmos and DTS-HD title in the Jellyfin library:
+
+- **TrueHD Atmos**: five 60-second windows, at 10%, 30%, 50%, 70% and 90%, from each of 179 titles (74 films and 105 episodes of four series), 15.8 hours in all, and ten of the films in full, 24.8 hours.
+- **DTS:X**: all eight titles in full, 17.2 hours.
+- **DTS-HD MA without a DTS:X label**: one to three windows from each of 112 titles. FFmpeg, and so Jellyfin, labels the alternate D4 fixture plain DTS-HD MA, so the label alone does not rule out DTS:X.
+
+| TrueHD Atmos | Result |
 |---|---|
-| Rejected streams | None |
-| Trim, size, snap, zones, screen anchoring, distance, divergence, bed distribution or downmix, ISF | Not used in any window |
-| Bed | LFE only in every title, with 11 to 15 objects alongside |
-| Object blocks inside the room (at least 2.5% of the room size from every wall) | In 23 of 48 windows, up to 35% of active blocks |
-| Dialogue level | −31 dB in most titles, −27 dB in *Encanto*, −23 and −24 dB in *Apocalypse Now* |
-| Peaks above full scale with the TS 103 448 panner | Three windows from two titles; highest +3.6 dBFS in a centre channel |
+| Rejected | One title. *Black Hawk Down* (2001) carries trim elements with `warp_mode` 1 in 21% of its metadata payloads, the first at 11:04; three of its five windows had none |
+| Other trim metadata | None; *Black Hawk Down*'s trims are the defaults |
+| Size, snap, zones, screen anchoring, distance, divergence, elevation disable, bed distribution or downmix, ISF, multiple beds | Not used in any window or full film |
+| Bed | LFE only in every title, with 11 objects alongside in 143 titles, 13 in 14 and 15 in 22 |
+| Object blocks inside the room (at least 2.5% of the room size from every wall) | In 239 of 895 windows, from 81 titles, up to 42% of active blocks; in 7 of the 10 full films, up to 17% |
+| Dialogue level | −31 dB in 166 titles; −23 to −29 dB in 13, most often −27 dB |
+| Peaks above full scale in 7.1.4 | 28 of 895 windows from 22 titles, highest +6.2 dBFS, most often in the front heights and centre. In full, *Alita: Battle Angel* reached +7.6 dBFS and *Sinners* +1.5 dBFS, though none of the *Sinners* windows exceeded full scale |
+
+| DTS | Result |
+|---|---|
+| DTS:X presentation | Standard 7.1.4, four fixed heights and no objects, in every frame of all eight films. Every film used its heights; the loudest height channel peaked between −16 and 0 dBFS |
+| Bed folds | Stated in every frame |
+| Rejected | None of the DTS:X films |
+| Peaks above full scale | None; highest 0.0 dBFS |
+| DTS-HD MA without a DTS:X label | No DTS:X extension, standard or alternate, in any of the 112 titles; the renderer rejects them, as intended |
 
 ### Reference rendering
 
@@ -115,7 +136,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Plex and Emby sources.
-- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#atmos-metadata-census) found them in two of 16 titles. See [levels](rendering.md#levels).
+- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 23 of 179 Atmos titles. See [levels](rendering.md#levels).
 - Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.
