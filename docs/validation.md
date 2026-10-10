@@ -13,6 +13,9 @@ Validated on 2026-10-09 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Full DTS:X Object Emulator elementary stream | 95-second fixture passes chunking, finite PCM, height-energy and truncation checks |
 | Decoder chunking | Bit-identical PCM and sample counts with 4096-byte and 317-byte chunks for both full fixtures |
 | Truncation | Removing the final compressed byte produces an error for both formats |
+| Matroska reader | Synthetic files cover track metadata, header stripping, all lacing modes, block groups, cues through the seek head and seeking to the last sync at or before the target |
+| Real Matroska file | The Helicopter MKV's TrueHD track is byte-identical to the FFmpeg extraction; a 30-second seek starts at a sync within 0.1 s |
+| Matroska over HTTP | From Jellyfin 12.2 on a gigabit LAN, 8-second conversions from 10:00 succeeded for one TrueHD Atmos and two DTS:X 4K remuxes; seeks reached a sync 21–64 ms before the target |
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
 | Eight-second Atmos / DTS:X → APAC → Apple PCM decoder | APAC codec and 16-channel 9.1.6 layout confirmed, duration checked, height energy retained |
 | Eight-second Atmos → 7.1.4 fragmented MP4 | 12-channel layout confirmed; continuous timestamps and playlists checked at zero and nonzero start times |
@@ -22,7 +25,7 @@ Validated on 2026-10-09 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Native Apple TV Atmos activation | On tvOS 27.2 beta, Kris confirmed TrueHD → APAC plus a near-silent JOC Atmos stream and direct DDP both trigger Atmos and sound similar; encoder/media/renderer unchanged |
 | A/B Auto playback | Eight matched 20-second excerpts completed in pair order on Apple TV; silent Atmos stream only during APAC, stop after the final pair, preparation/playback cancellation pass |
 
-The suite includes eleven Rust unit tests, three full-fixture Rust tests, five Swift configuration/lifecycle tests, three Atmos output activator tests and three Swift media tests. Rust Clippy and Apple Swift checks pass with warnings treated as errors. HLS codec strings are derived from the platform encoder’s documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream.
+The suite includes eleven Rust unit tests, three full-fixture Rust tests, five Swift configuration/lifecycle tests, six Matroska tests, three Atmos output activator tests and four Swift media tests. Rust Clippy and Apple Swift checks pass with warnings treated as errors. HLS codec strings are derived from the platform encoder’s documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream.
 
 The PCM chunk comparison checks that network/demuxer buffering does not change output. These checks do not establish equivalence to a licensed reference renderer. The [A/B player](../Examples/AtmosAB/README.md) provides the measured `AtmosOutputActivator` and session setup for Atmos activation. Receiver indication and informal listening do not establish correct APAC speaker placement or MAT content. `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and rendering mode/spatial-audio flags were also unsuitable detectors on the tested beta. Sustained Apple TV performance, native HLS A/V sync and host seeks still require device/host-player tests.
 
