@@ -31,6 +31,7 @@ public struct MatroskaAudioTrack: Sendable, Hashable {
 /// One compressed audio frame and its container presentation time.
 public struct MatroskaPacket: Sendable {
     public let data: Data
+    /// The block's time. Frames laced into one block share it.
     public let time: CMTime
     /// Whether decoding can start here: a TrueHD major sync or a DTS core sync.
     public let isSyncPoint: Bool
@@ -68,9 +69,29 @@ public struct MatroskaFile: Sendable {
         var scale: Int64 = 1_000_000, duration: Double?
         var tracks: [MatroskaAudioTrack] = []
         var cues: [Cue] = []
-        var cuesPosition: Int64?
+        var parsed: Set<UInt64> = []
+        var seekPositions: [UInt64: Int64] = [:]
         var firstCluster: Int64?
-        // Read the metadata before the first cluster; cues are usually at the end, found through the seek head.
+        func parse(_ id: UInt64, _ body: EBMLData) {
+            parsed.insert(id)
+            switch id {
+            case EBML.info:
+                scale = max(1, Int64(clamping: body.child(EBML.timestampScale)?.uint ?? 1_000_000))
+                duration = body.child(EBML.duration)?.float
+            case EBML.tracks:
+                tracks = body.children(EBML.trackEntry).compactMap(Self.audioTrack)
+            case EBML.seekHead:
+                for seek in body.children(EBML.seek) {
+                    if let target = seek.child(EBML.seekID)?.uint,
+                       let offset = seek.child(EBML.seekPosition).flatMap({ Int64(exactly: $0.uint) }), offset < length {
+                        seekPositions[target] = segmentStart + offset
+                    }
+                }
+            default:
+                cues = Self.cues(body, segmentStart: segmentStart, length: length)
+            }
+        }
+        // Read the metadata before the first cluster.
         while window.position < segmentEnd, firstCluster == nil {
             let start = window.position
             guard let id = try await window.elementID() else { break }
@@ -80,30 +101,19 @@ public struct MatroskaFile: Sendable {
                 firstCluster = start
             case EBML.info, EBML.tracks, EBML.seekHead, EBML.cues:
                 guard let size else { throw SpatialAudioError.source("Matroska metadata has an unknown size") }
-                let body = EBMLData(try await window.read(Int(size)))
-                switch id {
-                case EBML.info:
-                    scale = Int64(body.child(EBML.timestampScale)?.uint ?? 1_000_000)
-                    duration = body.child(EBML.duration)?.float
-                case EBML.tracks:
-                    tracks = body.children(EBML.trackEntry).compactMap(Self.audioTrack)
-                case EBML.seekHead:
-                    for seek in body.children(EBML.seek) where seek.child(EBML.seekID)?.uint == EBML.cues {
-                        cuesPosition = seek.child(EBML.seekPosition).map { segmentStart + Int64($0.uint) }
-                    }
-                default:
-                    cues = Self.cues(body, segmentStart: segmentStart)
-                }
+                parse(id, EBMLData(try await window.read(Int(size))))
             default:
                 guard let size else { throw SpatialAudioError.source("Unexpected Matroska element of unknown size") }
                 try await window.skip(Int64(size))
             }
         }
         guard let firstCluster else { throw SpatialAudioError.source("Matroska file has no clusters") }
-        if cues.isEmpty, let cuesPosition, cuesPosition < length {
-            window.seek(to: cuesPosition)
-            if try await window.elementID() == EBML.cues, let size = try await window.elementSize() {
-                cues = Self.cues(EBMLData(try await window.read(Int(size))), segmentStart: segmentStart)
+        // Elements after the clusters are found through the seek head: usually the cues, sometimes the info and tracks.
+        for id in [EBML.info, EBML.tracks, EBML.cues] where !parsed.contains(id) {
+            guard let position = seekPositions[id] else { continue }
+            window.seek(to: position)
+            if try await window.elementID() == id, let size = try await window.elementSize() {
+                parse(id, EBMLData(try await window.read(Int(size))))
             }
         }
         return MatroskaFile(audioTracks: tracks,
@@ -142,11 +152,12 @@ public struct MatroskaFile: Sendable {
                                   strippedHeader: stripped, unsupportedEncoding: unsupported)
     }
 
-    private static func cues(_ body: EBMLData, segmentStart: Int64) -> [Cue] {
+    private static func cues(_ body: EBMLData, segmentStart: Int64, length: Int64) -> [Cue] {
         body.children(EBML.cuePoint).compactMap { point in
-            guard let time = point.child(EBML.cueTime)?.uint,
-                  let position = point.child(EBML.cueTrackPositions)?.child(EBML.cueClusterPosition)?.uint else { return nil }
-            return Cue(time: Int64(time), cluster: segmentStart + Int64(position))
+            guard let time = point.child(EBML.cueTime).flatMap({ Int64(exactly: $0.uint) }),
+                  let offset = point.child(EBML.cueTrackPositions)?.child(EBML.cueClusterPosition).flatMap({ Int64(exactly: $0.uint) }),
+                  offset < length else { return nil }
+            return Cue(time: time, cluster: segmentStart + offset)
         }
     }
 }
@@ -208,20 +219,23 @@ final class PacketReader {
                 held = []
                 return ready.isEmpty ? nil : ready.removeFirst()
             }
-            for packet in packets { accept(packet) }
+            accept(packets)
         }
         return ready.removeFirst()
     }
 
-    private func accept(_ packet: MatroskaPacket) {
-        guard seeking else { ready.append(packet); return }
-        let ticks = Int64((packet.time.seconds * 1e9 / Double(file.timestampScale)).rounded())
+    /// Takes one block's frames. Laced frames share the block's time, so a block is kept whole.
+    private func accept(_ block: [MatroskaPacket]) {
+        guard seeking else { ready += block; return }
+        guard let time = block.first?.time else { return }
+        let ticks = Int64((time.seconds * 1e9 / Double(file.timestampScale)).rounded())
+        let sync = block.firstIndex(where: \.isSyncPoint)
         if ticks <= target {
-            if packet.isSyncPoint { held = [packet] } else if !held.isEmpty { held.append(packet) }
-        } else if !held.isEmpty || packet.isSyncPoint {
-            // The target lies before this packet; begin at the last sync at or before it,
+            if let sync { held = Array(block[sync...]) } else if !held.isEmpty { held += block }
+        } else {
+            // The target lies before this block; begin at the last sync at or before it,
             // or here when the stream starts after the target.
-            ready = held.isEmpty ? [packet] : held + [packet]
+            if !held.isEmpty { ready = held + block } else if let sync { ready = Array(block[sync...]) } else { return }
             held = []
             seeking = false
         }
@@ -258,13 +272,14 @@ final class PacketReader {
     private func block(size: Int64) async throws -> [MatroskaPacket]? {
         let start = window.position
         guard let number = try await window.vint() else { throw SpatialAudioError.source("Malformed Matroska block") }
+        // A timestamp and flags follow the track number.
         let headerLength = window.position - start
+        guard size - headerLength >= 3 else { throw SpatialAudioError.source("Truncated Matroska block") }
         guard number == track.number else {
             try await window.skip(size - headerLength)
             return nil
         }
         let body = try await window.read(Int(size - headerLength))
-        guard body.count >= 3 else { throw SpatialAudioError.source("Truncated Matroska block") }
         let relative = Int64(Int16(bitPattern: UInt16(body[body.startIndex]) << 8 | UInt16(body[body.startIndex + 1])))
         let flags = body[body.startIndex + 2]
         let frames = try Self.frames(body.dropFirst(3), lacing: (flags >> 1) & 3)
@@ -319,7 +334,7 @@ final class PacketReader {
             sizes = Array(repeating: each, count: count - 1)
         }
         let laced = sizes.reduce(0, +)
-        guard laced <= data.count - index else { throw SpatialAudioError.source("Malformed Matroska lacing") }
+        guard sizes.allSatisfy({ $0 >= 0 }), laced <= data.count - index else { throw SpatialAudioError.source("Malformed Matroska lacing") }
         sizes.append(data.count - index - laced)
         data = data.dropFirst(index)
         var frames: [Data] = [], offset = data.startIndex
