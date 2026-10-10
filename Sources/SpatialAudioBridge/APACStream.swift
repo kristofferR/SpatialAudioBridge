@@ -213,6 +213,9 @@ actor StreamEngine {
     /// After a restart, converts from a few segments ahead in parallel, until `run` reaches it
     /// and hands over. One encoder runs on one thread, so two runs fill a seek's gap sooner.
     private var helper: Run?
+    /// Where the helper will start, once `run` has delivered its first segment: started together,
+    /// the two runs delayed that segment past the 3 s AVPlayer allows a seek on Apple TV.
+    private var plannedHelper: Int?
     private var requested = 0
     /// Segments that requests are waiting for, one entry per request.
     private var waiting: [Int] = []
@@ -224,7 +227,7 @@ actor StreamEngine {
     private var demand: Int { max(requested, waiting.max() ?? requested) }
     /// Where conversion runs ahead from: what playback wants, or the helper's start, which playback
     /// will want soon after a seek.
-    private var frontier: Int { max(demand, helper?.start ?? 0) }
+    private var frontier: Int { max(demand, helper?.start ?? plannedHelper ?? 0) }
 
     private struct Run {
         let id: UUID
@@ -363,9 +366,10 @@ actor StreamEngine {
             store.retire(run: run.id)
         }
         run = launch(from: index, early: false)
+        helper = nil
         // The helper stays within the segments the store keeps for the request.
         let offset = min(Self.helperOffset, lookahead)
-        helper = offset >= 2 && index + offset < segmentCount ? launch(from: index + offset, early: true) : nil
+        plannedHelper = offset >= 2 && index + offset < segmentCount ? index + offset : nil
     }
 
     /// Converts from segment `index`: decoding starts at the last sync before its first presented
@@ -419,11 +423,19 @@ actor StreamEngine {
         return Run(id: id, start: index, task: task)
     }
 
-    /// Ends run `id` once it has delivered everything before the helper's first segment, and
-    /// makes the helper the run. A helper whose transport failed is dropped and the run carries on;
-    /// any other failure would repeat in the run, so it ends the stream.
+    /// Starts the planned helper once run `id` has delivered its first segment. Ends the run once it
+    /// has delivered everything before the helper's first segment, and makes the helper the run.
+    /// A helper whose transport failed is dropped and the run carries on; any other failure would
+    /// repeat in the run, so it ends the stream.
     private func handOver(from id: UUID) -> Bool {
-        guard run?.id == id, let helper else { return false }
+        guard let run, run.id == id else { return false }
+        let converted = store.highest(run: id)
+        if let planned = plannedHelper, converted >= run.start {
+            plannedHelper = nil
+            // A run already close to the planned start no longer needs the help.
+            if converted < planned - 1 { helper = launch(from: planned, early: true) }
+        }
+        guard let helper else { return false }
         if let error = store.failure(run: helper.id) {
             log.error("The helper from seg\(helper.start) failed: \(String(describing: error), privacy: .public)")
             if failure == nil, let error = error as? SpatialAudioError { failure = error }
@@ -433,7 +445,7 @@ actor StreamEngine {
         guard store.highest(run: id) >= helper.start - 1 else { return false }
         log.info("seg\(helper.start - 1) reached the helper; it continues from seg\(helper.start)")
         store.retire(run: id)
-        (run, self.helper) = (helper, nil)
+        (self.run, self.helper) = (helper, nil)
         return true
     }
 
