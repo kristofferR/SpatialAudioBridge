@@ -71,7 +71,7 @@ let report = try await audio?.finish()
 `APACHLSOutput` persists fragments and an EVENT playlist into a new directory:
 
 ```swift
-let configuration = APACConfiguration(layout: .nineOneSix, startTime: firstAudioPTS)
+let configuration = APACConfiguration(startTime: firstAudioPTS)
 let hls = try APACHLSOutput(directory: newDirectoryURL, configuration: configuration)
 let audio = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: hls.destination,
                                        configuration: configuration)
@@ -89,7 +89,7 @@ In the multivariant playlist, list `layout.apacCodecString` (`apac.31.04` for 9.
 
 | Property | Default | Notes |
 |---|---|---|
-| `layout` | `.nineOneSix` | `.sevenOneFour` for 12 channels |
+| `layout` | `.sevenOneFour` | `.nineOneSix` for 16 channels. Apple TV's Atmos output carries 12 channels and folds 9.1.6 into them; see [Atmos output](atmos-output.md#output-format) |
 | `bitRate` | 256 kbit/s per channel, at most 4.096 Mbit/s | 4.096 Mbit/s for 9.1.6, 3.072 Mbit/s for 7.1.4 |
 | `gainDB` | 0 | −60 to +12 dB, applied before encoding. No normalization or limiting. |
 | `startTime` | zero | Presentation time of the first output sample |

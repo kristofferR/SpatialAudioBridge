@@ -42,7 +42,7 @@ The stream's own log, subsystem `SpatialAudioBridge`, category `APACStream`, sho
 
 ## Playback stalls
 
-Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to 9.1.6 at about 3.2×. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate. Choosing `.sevenOneFour` lowers the APAC bit rate and encoding work.
+Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to 9.1.6 at about 3.2×; the default 7.1.4 needs a quarter less bit rate and, on a Mac, about a third less encoding time. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate.
 
 ## Seeks take several seconds
 
