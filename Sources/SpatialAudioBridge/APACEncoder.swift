@@ -80,8 +80,8 @@ final class APACEncoder {
         feed?.deallocate()
     }
 
-    /// Appends PCM and returns the packets it completes. The encoder holds about one sync period
-    /// (1.6 s) before its first packet. `final` flushes the remaining audio.
+    /// Appends PCM and returns the packets it completes. The live encoder holds 71 packets (1.5 s)
+    /// before its first packet. `final` flushes the remaining audio.
     func encode(_ samples: ArraySlice<Float>, final: Bool = false) throws -> [Data] {
         pending.append(contentsOf: samples)
         draining = final

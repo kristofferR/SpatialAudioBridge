@@ -74,18 +74,18 @@ The stream listens on `127.0.0.1` at a random port, under a random path, and ser
 | `audio.m3u8` | A VOD playlist of 3.2-second segments covering the whole file. Use it for audio-only playback. |
 | `init.mp4`, `seg<N>.m4s` | One shared initialization segment and the media segments, converted on request. |
 
-The master rewrite removes the server's audio renditions, replaces audio codecs in each variant's `CODECS` with `apac.31.04` (or `apac.31.03` for 7.1.4), adds the APAC bit rate to `BANDWIDTH`, and makes every URI absolute, so video segments still load directly from the server. Subtitle renditions are kept. The server's video variants may still carry muxed audio; `AVPlayer` plays the APAC rendition instead.
+The master rewrite removes the server's audio renditions, replaces audio codecs in each variant's `CODECS` with `apac.31.03` (or `apac.31.04` for 9.1.6), adds the APAC bit rate to `BANDWIDTH`, and makes every URI absolute, so video segments still load directly from the server. Subtitle renditions are kept. The server's video variants may still carry muxed audio; `AVPlayer` plays the APAC rendition instead.
 
 ## Seeking and synchronization
 
 Seek the player as usual. Segments lie on a fixed grid, so every conversion run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
 
 - Segments already converted are served at once: the lookahead ahead of the playhead, and the last 20 segments (about 64 s) behind it, so skipping back over recent audio is immediate.
-- Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 1 s apart on Apple TV 4K (2nd generation). The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s. Once the first segment is ready, a second run converts from 5 segments ahead at the same time, so the segments `AVPlayer` asks for next are often ready; see [concurrency](architecture.md#concurrency-bounds-and-failure).
+- Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 0.7 s apart on Apple TV 4K (2nd generation), 1 s apart at 9.1.6. The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s. Once the first segment is ready, a second run converts from 5 segments ahead at the same time, so the segments `AVPlayer` asks for next are often ready; see [concurrency](architecture.md#concurrency-bounds-and-failure).
 - While scrubbing, `AVPlayer` requests a segment at each intermediate position. Each restarts conversion, and requests a later restart replaced are answered with status 503 at once.
 - A gap or reset in the track's own timestamps ends the stream with an error. Conversion times audio by its samples, so it cannot keep audio aligned past the jump; the host falls back as for any other conversion failure.
 
-After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7 s and long jumps after 9–11 s with the helper run, 11–14 s before it. On a remux with keyframes under a second apart, jumps resumed after 5–8 s. Skips within already converted audio resumed after about 1 s.
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7.5 s and scrubs and long jumps after 5.5–12.5 s. At 9.1.6, long jumps took 9–11 s with the helper run and 11–14 s before it, and on a remux with keyframes under a second apart, 5–8 s. Skips within already converted audio resumed after 1–1.5 s.
 
 Pass the intended start position as `startTime`, so the first segment is ready when `AVPlayer` asks for it, and seek exactly (`toleranceBefore: .zero`) before playing.
 
@@ -93,7 +93,7 @@ Pass the intended start position as `startTime`, so the first segment is ready w
 
 ```swift
 var options = APACStream.Options()
-options.configuration = APACConfiguration(layout: .sevenOneFour) // 12 channels at 3.072 Mbit/s
+options.configuration.layout = .nineOneSix // 16 channels at 4.096 Mbit/s instead of 7.1.4
 options.renditionName = "Dolby Atmos (Spatial Audio)"
 options.lookahead = 6              // segments converted ahead of the newest request
 options.keptBehind = 20            // played segments kept for skipping back
@@ -103,7 +103,7 @@ options.includesVideoVariant = { $0.query?.contains("AllowVideoStreamCopy=true")
 let stream = try await APACStream.start(file: file, videoMaster: videoMaster, options: options)
 ```
 
-The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 7.1.4 layout uses 3.072 Mbit/s, about 1.2 MB per segment, so the defaults keep at most about 42 MB of converted audio.
+The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 7.1.4 layout uses 3.072 Mbit/s, about 1.2 MB per segment, so the defaults keep at most about 42 MB of converted audio; 9.1.6 raises that to about 56 MB. Apple TV folds 9.1.6 into 12 channels; see [Atmos output](atmos-output.md#output-format).
 
 `includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
 
@@ -123,14 +123,14 @@ A track can also carry unsupported metadata partway through. The failed run retu
 
 ## Measured on Apple TV
 
-Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Ethernet, a 4K HDR10 HEVC remux with TrueHD Atmos 7.1, converted to 9.1.6:
+Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Ethernet, a 4K HDR10 HEVC remux with TrueHD Atmos 7.1, converted to the default 7.1.4:
 
 | Measure | Result |
 |---|---|
-| `MatroskaFile.open` and `APACStream.start` | 2.0–2.5 s |
-| Launch to playing | 4–5 s |
-| Conversion | About 1 s per 3.2-second segment, 3.2× real time; Debug and Release alike |
-| Memory | No growth: available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes |
+| `MatroskaFile.open` and `APACStream.start` | 1.8–2.4 s |
+| Launch to playing | 4.3–6.6 s |
+| Conversion | About 6× real time in steady playback; 0.7 s per 3.2-second segment, 4.5×, while video loads after a seek (9.1.6: 1 s, 3.2×); Debug and Release alike |
+| Memory | No growth: available memory stayed within 2,139–2,174 MB over a 22-minute session, and 2,135–2,171 MB across 9.1.6 sessions of up to 16 minutes |
 | Seeks | Recovered from every skip, scrub and jump in a scripted test; times above |
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; video and audio played together |
 

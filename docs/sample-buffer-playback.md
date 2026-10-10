@@ -34,7 +34,7 @@ try await audio.endOfStream()
 ## Timing
 
 - **Start.** Call `begin(at:)` with the presentation time, then enqueue packets from a sync point at or before it. The first packet's time anchors the timeline; audio before `start` is discarded, and a source that begins after it is padded with silence, so audio starts exactly at `start`.
-- **Readiness.** The live encoder holds about 1.6 s of input before its first packet. Start the synchronizer only when `isReadyToPlay` is true.
+- **Readiness.** The live encoder holds 71 packets (1.5 s) of input before its first packet. Start the synchronizer only when `isReadyToPlay` is true.
 - **Seek.** Pause the synchronizer, call `begin(at:)` with the target, which flushes queued audio and resets the decoder and encoder, then feed packets from the target and start the clock again once ready. An `enqueue` still waiting from before the seek throws `CancellationError` instead of queuing stale audio.
 - **Pause and rate.** The host sets the synchronizer's rate. `AtmosOutputActivator` follows it.
 - **Discontinuities.** A timestamp jump or a format change needs `begin(at:)`, just like a seek.

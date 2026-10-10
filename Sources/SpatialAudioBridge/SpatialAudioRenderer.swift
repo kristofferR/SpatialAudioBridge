@@ -34,8 +34,8 @@ public actor SpatialAudioRenderer {
     private var state = State.accepting
     private enum State { case accepting, ended, failed }
 
-    /// Whether enough APAC is queued to start the synchronizer. The encoder holds about one sync
-    /// period (1.6 s) before its first packet, so start the clock only once this is true.
+    /// Whether enough APAC is queued to start the synchronizer. The encoder holds 71 packets
+    /// (1.5 s) before its first packet, so start the clock only once this is true.
     public var isReadyToPlay: Bool { audioRenderer.hasSufficientMediaDataForReliablePlaybackStart }
 
     /// Whether the renderer is playing APAC, or failed to decode it.

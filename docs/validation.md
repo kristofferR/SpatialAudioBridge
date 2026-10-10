@@ -68,26 +68,26 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | 9.1.6 output | With the activator, a Samsung HW-Q990C soundbar played a 9.1.6 sweep's wides and top middles from neighbouring speakers, the top middles from both front and rear heights: tvOS folds 9.1.6 into its 12-channel output |
 | Blind layout comparison | Our 7.1.4 and 9.1.6 renders of a synthetic object circling the room at ear level and overhead and of seven Dolby demo and film excerpts, as X and Y in random order without a reference: 7.1.4 was preferred five times and 9.1.6 three, while the second-played version won seven of eight. No consistent difference; 7.1.4 became the default |
 | MAT Atmos without the activator | Requesting `'mat+'` through the private `-[AVAudioSession setPreferredAudioFormat:error:]` switched the output to MAT Atmos with 12 channels, and the soundbar showed Atmos. In an A/B of the same height channels, the heights sounded lower, vaguer and quieter than with the activator. `setPreferredOutputNumberOfChannels(_:)` with 12 or 16 left 8-channel LPCM |
-| `APACStream` with Jellyfin | A 4K HDR10 title with TrueHD Atmos played with stream-copied HEVC video and Atmos on the receiver; stream ready 2.0–2.5 s and playing 4–5 s after launch; about 1 s of conversion per 3.2-second segment, in Debug and Release builds alike |
-| Sustained `APACStream` playback | After the pacing fix, no stalls in 37 minutes of steady playback; before it, playback stopped after 111 s when a dropped segment was requested. Available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes |
+| `APACStream` with Jellyfin | A 4K HDR10 title with TrueHD Atmos played with stream-copied HEVC video and Atmos on the receiver; at 9.1.6, stream ready 2.0–2.5 s and playing 4–5 s after launch, about 1 s of conversion per 3.2-second segment, in Debug and Release builds alike. At 7.1.4, in three Debug launches: ready 1.8–2.4 s, playing 4.3–6.6 s after launch, `conversionSpeed` about 6.3× in steady playback and segments a median 0.7 s apart while video loads after a seek |
+| Sustained `APACStream` playback | At 9.1.6, after the pacing fix, no stalls in 37 minutes of steady playback; before it, playback stopped after 111 s when a dropped segment was requested. Available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes. At 7.1.4, no stalls or segment errors in 15 minutes of steady playback, then remote pauses and skips; available memory stayed within 2,139–2,174 MB over the 22-minute session |
 | Seeks with `AVPlayer` | Before the restart rule changed, a long scrub failed the item (`-12880`) and skips back waited up to 30 s. Afterwards, a scripted test of eight skips, scrubs and jumps recovered every time; times below |
 | `SpatialAudioRenderer` on device | Renderer mode read the title from Jellyfin, started the synchronizer 1.47 s after launch and reported `.rendering` with the silent Atmos stream playing |
 | Activator lifecycle | The silent stream follows host play/pause, plays only for accepted items, follows a synchronizer, stops on detach and reports an unplayable stream (macOS) |
 
-Scripted seeks on the Release build, from 55:06 into the Jellyfin title, whose stream-copy video segments last 10.4 s. Each seek was issued as a remote does, without waiting for the previous one, and timed until playback moved past the target:
+Scripted seeks from 55:06 into the Jellyfin title, whose stream-copy video segments last 10.4 s. Each seek was issued as a remote does, without waiting for the previous one, and timed until playback moved past the target:
 
-| Seek | Resumed after | With the helper run |
-|---|---|---|
-| Skip forward 10 s, within converted audio | 1.1 s | 1.5 s |
-| Skip back 10 s, before the first converted segment | 6.8 s | 6.0 s |
-| Three skips back 10 s, 0.3 s apart | 6.2 s | 6.7 s |
-| Scrub forward 2 min, twelve steps 0.17 s apart | 13.6 s | 11.4 s |
-| Scrub back 1 min, six steps | 12.2 s | 9.3 s |
-| Jump forward 10 min | 13.7 s | 9.0 s |
-| Jump back 5 min | 13.3 s | 9.8 s |
-| Two 1-minute jumps forward, 0.5 s apart | 11.9 s | 10.0 s |
+| Seek | 9.1.6, Release | 9.1.6, with the helper run | 7.1.4, two runs |
+|---|---|---|---|
+| Skip forward 10 s, within converted audio | 1.1 s | 1.5 s | 1.1 s, 1.5 s |
+| Skip back 10 s, before the first converted segment | 6.8 s | 6.0 s | 6.4 s, 6.8 s |
+| Three skips back 10 s, 0.3 s apart | 6.2 s | 6.7 s | 21.5 s (wedge, recovered by the watchdog), 7.5 s |
+| Scrub forward 2 min, twelve steps 0.17 s apart | 13.6 s | 11.4 s | 9.3 s, 10.0 s |
+| Scrub back 1 min, six steps | 12.2 s | 9.3 s | 9.8 s, 8.0 s |
+| Jump forward 10 min | 13.7 s | 9.0 s | 7.3 s, 5.5 s |
+| Jump back 5 min | 13.3 s | 9.8 s | 12.5 s, 7.4 s |
+| Two 1-minute jumps forward, 0.5 s apart | 11.9 s | 10.0 s | 8.7 s, 6.4 s |
 
-In three of six runs, the three quick skips back left `AVPlayer` waiting without requesting anything more, after Jellyfin aborted a video segment mid-response or `AVPlayer` reset an audio connection. StreamPlayer's 20-second watchdog recovered the one wedge that occurred while it was in place, by replacing the item; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). In the two runs on the final code, every other seek resumed in 0.7–14.7 s, within about a second of the times above. The last column is one run of a Debug build with the helper run; Debug converts as fast as Release. A run that started the helper together with the first run resumed long jumps as fast, but delayed first segments after restarts to up to 4.2 s, past the 3 s `AVPlayer` allows a seek; starting the helper after the first segment kept them at 1.6–3.1 s, as without it (1.8–3.7 s).
+In four of eight runs, the three quick skips back left `AVPlayer` waiting without requesting anything more, after Jellyfin aborted a video segment mid-response or `AVPlayer` reset an audio connection. StreamPlayer's 20-second watchdog recovered both wedges that occurred while it was in place, by replacing the item, the second at the pending seek target; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). In the two runs on the final code, every other seek resumed in 0.7–14.7 s, within about a second of the times above. The helper column is one run of a Debug build; Debug converts as fast as Release. The 7.1.4 runs used a Debug build of the current code: segments converted in a median 0.7 s (0.68–0.80 s for 80% of them), and first segments after restarts in 1.2–2.6 s, with one at 3.1 s and one at 4.9 s after the 5-minute jump back, which `AVPlayer` logged as a −12889 timeout without failing the seek. A run that started the helper together with the first run resumed long jumps as fast, but delayed first segments after restarts to up to 4.2 s, past the 3 s `AVPlayer` allows a seek; starting the helper after the first segment kept them at 1.6–3.1 s, as without it (1.8–3.7 s).
 
 On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted test from 20:00 resumed scrubs and jumps in 5.1–8.2 s and three skips back in 6.8 s; skips within converted audio took 0.7–0.9 s. Its first segments after restarts took 3.0–3.5 s and `AVPlayer` logged three −12889 timeouts without failing a seek: the reader transfers the video too, about 85 MB for the 7 s of file a restart's first segment needs.
 
@@ -134,7 +134,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 ## Coverage
 
-The suite includes 30 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 30 Rust unit tests, 4 Rust fixture tests and 48 Swift tests. Without fixture variables, 36 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 

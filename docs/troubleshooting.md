@@ -43,17 +43,17 @@ The stream's own log, subsystem `SpatialAudioBridge`, category `APACStream`, sho
 
 ## Playback stalls
 
-Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to 9.1.6 at about 3.2×; the default 7.1.4 needs a quarter less bit rate and, on a Mac, about a third less encoding time. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate.
+Playback needs conversion faster than real time. Apple TV 4K (2nd generation) converts TrueHD Atmos to the default 7.1.4 at about 6× real time in steady playback and 4.5× while video loads after a seek, and to 9.1.6 at about 3.2× after a seek. Over Wi-Fi, the Matroska reader also transfers the video bytes, so the network must deliver the file faster than its bitrate.
 
 ## Seeks take several seconds
 
-After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, and each segment that is not yet converted costs about 1 s on Apple TV 4K (2nd generation). Titles with long keyframe intervals, whose stream-copy video segments are long, therefore take longest: 6–11 s with 10.4-second segments. Skips within the last minute of played audio, or within the lookahead, resume in about 1 s. See [seeking](avplayer.md#seeking-and-synchronization).
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, and each segment that is not yet converted costs about 0.7 s on Apple TV 4K (2nd generation) at 7.1.4, 1 s at 9.1.6. Titles with long keyframe intervals, whose stream-copy video segments are long, therefore take longest: 5.5–12.5 s with 10.4-second segments. Skips within the last minute of played audio, or within the lookahead, resume in 1–1.5 s. See [seeking](avplayer.md#seeking-and-synchronization).
 
 ## Playback stays waiting after rapid seeks
 
 Three quick skips back sometimes left `AVPlayer` waiting indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. In one run Jellyfin had aborted a video segment mid-response (`The response has already started` in its log); in another, `AVPlayer` reset the connection while an audio segment was being sent.
 
-Recover in the host: when the player has waited 20 s, replace the item and seek it to the pending seek target, or to the current position when no seek is pending. On the tested title, legitimate waits after a seek lasted up to 15 s, so 20 s does not cut a slow seek short. On tvOS, `AVPlayerViewControllerDelegate`'s `playerViewController(_:timeToSeekAfterUserNavigatedFrom:to:)` reports the remote's seek targets. [StreamPlayer](../Examples/StreamPlayer/README.md) does this. On an Apple TV its earlier version, which reloaded at the stuck position, recovered a wedge and the next skip resumed in 0.7 s; the pending target was lost. A player's own stall handling can do the same.
+Recover in the host: when the player has waited 20 s, replace the item and seek it to the pending seek target, or to the current position when no seek is pending. On the tested title, legitimate waits after a seek lasted up to 15 s, so 20 s does not cut a slow seek short. On tvOS, `AVPlayerViewControllerDelegate`'s `playerViewController(_:timeToSeekAfterUserNavigatedFrom:to:)` reports the remote's seek targets. [StreamPlayer](../Examples/StreamPlayer/README.md) does this. On an Apple TV it recovered a wedge at the pending target, playing 0.25 s after replacing the item. An earlier version, which reloaded at the stuck position, also recovered one but lost the pending target. A player's own stall handling can do the same.
 
 ## Other audio stutters
 

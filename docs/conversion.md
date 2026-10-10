@@ -64,7 +64,7 @@ for try await packet in file.packets(of: track, from: target) {
 let report = try await audio?.finish()
 ```
 
-`packets(of:from:)` starts at the last sync point at or before `from` and reports each frame's container time and whether it is a sync point. Frames laced into one block share the block's time. The reader handles header-stripping compression and Xiph, EBML and fixed lacing. It rejects encrypted or zlib-compressed tracks. Seeks start from the cue two seconds before the target, because audio is interleaved near, not exactly at, video keyframes. `FileByteSource` reads local files and `HTTPByteSource` sends range requests with optional headers. Implement `MediaByteSource` for other storage.
+`packets(of:from:)` starts at the last sync point at or before `from` and reports each frame's container time and whether it is a sync point. Frames laced into one block share the block's time. The reader handles header-stripping compression and Xiph, EBML and fixed lacing. It rejects encrypted tracks and any other content compression, such as zlib. Seeks start from the cue two seconds before the target, because audio is interleaved near, not exactly at, video keyframes. `FileByteSource` reads local files and `HTTPByteSource` sends range requests with optional headers. Implement `MediaByteSource` for other storage.
 
 ## Write HLS
 
@@ -90,7 +90,7 @@ In the multivariant playlist, list `layout.apacCodecString` (`apac.31.04` for 9.
 | Property | Default | Notes |
 |---|---|---|
 | `layout` | `.sevenOneFour` | `.nineOneSix` for 16 channels. Apple TV's Atmos output carries 12 channels and folds 9.1.6 into them; see [Atmos output](atmos-output.md#output-format) |
-| `bitRate` | 256 kbit/s per channel, at most 4.096 Mbit/s | 4.096 Mbit/s for 9.1.6, 3.072 Mbit/s for 7.1.4 |
+| `bitRate` | 256 kbit/s per channel of `layout`, at most 4.096 Mbit/s | 3.072 Mbit/s for 7.1.4, 4.096 Mbit/s for 9.1.6. Once set, it no longer follows `layout` |
 | `gainDB` | 0 | −60 to +12 dB, applied before encoding. No normalization or limiting. |
 | `startTime` | zero | Presentation time of the first output sample |
 | `inputStartTime` | nil | Container time of the first input packet, after a seek |
@@ -113,12 +113,12 @@ The encoder has three effort tiers at the same bit rate, and every path uses med
 
 ```sh
 swift run -j 1 apac-convert truehd movie.thd movie.apac.mp4
-swift run -j 1 apac-convert dtsx movie.dts movie.apac.mp4
+swift run -j 1 apac-convert dtsx movie.dts movie.apac.mp4 --layout 9.1.6
 swift run -j 1 apac-convert mkv movie.mkv excerpt.apac.mp4 --start 600 --duration 30
 swift run -j 1 apac-convert mkv "http://jellyfin:8096/Videos/ID/stream?static=true&ApiKey=…" excerpt.apac.mp4 --track 2
 ```
 
-For servers that authenticate with a header, set it in `SAB_HTTP_HEADER`, such as `SAB_HTTP_HEADER="Authorization: …"`.
+Output is 7.1.4 unless `--layout 9.1.6` is given. For servers that authenticate with a header, set it in `SAB_HTTP_HEADER`, such as `SAB_HTTP_HEADER="Authorization: …"`.
 
 The `mkv` mode lists the audio tracks, then reports the bytes read and the time taken to open the file and to reach the first packet, which is useful for checking a server's range support.
 

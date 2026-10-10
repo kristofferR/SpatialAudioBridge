@@ -28,7 +28,7 @@ public final class APACStream: Sendable {
         /// Segments converted ahead of the latest request, each about 3.2 seconds.
         public var lookahead = 6
         /// Segments kept behind the latest request, so skipping back plays from memory. Each
-        /// segment holds about 1.6 MB at the default bit rate.
+        /// segment holds about 1.2 MB at the default 7.1.4 bit rate, 1.6 MB at 9.1.6's.
         public var keptBehind = 20
         /// How long a segment request waits for conversion before failing.
         public var segmentTimeout: Duration = .seconds(30)
