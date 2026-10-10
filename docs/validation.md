@@ -29,7 +29,8 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Fragmented encoder priming | Core Audio reports 2048 leading frames; native decoding trims them, and the full 58-second stream decodes to its source length rounded up to a whole 1024-frame packet |
 | Live encoding | Segments trail their input by less than 2 s over 30 s of TrueHD Atmos; the offline profile's first fragment needs 23.3 s of input |
 | `AudioConverter` encoder | Sixteen distinct tones survive a 9.1.6 APAC round trip, each correlating above 0.98 with its own channel and below 0.1 with its neighbour |
-| Encoder quality tiers | On 20 s of a film, all 16 channels active: high 47.0 dB and medium 48.4 dB signal-to-error, low 43.0 dB; on the height-only fixture, high and medium 60.9–61.0 dB, low 18.8 dB. Medium encoded 1.25–1.5× as fast as high, low 3×. `AVAssetWriter` ignored the setting |
+| Encoder quality tiers | On 20 s of a film, all 16 channels active: high 47.0 dB and medium 48.4 dB signal-to-error, low 43.0 dB; on the height-only fixture, high and medium 60.9–61.0 dB, low 18.8 dB. Medium encoded 1.25–1.5× as fast as high on a synthetic 16-channel signal and 1.06–1.17× on Atmos content (lowest process CPU of repeated runs on a busy Mac), low 3×. `AVAssetWriter` ignored the setting; its packets were bit-identical to `AudioConverter` at medium, Core Audio's default, with the live and offline profiles |
+| Encoder input batching | Passing PCM to `AudioConverter` once a packet's worth is pending, instead of once per 40-frame TrueHD access unit, cut encoding CPU by about 20% with identical packets |
 | Conversion profile | In a macOS profile, Apple's APAC encoder was about 85% of conversion work. After moving PCM scaling to Accelerate, Debug and Release builds convert at the same speed |
 
 ### Sources and streaming

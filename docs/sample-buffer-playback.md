@@ -51,6 +51,6 @@ On an Apple TV 4K (2nd generation) with tvOS 27.2 beta, APAC played through `AVS
 
 The [StreamPlayer](../Examples/StreamPlayer/README.md) example's renderer mode then ran this API end to end, reading the MKV from Jellyfin: the synchronizer started 1.47 s after launch, the renderer reported `.rendering` and the silent Atmos stream played. Receiver output was not checked by listening in that run.
 
-`SpatialAudioRenderer` encodes with Apple's medium quality tier, which matched the default tier on real Atmos content and encodes 1.25 to 1.5 times as fast.
+`SpatialAudioRenderer` encodes with Apple's medium quality tier, the same tier `AVAssetWriter` uses for `APACStream` and file conversion.
 
 On macOS, the same renderer rejected TrueHD packets as an unsupported format (`fmt?`) while playing 16-channel APAC, so the conversion is what makes this path possible.

@@ -84,7 +84,7 @@ A player cannot wait 23 s for a seek, so `APACStream` and `SpatialAudioRenderer`
 
 ## Where the time goes
 
-Apple's APAC encoder was about 85% of the conversion work in a macOS profile; TrueHD decoding and rendering were small by comparison. `AVAssetWriter` runs the encoder on one thread per session, at about 3.2 times real time on Apple TV 4K (2nd generation) for 9.1.6, in Debug and Release builds alike. `SpatialAudioRenderer` sets the encoder's medium quality tier, which matched the default high tier on real Atmos content and encodes 1.25 to 1.5 times as fast. `AVAssetWriter` ignores that setting for APAC, so `APACStream` and file conversion encode at the default tier.
+Apple's APAC encoder was about 85% of the conversion work in a macOS profile; TrueHD decoding and rendering were small by comparison. `AVAssetWriter` runs the encoder on one thread per session, at about 3.2 times real time on Apple TV 4K (2nd generation) for 9.1.6, in Debug and Release builds alike. Every path encodes at the medium quality tier, Core Audio's default. `AVAssetWriter` ignores the quality setting for APAC, but its packets were bit-identical to `AudioConverter` at medium, and `SpatialAudioRenderer` sets medium explicitly. Medium matched the high tier on real Atmos content at less CPU, so the quality setting offers no faster encoding without losing quality.
 
 ## Boundaries
 
