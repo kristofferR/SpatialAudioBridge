@@ -43,6 +43,23 @@ import Testing
     #expect(lines.contains(#"#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=7480,RESOLUTION=320x132,CODECS="jpeg",URI="http://server:8096/videos/42/Trickplay/320/tiles.m3u8?x=1""#))
 }
 
+@Test func masterPlaylistLeavesOutRejectedVariants() {
+    let upstream = """
+    #EXTM3U
+    #EXT-X-STREAM-INF:BANDWIDTH=128000,VIDEO-RANGE=PQ,CODECS="hvc1.2.4.L153.B0,mp4a.40.2"
+    main.m3u8?AllowVideoStreamCopy=true
+    #EXT-X-STREAM-INF:BANDWIDTH=128000,VIDEO-RANGE=SDR,CODECS="avc1.424029,mp4a.40.2"
+    main.m3u8?VideoCodec=h264&AllowVideoStreamCopy=false
+    """
+    let master = HLSPlaylists.master(rewriting: upstream, baseURL: URL(string: "http://server/videos/42/master.m3u8")!,
+                                     rendition: HLSPlaylists.rendition(name: "Atmos", language: nil, channels: 16),
+                                     codec: "apac.31.04", bitRate: 4_096_000,
+                                     includesVariant: { $0.query?.contains("AllowVideoStreamCopy=true") == true })
+    #expect(master.components(separatedBy: "#EXT-X-STREAM-INF:").count == 2)
+    #expect(master.contains("http://server/videos/42/main.m3u8?AllowVideoStreamCopy=true"))
+    #expect(!master.contains("avc1"))
+}
+
 /// After a seek, AVPlayer allows about 3 s for the first segment and requests every scrub
 /// position; only segments the current run will reach within about two conversions are worth waiting for.
 @Test func requestsWaitOnlyForSegmentsTheRunReachesSoon() {
