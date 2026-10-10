@@ -3,7 +3,8 @@
 ## The receiver does not show Atmos
 
 - Attach `AtmosOutputActivator` and check `isActive` while APAC plays. If it is false, check `error`, and for `AVPlayer` check that the `playsAPAC` predicate returns true for the item.
-- Check that the silent stream signals Atmos: `ffprobe` should report `profile=Dolby Digital Plus + Dolby Atmos`. See [Atmos output](atmos-output.md#make-a-silent-atmos-stream).
+- With your own stream in `init(silentAtmosStream:)`, check that it signals Atmos: `ffprobe` should report `profile=Dolby Digital Plus + Dolby Atmos`. See [Atmos output](atmos-output.md#the-bundled-stream).
+- Check that the receiver shows Atmos for Atmos content in other Apple TV apps. The Apple TV sends the same Dolby MAT output for both.
 - In Apple TV settings, keep the audio format on Auto with Change Format off, and Dolby Atmos enabled.
 - Do not rely on `AVAudioSession` channel counts or spatial audio flags to detect Atmos; they did not distinguish it on tvOS 27.2.
 

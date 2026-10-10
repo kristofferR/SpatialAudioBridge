@@ -37,6 +37,28 @@ import Testing
         host.pause()
     }
 
+    @Test func bundledStreamIsSignalledAsAtmosAndPlays() async throws {
+        let asset = AVURLAsset(url: AtmosOutputActivator.bundledStream)
+        let track = try #require(try await asset.loadTracks(withMediaType: .audio).first)
+        let description = try #require(try await track.load(.formatDescriptions).first)
+        var size = 0
+        let list = try #require(CMAudioFormatDescriptionGetFormatList(description, sizeOut: &size))
+        let formats = (0..<size / MemoryLayout<AudioFormatListItem>.size).map { list[$0].mASBD.mFormatID }
+        // CoreMedia offers the object-audio format 'ec+3' only when dec3 signals Atmos.
+        #expect(formats.contains(0x6563_2B33))
+        #expect(formats.contains(kAudioFormatEnhancedAC3))
+
+        let activator = AtmosOutputActivator()
+        let host = AVPlayer(url: try silence("apac"))
+        host.volume = 0
+        activator.attach(to: host)
+        host.play()
+        #expect(await eventually { activator.isActive })
+        #expect(activator.error == nil)
+        activator.detach()
+        host.pause()
+    }
+
     @Test func followsARenderSynchronizer() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let synchronizer = AVSampleBufferRenderSynchronizer()

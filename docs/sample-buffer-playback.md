@@ -14,7 +14,7 @@ import SpatialAudioPlayback
 let synchronizer = AVSampleBufferRenderSynchronizer()
 synchronizer.addRenderer(videoRenderer) // the host's video
 let audio = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: synchronizer)
-let atmos = AtmosOutputActivator(silentAtmosStream: silentAtmosURL)
+let atmos = AtmosOutputActivator()
 atmos.attach(to: synchronizer)
 
 try await audio.begin(at: start)

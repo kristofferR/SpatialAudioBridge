@@ -3,8 +3,7 @@ import AVFoundation
 /// Keeps Apple TV HDMI output in Dolby Atmos while a host `AVPlayer` plays APAC.
 ///
 /// On the tested Apple TV and receiver route, APAC alone did not switch the output to Atmos.
-/// A second, unmuted player looping a near-silent E-AC-3 + JOC (Dolby Atmos) stream did.
-/// Supply that stream; this library does not ship one.
+/// A second, unmuted player looping a silent E-AC-3 stream signalled as Dolby Atmos did.
 /// Validate each target route and OS: receiver Atmos indication does not prove speaker placement.
 @MainActor
 public final class AtmosOutputActivator {
@@ -23,13 +22,29 @@ public final class AtmosOutputActivator {
     /// Why the silent Atmos stream could not play, if it failed to load.
     public var error: (any Error)? { looper?.error }
 
-    /// `silentAtmosStream` must be a near-silent E-AC-3 file signalled as JOC (Dolby Atmos). It is looped.
+    /// Loops the bundled stream: 2 s of digital silence in E-AC-3 signalled as Dolby Atmos,
+    /// written by `scripts/make-silent-atmos.swift`.
+    public convenience init() {
+        self.init(silentAtmosStream: Self.bundledStream)
+    }
+
+    /// `silentAtmosStream` must be a silent or near-silent E-AC-3 file signalled as Dolby Atmos. It is looped.
     public init(silentAtmosStream: URL) {
         stream = silentAtmosStream
         player.automaticallyWaitsToMinimizeStalling = false
     }
 
     isolated deinit { detach() }
+
+    static var bundledStream: URL {
+        #if SWIFT_PACKAGE
+        let bundle = Bundle.module
+        #else
+        // The example apps compile these sources into the app, which copies the resource.
+        let bundle = Bundle(for: AtmosOutputActivator.self)
+        #endif
+        return bundle.url(forResource: "silent-atmos", withExtension: "mp4")!
+    }
 
     /// Plays the silent stream whenever `player` is playing, or waiting to play, an item for which
     /// `playsAPAC` returns true. Pauses with the host and re-evaluates on item and audio selection changes.

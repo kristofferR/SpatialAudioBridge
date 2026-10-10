@@ -12,7 +12,7 @@ let package = Package(
     targets: [
         .binaryTarget(name: "SpatialAudioCore", path: "BinaryArtifacts/SpatialAudioCore.xcframework"),
         .target(name: "SpatialAudioBridge", dependencies: ["SpatialAudioCore"]),
-        .target(name: "SpatialAudioPlayback"),
+        .target(name: "SpatialAudioPlayback", resources: [.copy("Resources/silent-atmos.mp4")]),
         .executableTarget(name: "APACConvert", dependencies: ["SpatialAudioBridge"]),
         .testTarget(name: "SpatialAudioBridgeTests", dependencies: ["SpatialAudioBridge"]),
         .testTarget(name: "SpatialAudioPlaybackTests", dependencies: ["SpatialAudioPlayback"]),

@@ -2,7 +2,7 @@
 
 Play **TrueHD Atmos** and **DTS:X** on Apple TV with native spatial audio, including the height channels.
 
-Apple TV cannot decode either format. Players usually decode them to multichannel PCM and lose the heights, or the server transcodes them. SpatialAudioBridge decodes the track, renders its objects and heights into 7.1.4 or 9.1.6 speaker feeds, and encodes those feeds as **Apple Positional Audio Codec (APAC)**, which Apple TV plays natively. With a near-silent Dolby Atmos stream alongside, the receiver switches to Atmos.
+Apple TV cannot decode either format. Players usually decode them to multichannel PCM and lose the heights, or the server transcodes them. SpatialAudioBridge decodes the track, renders its objects and heights into 7.1.4 or 9.1.6 speaker feeds, and encodes those feeds as **Apple Positional Audio Codec (APAC)**, which Apple TV plays natively. With a silent Dolby Atmos stream alongside, which the library bundles, the receiver switches to Atmos.
 
 ```text
 TrueHD Atmos / DTS:X ─▶ decode ─▶ render objects to 7.1.4 / 9.1.6 ─▶ APAC ─▶ AVPlayer or AVSampleBufferAudioRenderer
@@ -23,7 +23,7 @@ try AtmosOutputActivator.configureAudioSession()
 let file = try await MatroskaFile.open(HTTPByteSource(url: directPlayURL))
 let stream = try await APACStream.start(file: file, videoMaster: serverHLSURL, startTime: position)
 
-let atmos = AtmosOutputActivator(silentAtmosStream: silentAtmosURL)
+let atmos = AtmosOutputActivator()
 atmos.attach(to: player)
 player.replaceCurrentItem(with: AVPlayerItem(url: stream.masterPlaylistURL!))
 await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
@@ -84,7 +84,7 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 - [Play through sample buffers](docs/sample-buffer-playback.md): `SpatialAudioRenderer` with a render synchronizer
 - [Convert and package](docs/conversion.md): transcoder, HLS output, configuration, priming and the CLI
 - [Media servers](docs/media-servers.md): Jellyfin URLs and network costs
-- [Atmos output](docs/atmos-output.md): the silent Atmos stream and how to make one
+- [Atmos output](docs/atmos-output.md): the bundled silent Atmos stream, how it is made and what was tested
 - [Architecture](docs/architecture.md): pipeline, timing grid, live encoding and bounds
 - [Rendering model](docs/rendering.md): coordinate mapping and supported metadata
 - [Troubleshooting](docs/troubleshooting.md): errors and their causes

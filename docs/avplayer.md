@@ -10,7 +10,8 @@ Use this path when the host already plays video with `AVPlayer` or `AVPlayerView
 - The MKV, reachable as a local file or over HTTP with range requests, such as a media server's direct-play URL. M2TS and MP4 sources need the host's demuxer and the [conversion API](conversion.md).
 - For video, an HLS multivariant playlist that `AVPlayer` can play, such as a media server's remux. [Media servers](media-servers.md) shows how to request one from Jellyfin.
 - App Transport Security settings that allow the loopback playlist. The example app uses `NSAllowsLocalNetworking`, plus `NSAllowsArbitraryLoadsForMedia` for a plain-HTTP media server.
-- A near-silent Dolby Atmos stream for `AtmosOutputActivator`; see [Atmos output](atmos-output.md).
+
+`AtmosOutputActivator` brings its own silent Atmos stream; see [Atmos output](atmos-output.md).
 
 ## Play
 
@@ -30,8 +31,7 @@ import SpatialAudioPlayback
         // Converts the segment at `start` before returning, so unsupported tracks fail here.
         let stream = try await APACStream.start(file: file, videoMaster: videoMaster,
                                                 videoHeaders: headers, startTime: start)
-        let silence = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4")!
-        let atmos = AtmosOutputActivator(silentAtmosStream: silence)
+        let atmos = AtmosOutputActivator()
         atmos.attach(to: player) // the master offers only APAC audio
         player.replaceCurrentItem(with: AVPlayerItem(url: stream.masterPlaylistURL!))
         await player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)

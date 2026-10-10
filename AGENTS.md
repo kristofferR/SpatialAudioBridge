@@ -13,6 +13,7 @@ The first deliverable is the library: a simple Swift API for file conversion and
 - `Sources/SpatialAudioPlayback`: playback-route helpers without the Rust core, including Atmos output activation for `AVPlayer` and render synchronizers.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
 - `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV device and Apple TV simulator.
+- `scripts/make-silent-atmos.swift`: writes the silent Dolby Digital Plus Atmos stream that `SpatialAudioPlayback` bundles, from the ETSI specifications alone.
 - `Tests` and the Rust tests: focused checks for spatial rendering, stream handling, timing and native APAC round trips.
 - `Examples`: Apple TV apps for listening comparisons (AtmosAB) and end-to-end media-server playback (StreamPlayer).
 
@@ -26,7 +27,7 @@ None of the surveyed open-source Apple TV players expose compressed audio packet
 - 48 kHz TrueHD Atmos with one bed; objects follow the ETSI TS 103 448 source panner, including size, divergence, snap, zones, trim, gain, activity, timed updates and ramps, and TrueHD dialogue normalisation is applied. Warp mode 1, a 5.1 downmix setting, leaves 7.1.4 and 9.1.6 positions unchanged.
 - 48 kHz lossless DTS:X standard four-height and known alternate object presentations; resolved spatial folds are removed from the compatible bed before recombination. Alternate profiles are experimental, with physical-angle panning and frame-length object ramps.
 - APAC 7.1.4 (default) and 9.1.6 output, including files, HLS fragments and sample buffers. Apple TV's Atmos output carries 12 channels, so it folds 9.1.6 to 7.1.4; a blind comparison found no consistent difference. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).
-- On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K title with video and Atmos output, converting at about 3.2× real time and recovering from every scripted seek (1–14 s); `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`; requesting MAT Atmos through private `AVAudioSession` API also switched output but sounded worse.
+- On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K title with video and Atmos output, converting at about 3.2× real time and recovering from every scripted seek (1–14 s); `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a silent E-AC-3 stream signalled as Atmos alongside, via `AtmosOutputActivator`; requesting MAT Atmos through private `AVAudioSession` API also switched output but sounded worse. The bundled stream signals Atmos only in its frame headers and `dec3` box: tvOS ignores Dolby Digital Plus object metadata unless Dolby's keyed EMDF protection is valid, and switches the output without it.
 - Atmos ISF, multiple beds, bed distribution, bed downmix metadata, objects outside the room and reserved warp modes are rejected; none appeared in a census of 179 library titles. Unknown DTS:X profiles, mismatched source roles and unresolved folds are rejected; all eight DTS:X titles in the census used the standard presentation with every fold stated.
 - The [rendering model](docs/rendering.md) documents the Atmos panner, its 9.1.6 extension and the DTS:X approximation. None of it is a licensed reference renderer.
 
@@ -47,7 +48,7 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 - Query encoder priming instead of hardcoding a measured value. Coded fragment duration and presented source duration are different quantities.
 - Keep cancellation, callback failures and encoder failures terminal for a session. Bound buffering and await backpressure.
 - Pin decoder dependencies and preserve their license notices in binary distributions.
-- Keep generated binaries and fixture media out of Git. Commit validated, scoped changes in logical commits.
+- Keep generated binaries and fixture media out of Git; the one exception is the bundled silent Atmos stream, which its script reproduces byte for byte. Never ship output from Dolby encoders or programme audio. Commit validated, scoped changes in logical commits.
 
 ## Development and validation
 
