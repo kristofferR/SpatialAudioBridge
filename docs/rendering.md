@@ -29,6 +29,12 @@ The room centre therefore distributes equal power across the ring instead of col
 
 Vertical position then scales the bed ring by `cos(z × π/2)` and the height ring by `sin(z × π/2)`. Both rings maintain unit power before this blend. A stationary point has unit total gain power; sums of multiple signals and time-domain metadata ramps need not. Metadata ramps interpolate channel gains over the signalled duration plus one sample.
 
+## Levels
+
+Rendering is linear: no normalization, limiting or headroom gain. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
+
+Measured before encoding, nothing reached full scale in either layout: 38 minutes of a TrueHD Atmos film peaked at −0.2 dBFS, the DTS:X fixture at −0.3 dBFS and the Helicopter fixture at −9.8 dBFS. One 20-second film excerpt reached +4 dBFS in a 9.1.6 height channel. APAC keeps such peaks: tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder. Whether tvOS or the HDMI output then clips them is unverified. A limiter would also change the measured peaks just below full scale, so the renderer leaves the level to the mix and the host's `gainDB`.
+
 ## Metadata boundary
 
 Position, extended precision, object gain, activity, elevation enable, update offsets and gain ramps are implemented. Elevation-disabled objects render at `z = 0`. Inactive object blocks target silence, including when they retain stale object-rendering controls.
