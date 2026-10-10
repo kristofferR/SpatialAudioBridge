@@ -253,8 +253,12 @@ fn for_each_block(
         return Err("Atmos bed downmix metadata is not yet supported".into());
     }
     let trim = metadata.trim_element.as_ref();
-    if trim.is_some_and(|trim| trim.warp_mode != 0) {
-        return Err("Atmos warped object positions are not yet supported".into());
+    // `warp_mode` 1 doubles Y before rendering (TS 103 420 table 32). It is the Dolby Atmos
+    // Renderer's 5.1 "direct render with warp": with the surrounds at the back, everything
+    // behind the room's midpoint plays at a constant level in them. 7.1.4 and 9.1.6 have side
+    // and back surrounds, so positions stay as transmitted.
+    if trim.is_some_and(|trim| trim.warp_mode > 1) {
+        return Err("Reserved Atmos warp mode".into());
     }
     let element = metadata
         .object_element
@@ -784,9 +788,9 @@ mod metadata_tests {
             ("downmix", |m| {
                 m.bed_object_element = Some(Default::default())
             }),
-            ("warped", |m| {
+            ("warp mode", |m| {
                 m.trim_element = Some(TrimElement {
-                    warp_mode: 1,
+                    warp_mode: 2,
                     ..Default::default()
                 })
             }),
@@ -796,6 +800,19 @@ mod metadata_tests {
             set(&mut metadata);
             assert!(render(&metadata).unwrap_err().contains(name));
         }
+    }
+
+    #[test]
+    fn warp_mode_leaves_side_positions_on_the_side_surrounds() {
+        let mut metadata = point();
+        block(&mut metadata).object_render_info.pos3d = [0., 0.5, 0.];
+        let plain = render(&metadata).unwrap();
+        assert_eq!(plain[4], 1.);
+        metadata.trim_element = Some(TrimElement {
+            warp_mode: 1,
+            ..Default::default()
+        });
+        assert_eq!(render(&metadata).unwrap(), plain);
     }
 
     #[test]

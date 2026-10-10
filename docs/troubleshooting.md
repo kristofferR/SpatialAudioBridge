@@ -13,7 +13,7 @@
 
 | Error | Meaning |
 |---|---|
-| `.decoding("… is not yet supported")`, naming objects outside the room, warped positions, bed distribution, bed downmix, ISF or multiple beds, or `.decoding("Reserved Atmos zone constraint")` | The track uses metadata this renderer does not support. |
+| `.decoding("… is not yet supported")`, naming objects outside the room, bed distribution, bed downmix, ISF or multiple beds, or `.decoding("Reserved Atmos zone constraint")` or `"Reserved Atmos warp mode"` | The track uses metadata this renderer does not support. |
 | `.decoding("This TrueHD stream has no Atmos presentation")` | Plain TrueHD without Atmos. |
 | `.decoding("Atmos presentation has no object metadata within 0.5 s")` | The stream started without object metadata; possibly damaged or not a standard Atmos stream. |
 | `.decoding("The initial Atmos renderer supports 48 kHz tracks")` | A 96 kHz or other non-48 kHz track. |

@@ -51,6 +51,7 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 | TrueHD Atmos, 48 kHz, one bed | Supported, including starts at any major sync |
 | Atmos object position, size, divergence, snap, zones, trim, gain, activity, timing and ramps | Supported; ETSI TS 103 448 source panner |
 | TrueHD dialogue normalisation | Applied as a native decoder does |
+| Atmos warp mode, a 5.1 downmix setting | Accepted; 7.1.4 and 9.1.6 positions unchanged |
 | DTS:X standard four-height presentation, 48 kHz | Supported |
 | DTS:X known alternate and IMAX object presentations, 48 kHz lossless | Experimental: D0, D1, D3 and D4, three-component D0 and object-only routing |
 | Matroska (MKV, MKA), local or over HTTP range requests | Supported, with cue-based seeking |
@@ -58,7 +59,7 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 | `AVPlayer` playback with on-demand conversion and seeking | Verified on Apple TV with Jellyfin |
 | `AVSampleBufferAudioRenderer` playback | Atmos and channel placement verified on Apple TV |
 | Atmos ISF, multiple beds, bed distribution or downmix metadata | Rejected |
-| Atmos objects outside the room, warped positions | Rejected |
+| Atmos objects outside the room, reserved warp modes | Rejected |
 | Unknown DTS:X profiles, mismatched source roles, unresolved folds | Rejected |
 | M2TS and MP4 containers | Use the host's demuxer with `SpatialAudioTranscoder` |
 

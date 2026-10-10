@@ -10,7 +10,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 |---|---|
 | Atmos source panner | Every panner target routes to its own speaker, interior and ceiling positions match values worked by hand from TS 103 448, and point gains have unit power on at most eight speakers and are continuous over a room grid |
 | Atmos panner against the specification | 2,880 point, size and divergence cases over both layouts match a literal transcription of TS 103 448 pseudocode 3 to 15 within 3.2 × 10⁻⁷ |
-| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, default and custom trims, extended precision and dialogue normalisation pass; remaining unsupported controls produce explicit errors |
+| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, default and custom trims, extended precision and dialogue normalisation pass; warp mode 1 leaves a side surround position unchanged; remaining unsupported controls produce explicit errors |
 | DTS:X angular panning | Physical speaker angles, overhead symmetry, unit power and absent channels on their own ring pass |
 | DTS:X alternate routing | All seven presentations in both layouts pass synthetic fold cleanup, role separation and physical-angle tests; object ramps and fallback errors pass |
 | IMAX three-component metadata | Upstream payload parsed and C/L/R components routed correctly in both layouts, using synthetic PCM |
@@ -101,13 +101,14 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 | TrueHD Atmos | Result |
 |---|---|
-| Rejected | One title. *Black Hawk Down* (2001) carries trim elements with `warp_mode` 1 in 21% of its metadata payloads, the first at 11:04; three of its five windows had none |
+| Warp mode | One title. *Black Hawk Down* (2001) carries trim elements with `warp_mode` 1 in 21% of its metadata payloads, in whole scenes from 11:04; three of its five windows had none. The renderer rejected it until warp mode was accepted; a 10-minute excerpt with its first two warped scenes now renders in both layouts |
+| Rejected | None with the current renderer |
 | Other trim metadata | None; *Black Hawk Down*'s trims are the defaults |
 | Size, snap, zones, screen anchoring, distance, divergence, elevation disable, bed distribution or downmix, ISF, multiple beds | Not used in any window or full film |
 | Bed | LFE only in every title, with 11 objects alongside in 143 titles, 13 in 14 and 15 in 22 |
 | Object blocks inside the room (at least 2.5% of the room size from every wall) | In 239 of 895 windows, from 81 titles, up to 42% of active blocks; in 7 of the 10 full films, up to 17% |
 | Dialogue level | −31 dB in 166 titles; −23 to −29 dB in 13, most often −27 dB |
-| Peaks above full scale in 7.1.4 | 28 of 895 windows from 22 titles, highest +6.2 dBFS, most often in the front heights and centre. In full, *Alita: Battle Angel* reached +7.6 dBFS and *Sinners* +1.5 dBFS, though none of the *Sinners* windows exceeded full scale |
+| Peaks above full scale in 7.1.4 | 28 of 895 windows from 22 titles, highest +6.2 dBFS, most often in the front heights and centre. In full, *Alita: Battle Angel* reached +7.6 dBFS and *Sinners* +1.5 dBFS, though none of the *Sinners* windows exceeded full scale. The *Black Hawk Down* excerpt reached +2.4 dBFS once warp mode was accepted |
 
 | DTS | Result |
 |---|---|
@@ -125,7 +126,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 ## Coverage
 
-The suite includes 29 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 30 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 
@@ -136,7 +137,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Plex and Emby sources.
-- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 23 of 179 Atmos titles. See [levels](rendering.md#levels).
+- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
 - Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.

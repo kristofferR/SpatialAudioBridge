@@ -39,6 +39,8 @@ Object gain applies in decibels. Inactive object blocks target silence, includin
 
 The trim configuration follows the surround and top speakers left after an object's zone constraints. Both full layouts use configuration 8 (four or more surrounds and more than two top speakers), where the default trim is 0 dB. Excluding speakers selects a smaller configuration: with elevation disabled, for example, configuration 2's default trim lowers rear positions by up to 1.5 dB. The default trim also applies when a stream carries no trim metadata. A custom trim attenuates by the surround trim, scaled by `y` up to the room's midpoint, plus the height trim scaled by `|z|`. Per-object trim disables apply, and the centre trim applies only to stereo. TS 103 448 has no balance control, so balance metadata is ignored.
 
+The trim metadata's `warp_mode` 1 doubles an object's `y` before rendering (TS 103 420 table 32). It records the Dolby Atmos Renderer's 5.1 direct render with warp, later renamed room balance: with the surrounds at the back of the room, everything behind its midpoint plays at a constant level in them. Both output layouts have side and back surrounds, so the renderer leaves positions as transmitted. *Black Hawk Down* signals warp in some scenes; doubling `y` there would move its side surround channel objects to the back speakers. Reserved warp modes are rejected.
+
 Update offsets count in units of 32 samples. Metadata ramps interpolate channel gains over the signalled duration plus one sample. A stationary point has unit total gain power; sums of signals and gain ramps need not.
 
 ### Beds
@@ -53,7 +55,7 @@ TrueHD signals a dialogue level for the object presentation. Native decoders att
 
 A stream entered at a later major sync, after a seek or from a server-side remux, usually carries its first object metadata a few access units in: 7.5–20 ms in measured Blu-ray streams, which then repeat it every 32 ms. The decoder holds up to 0.5 s of audio until that metadata arrives and renders it at the first metadata block's positions. Every sample is kept, so timing is unchanged. A stream without object metadata within 0.5 s is rejected.
 
-The decoder rejects objects outside the room (distance metadata, which TS 103 448 does not render), warped positions (`warp_mode`), reserved zone constraints, ISF, multiple beds, bed distribution and bed downmix metadata. Of these, the [library census](validation.md#library-census) found only warped positions, in one of 179 titles from 11:04 into the film, carried by default trims; none of the other controls above appeared. Hosts should select their existing fallback on these errors.
+The decoder rejects objects outside the room (distance metadata, which TS 103 448 does not render), reserved zone constraints and warp modes, ISF, multiple beds, bed distribution and bed downmix metadata. None of these appeared in the [library census](validation.md#library-census), and of the controls above only warp mode 1, with default trims, did. Hosts should select their existing fallback on these errors.
 
 ## DTS:X
 
