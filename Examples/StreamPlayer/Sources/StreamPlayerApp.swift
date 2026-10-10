@@ -11,7 +11,10 @@ import SwiftUI
 /// - `SAB_SOURCE_URL`: the MKV, reachable with HTTP range requests (a media server's direct-play URL).
 /// - `SAB_HTTP_HEADER`: optional header for that URL, such as `Authorization: …`.
 /// - `SAB_VIDEO_MASTER`: optional HLS multivariant playlist supplying the video.
+/// - `SAB_VIDEO_VARIANT`: optional text the chosen video variant's URL must contain, such as
+///   `AllowVideoStreamCopy=true` to keep Jellyfin from switching to a transcode.
 /// - `SAB_START`: optional start time in seconds.
+/// - `SAB_SEEK_TEST=1`: seeks like a remote would and logs how long each seek takes to play again.
 @main struct StreamPlayerApp: App {
     // devicectl --console reads stdout through a pipe; keep diagnostics line-buffered.
     init() { setvbuf(stdout, nil, _IOLBF, 0) }
@@ -41,27 +44,93 @@ import SwiftUI
             try AtmosOutputActivator.configureAudioSession()
             let clock = ContinuousClock.now
             let file = try await MatroskaFile.open(HTTPByteSource(url: source, headers: headers))
+            var options = APACStream.Options()
+            if let variant = environment["SAB_VIDEO_VARIANT"] {
+                options.includesVideoVariant = { $0.absoluteString.contains(variant) }
+            }
             let stream = try await APACStream.start(file: file, videoMaster: environment["SAB_VIDEO_MASTER"].flatMap(URL.init(string:)),
-                                                    startTime: start)
+                                                    startTime: start, options: options)
             self.stream = stream
             log("ready in \(ContinuousClock.now - clock): track \(stream.track.number) \(stream.track.codecID) \(stream.track.language ?? "-")")
-            if let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") {
-                let atmos = AtmosOutputActivator(silentAtmosStream: url)
-                // The master offers only the APAC rendition, so every item plays APAC.
-                atmos.attach(to: player)
-                self.atmos = atmos
-            } else {
-                log("no silent Atmos stream bundled: receivers may not switch to Atmos")
-            }
+            // The master offers only the APAC rendition, so every item plays APAC.
+            activateAtmos { $0.attach(to: player) }
             player.replaceCurrentItem(with: AVPlayerItem(url: stream.masterPlaylistURL ?? stream.audioPlaylistURL))
             if start > .zero { await player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) }
             player.play()
             status = stream.renditionName
             monitor = Task { [weak self] in await self?.report() }
+            if environment["SAB_SEEK_TEST"] == "1" { await seekTest() }
         } catch {
             status = "\(error)"
             log("failed: \(error)")
         }
+    }
+
+    private func activateAtmos(_ attach: (AtmosOutputActivator) -> Void) {
+        guard let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") else {
+            log("no silent Atmos stream bundled: receivers may not switch to Atmos")
+            return
+        }
+        let atmos = AtmosOutputActivator(silentAtmosStream: url)
+        attach(atmos)
+        self.atmos = atmos
+    }
+
+    /// Skips, scrubs and jumps, each step issued without waiting for the previous seek, as the
+    /// remote does, then times how long playback takes to move past the final target.
+    private func seekTest() async {
+        let scenarios: [(name: String, offsets: [Double], gap: Duration)] = [
+            ("skip back 10 s", [-10], .zero),
+            ("skip back 10 s x3", [-10, -10, -10], .milliseconds(300)),
+            ("skip forward 10 s", [10], .zero),
+            ("scrub forward 2 min", Array(repeating: 10, count: 12), .milliseconds(170)),
+            ("scrub back 1 min", Array(repeating: -10, count: 6), .milliseconds(170)),
+            ("jump forward 10 min", [600], .zero),
+            ("jump back 5 min", [-300], .zero),
+            ("double jump forward", [60, 60], .milliseconds(500)),
+        ]
+        let ready = ContinuousClock.now
+        while player.timeControlStatus != .playing, ContinuousClock.now - ready < .seconds(30) {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard player.timeControlStatus == .playing else {
+            log("SEEKTEST could not start: item status \(player.currentItem?.status.rawValue ?? -1), \(player.currentItem?.error.map(String.init(describing:)) ?? "no error")")
+            return
+        }
+        var results: [String] = []
+        for scenario in scenarios {
+            try? await Task.sleep(for: .seconds(10))
+            guard player.currentItem?.status == .readyToPlay else { break }
+            var target = player.currentTime().seconds
+            let clock = ContinuousClock.now
+            for offset in scenario.offsets {
+                target = max(0, target + offset)
+                player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+                try? await Task.sleep(for: scenario.gap)
+            }
+            var resumed: Duration?
+            var pressedPlay = false
+            while ContinuousClock.now - clock < .seconds(40), player.currentItem?.status == .readyToPlay {
+                // AVPlayer pauses itself when a server segment times out; a viewer would press play.
+                if player.timeControlStatus == .paused {
+                    player.play()
+                    pressedPlay = true
+                }
+                // Just past the target: before a backward seek lands, the old position is past it too.
+                let position = player.currentTime().seconds
+                if player.timeControlStatus == .playing, position >= target + 0.3, position < target + 3 {
+                    resumed = ContinuousClock.now - clock
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            let result = "\(scenario.name) to \(Int(target)) s: " + (resumed.map { String(format: "%.2f s", $0 / .seconds(1)) }
+                ?? (player.currentItem?.status == .failed ? "item failed" : "did not resume in 40 s"))
+                + (pressedPlay ? " (pressed play)" : "")
+            log("SEEKTEST \(result)")
+            results.append(result)
+        }
+        log("SEEKTEST done: " + results.joined(separator: "; "))
     }
 
     /// Prints playback state every five seconds, and each wait for media with its duration, for
@@ -77,6 +146,17 @@ import SwiftUI
                 log(String(format: "%@ → %@ after %.2f s at t=%.1f", Self.name(status), Self.name(player.timeControlStatus),
                            (now - changed) / .seconds(1), player.currentTime().seconds))
                 (status, changed) = (player.timeControlStatus, now)
+            }
+            // AVPlayer can wedge when a server aborts a segment mid-response, as Jellyfin does when
+            // rapid seeks restart its remux. A fresh item at the same position recovers.
+            if status == .waitingToPlayAtSpecifiedRate, ContinuousClock.now - changed > .seconds(20),
+               let asset = player.currentItem?.asset as? AVURLAsset {
+                let position = player.currentTime()
+                log(String(format: "recovering a stalled item at t=%.1f", position.seconds))
+                player.replaceCurrentItem(with: AVPlayerItem(url: asset.url))
+                await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
+                player.play()
+                changed = .now
             }
             guard tick % 20 == 0 else { continue }
             let item = player.currentItem
