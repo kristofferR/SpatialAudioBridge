@@ -31,7 +31,9 @@ struct FixtureTests {
         let input = URL(fileURLWithPath: ProcessInfo.processInfo.environment[variable]!)
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("sab-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: output) }
-        let report = try await APACTrackConverter.convert(elementaryStream: input, codec: codec, output: output)
+        // 9.1.6 exercises every output channel.
+        let report = try await APACTrackConverter.convert(elementaryStream: input, codec: codec, output: output,
+                                                          configuration: APACConfiguration(layout: .nineOneSix))
         #expect(report.sampleFrames > 0)
         #expect(report.sampleRate == 48_000)
         #expect(report.peakPCM > 0 && report.peakPCM.isFinite)

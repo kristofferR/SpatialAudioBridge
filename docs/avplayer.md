@@ -103,7 +103,7 @@ options.includesVideoVariant = { $0.query?.contains("AllowVideoStreamCopy=true")
 let stream = try await APACStream.start(file: file, videoMaster: videoMaster, options: options)
 ```
 
-The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 9.1.6 layout uses 4.096 Mbit/s, about 1.6 MB per segment, so the defaults keep at most about 56 MB of converted audio.
+The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 7.1.4 layout uses 3.072 Mbit/s, about 1.2 MB per segment, so the defaults keep at most about 42 MB of converted audio.
 
 `includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
 

@@ -36,7 +36,8 @@ public enum SpatialAudioLayout: UInt32, Sendable {
 
 /// How a session renders and encodes APAC.
 public struct APACConfiguration: Sendable {
-    /// The rendered speaker layout. Defaults to 9.1.6.
+    /// The rendered speaker layout. Defaults to 7.1.4: on the tested Apple TV, Dolby Atmos
+    /// output carries 12 channels and folds 9.1.6's wides and top middles into their neighbours.
     public var layout: SpatialAudioLayout
     /// Gain before encoding. No automatic normalization or clipping is applied.
     public var gainDB: Float
@@ -57,7 +58,7 @@ public struct APACConfiguration: Sendable {
     /// `APACStream` and `SpatialAudioRenderer` always use the live profile.
     public var liveEncoding: Bool
 
-    public init(layout: SpatialAudioLayout = .nineOneSix, gainDB: Float = 0,
+    public init(layout: SpatialAudioLayout = .sevenOneFour, gainDB: Float = 0,
                 bitRate: Int? = nil, startTime: CMTime = .zero, syncPacketFrequency: Int = 75,
                 liveEncoding: Bool = false) {
         self.layout = layout
