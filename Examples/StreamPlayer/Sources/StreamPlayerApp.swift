@@ -14,6 +14,7 @@ import SwiftUI
 /// - `SAB_VIDEO_VARIANT`: optional text the chosen video variant's URL must contain, such as
 ///   `AllowVideoStreamCopy=true` to keep Jellyfin from switching to a transcode.
 /// - `SAB_START`: optional start time in seconds.
+/// - `SAB_RENDERER=1`: plays the audio alone through `SpatialAudioRenderer` instead of AVPlayer.
 /// - `SAB_SEEK_TEST=1`: seeks like a remote would and logs how long each seek takes to play again.
 @main struct StreamPlayerApp: App {
     // devicectl --console reads stdout through a pipe; keep diagnostics line-buffered.
@@ -26,6 +27,7 @@ import SwiftUI
     let player = AVPlayer()
     var status = "Starting…"
     private var stream: APACStream?
+    private var synchronizer: AVSampleBufferRenderSynchronizer?
     private var atmos: AtmosOutputActivator?
     private var monitor: Task<Void, Never>?
 
@@ -44,6 +46,10 @@ import SwiftUI
             try AtmosOutputActivator.configureAudioSession()
             let clock = ContinuousClock.now
             let file = try await MatroskaFile.open(HTTPByteSource(url: source, headers: headers))
+            if environment["SAB_RENDERER"] == "1" {
+                try await playThroughRenderer(file, from: start, since: clock)
+                return
+            }
             var options = APACStream.Options()
             if let variant = environment["SAB_VIDEO_VARIANT"] {
                 options.includesVideoVariant = { $0.absoluteString.contains(variant) }
@@ -64,6 +70,32 @@ import SwiftUI
             status = "\(error)"
             log("failed: \(error)")
         }
+    }
+
+    /// Plays the audio alone, as a player with its own video pipeline would: packets go to
+    /// `SpatialAudioRenderer`, and the synchronizer starts once enough APAC is queued.
+    private func playThroughRenderer(_ file: MatroskaFile, from start: CMTime, since clock: ContinuousClock.Instant) async throws {
+        guard let track = file.audioTracks.first(where: { $0.codec != nil && $0.isDefault })
+                ?? file.audioTracks.first(where: { $0.codec != nil }), let codec = track.codec else {
+            throw SpatialAudioError.source("The file has no TrueHD or DTS track")
+        }
+        let synchronizer = AVSampleBufferRenderSynchronizer()
+        self.synchronizer = synchronizer
+        let renderer = try SpatialAudioRenderer(codec: codec, synchronizer: synchronizer)
+        activateAtmos { $0.attach(to: synchronizer) }
+        try await renderer.begin(at: start)
+        status = "Renderer: \(track.codecID)"
+        var started = false
+        for try await packet in file.packets(of: track, from: start) {
+            try await renderer.enqueue(packet.data, time: packet.time)
+            if !started, await renderer.isReadyToPlay {
+                started = true
+                synchronizer.setRate(1, time: start)
+                log("renderer playing \(track.codecID) after \(ContinuousClock.now - clock)")
+                monitor = Task { [weak self] in await self?.reportRenderer(renderer) }
+            }
+        }
+        try await renderer.endOfStream()
     }
 
     private func activateAtmos(_ attach: (AtmosOutputActivator) -> Void) {
@@ -131,6 +163,17 @@ import SwiftUI
             results.append(result)
         }
         log("SEEKTEST done: " + results.joined(separator: "; "))
+    }
+
+    private func reportRenderer(_ renderer: SpatialAudioRenderer) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+            guard let synchronizer else { return }
+            let rendering = await renderer.renderingStatus
+            log(String(format: "t=%.1f rate=%.1f renderer=%d silentAtmos=%@ available=%d MB", synchronizer.currentTime().seconds,
+                       synchronizer.rate, rendering.rawValue, atmos?.isActive == true ? "on" : "off",
+                       os_proc_available_memory() / 1_000_000))
+        }
     }
 
     /// Prints playback state every five seconds, and each wait for media with its duration, for
