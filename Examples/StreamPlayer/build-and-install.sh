@@ -1,12 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Usage: ./build-and-install.sh DEVICE_ID /path/to/silent-atmos.mp4
+# Usage: ./build-and-install.sh DEVICE_ID
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEVICE_ID="${1:?Usage: ./build-and-install.sh DEVICE_ID /path/to/silent-atmos.mp4}"
-SILENT="${2:?Supply a near-silent E-AC-3 JOC file for AtmosOutputActivator}"
-mkdir -p "$APP_DIR/Media"
-[ "$SILENT" -ef "$APP_DIR/Media/silent-atmos.mp4" ] || cp -c "$SILENT" "$APP_DIR/Media/silent-atmos.mp4"
+DEVICE_ID="${1:?Usage: ./build-and-install.sh DEVICE_ID}"
 BUILD_USER="$(id -un)"
 USER="${USER:-$BUILD_USER}" LOGNAME="${LOGNAME:-$BUILD_USER}" \
   xcodegen generate --spec "$APP_DIR/project.yml"

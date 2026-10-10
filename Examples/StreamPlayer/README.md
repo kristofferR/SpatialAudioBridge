@@ -9,14 +9,14 @@ Both modes attach `AtmosOutputActivator` and configure the audio session as in t
 
 ## Build and install
 
-Use macOS with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and build the Rust core first with `./scripts/build-core.sh` from the repository root. Supply a near-silent Dolby Atmos stream ([how to make one](../../docs/atmos-output.md#make-a-silent-atmos-stream)):
+Use macOS with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and build the Rust core first with `./scripts/build-core.sh` from the repository root:
 
 ```sh
 cd Examples/StreamPlayer
-SAB_DEVELOPMENT_TEAM="YOUR_TEAM_ID" ./build-and-install.sh "DEVICE_ID" "/path/to/silent-atmos.mp4"
+SAB_DEVELOPMENT_TEAM="YOUR_TEAM_ID" ./build-and-install.sh "DEVICE_ID"
 ```
 
-`xcrun devicectl list devices` shows the Apple TV's identifier. The script copies the stream into the ignored `Media` folder, generates the project, builds with one job and installs the app.
+`xcrun devicectl list devices` shows the Apple TV's identifier. The script generates the project, builds with one job and installs the app.
 
 ## Run
 

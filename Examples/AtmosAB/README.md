@@ -6,12 +6,12 @@ APAC playback uses the tested Atmos setup:
 
 - Configure `AVAudioSession` for playback/movie playback, enable `supportsMultichannelContent`, and activate the session.
 - Register the main `AVPlayer` with `MPNowPlayingSession` and make that session active before playback.
-- Attach the library's `AtmosOutputActivator` to the main player. It loops a near-silent E-AC-3/JOC stream in a separate, unmuted player while APAC plays and pauses it with the main player.
+- Attach the library's `AtmosOutputActivator` to the main player. It loops its bundled silent Atmos stream in a separate, unmuted player while APAC plays and pauses it with the main player.
 - Play DDP directly, without the silent stream.
 
 On the tested Apple TV and receiver route, APAC alone did not trigger Atmos. With this setup, Kris confirmed APAC and DDP both trigger Atmos and sound similar. The APAC encoder settings, media and renderer were unchanged. This observation establishes Atmos activation and an informal listening result; it does not establish correct APAC speaker placement. `AVAudioSession.outputNumberOfChannels`, `renderingMode` and `isSpatialAudioEnabled` were unsuitable Atmos detectors on the tested beta.
 
-The silent stream used in that test was a 2.016-second intro from our own Deezy Helicopter conversion, with decoded compatible-bed peak around −105 dBFS. It is near-silent, not digital zero. The example requires a supplied stream; no sample media is distributed here.
+That test used a 2.016-second intro from our own Deezy Helicopter conversion as the silent stream. The library's generated stream replaced it after sounding the same in this app; see [Atmos output](../../docs/atmos-output.md#the-bundled-stream). No sample media is distributed here.
 
 Launch arguments isolate each part of the setup: `--plain-session` omits multichannel content from the audio session, `--without-now-playing` skips `MPNowPlayingSession`, and `--without-silent-atmos` plays APAC alone. The app prints the active combination at launch. Pass them in the Xcode scheme or after the bundle identifier in `xcrun devicectl device process launch`.
 
@@ -32,7 +32,6 @@ helicopter.APAC.mp4             helicopter.DDP.mp4
 amaze.APAC.mp4                  amaze.DDP.mp4
 natures-fury.APAC.mp4           natures-fury.DDP.mp4
 channel-check-7.1.4.APAC.mp4     channel-check-7.1.4.DDP.mp4
-silent-atmos.mp4
 ```
 
 Then install on a paired Apple TV:

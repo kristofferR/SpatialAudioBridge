@@ -18,9 +18,6 @@ targets:
     platform: tvOS
     sources:
       - Sources
-      - path: Media
-        type: folder
-        buildPhase: resources
     dependencies:
       - package: SpatialAudioBridge
         product: SpatialAudioBridge

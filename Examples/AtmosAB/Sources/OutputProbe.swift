@@ -75,8 +75,8 @@ import SwiftUI
             }
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
             nowPlaying = MPNowPlayingSession(players: [player])
-            if atmosMode == "silent", let silent = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") {
-                atmos = AtmosOutputActivator(silentAtmosStream: silent)
+            if atmosMode == "silent" {
+                atmos = AtmosOutputActivator()
                 atmos?.attach(to: player)
             }
             print("OUTPUT PROBE sweep=\(sweep) atmos=\(atmosMode) order=\(order.joined(separator: ","))")

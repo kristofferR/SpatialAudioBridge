@@ -109,11 +109,7 @@ import SwiftUI
     }
 
     private func activateAtmos(_ attach: (AtmosOutputActivator) -> Void) {
-        guard let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") else {
-            log("no silent Atmos stream bundled: receivers may not switch to Atmos")
-            return
-        }
-        let atmos = AtmosOutputActivator(silentAtmosStream: url)
+        let atmos = AtmosOutputActivator()
         attach(atmos)
         self.atmos = atmos
     }

@@ -179,12 +179,8 @@ struct BlindResult {
             nowPlaying?.automaticallyPublishesNowPlayingInfo = true
         }
         if !arguments.contains("--without-silent-atmos") {
-            if let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4", subdirectory: "Media") {
-                atmos = AtmosOutputActivator(silentAtmosStream: url)
-                atmos?.attach(to: player) { [weak self] _ in self?.version.isAPAC == true }
-            } else {
-                setupError = "The silent Atmos stream is missing. Rebuild the app with its media."
-            }
+            atmos = AtmosOutputActivator()
+            atmos?.attach(to: player) { [weak self] _ in self?.version.isAPAC == true }
         }
         print("ATMOS SETUP session=\(arguments.contains("--plain-session") ? "plain" : "multichannel") nowPlaying=\(nowPlaying != nil) silentAtmos=\(atmos != nil)")
         load(sample: sample, version: version, resume: false)
