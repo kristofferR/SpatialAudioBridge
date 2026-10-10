@@ -66,14 +66,63 @@ public struct HTTPByteSource: MediaByteSource {
         var request = URLRequest(url: url)
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         request.setValue(range, forHTTPHeaderField: "Range")
-        let (data, response) = try await session.data(for: request)
+        let download = RangedDownload(host: url.host() ?? "the server")
+        let task = session.dataTask(with: request)
+        task.delegate = download
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                download.start(task, continuation: continuation)
+            }
+        } onCancel: {
+            task.cancel()
+        }
+    }
+}
+
+/// Collects one ranged response. A server that ignores the range answers 200 with the whole
+/// file, so the transfer is cancelled as soon as the status arrives instead of downloading it.
+private final class RangedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let host: String
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>?
+    private var response: HTTPURLResponse?
+    private var failure: SpatialAudioError?
+    private var data = Data()
+
+    init(host: String) { self.host = host }
+
+    func start(_ task: URLSessionDataTask, continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>) {
+        lock.withLock { self.continuation = continuation }
+        task.resume()
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
         guard let response = response as? HTTPURLResponse else {
-            throw SpatialAudioError.source("Unexpected response from \(url.host() ?? "the server")")
+            lock.withLock { failure = .source("Unexpected response from \(host)") }
+            return completionHandler(.cancel)
         }
-        // A 200 means the server ignored the range and sent the whole file.
         guard response.statusCode == 206 else {
-            throw SpatialAudioError.source("HTTP \(response.statusCode) for a range request to \(url.host() ?? "the server")")
+            lock.withLock { failure = .source("HTTP \(response.statusCode) for a range request to \(host)") }
+            return completionHandler(.cancel)
         }
-        return (data, response)
+        lock.withLock { self.response = response }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.withLock { self.data.append(data) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        let (continuation, result): (CheckedContinuation<(Data, HTTPURLResponse), any Error>?, Result<(Data, HTTPURLResponse), any Error>) =
+            lock.withLock {
+                defer { self.continuation = nil }
+                if let failure { return (self.continuation, .failure(failure)) }
+                if let error { return (self.continuation, .failure(error)) }
+                guard let response else { return (self.continuation, .failure(SpatialAudioError.source("No response from \(host)"))) }
+                return (self.continuation, .success((data, response)))
+            }
+        continuation?.resume(with: result)
     }
 }
