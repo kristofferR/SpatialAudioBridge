@@ -183,8 +183,8 @@ public actor SpatialAudioTranscoder {
             AVNumberOfChannelsKey: configuration.layout.channelCount,
             AVChannelLayoutKey: layoutData(configuration.layout),
             AVEncoderBitRateKey: configuration.bitRate,
-            AVEncoderContentSourceKey: AVAudioContentSource.appleAV_Spatial_Offline.rawValue,
-            AVEncoderDynamicRangeControlConfigurationKey: AVAudioDynamicRangeControlConfiguration.movie.rawValue,
+            AVEncoderContentSourceKey: configuration.contentSource.rawValue,
+            AVEncoderDynamicRangeControlConfigurationKey: configuration.dynamicRangeConfiguration.rawValue,
             AVEncoderASPFrequencyKey: configuration.syncPacketFrequency,
         ]
         guard writer.canApply(outputSettings: settings, forMediaType: .audio) else {
@@ -220,4 +220,10 @@ public actor SpatialAudioTranscoder {
         guard input.append(sample) else { throw encoderError(writer) }
         frames += Int64(block.frames)
     }
+}
+
+extension APACConfiguration {
+    /// The content source and dynamic-range profile for the chosen encoding mode.
+    var contentSource: AVAudioContentSource { liveEncoding ? .appleAV_Spatial_Live : .appleAV_Spatial_Offline }
+    var dynamicRangeConfiguration: AVAudioDynamicRangeControlConfiguration { liveEncoding ? .capture : .movie }
 }

@@ -39,15 +39,22 @@ public struct APACConfiguration: Sendable {
     public var inputStartTime: CMTime?
     /// APAC sync packets occur every 75 * 1024 / sampleRate seconds.
     public var syncPacketFrequency: Int
+    /// Encodes with Apple's live profile (Capture dynamic range, spatial live content), which emits
+    /// audio about 1.6 s behind its input. The default offline Movie profile analyzes about 20 s
+    /// ahead for loudness and dynamic range, so it suits files rather than playback.
+    /// `APACStream` and `SpatialAudioRenderer` always use the live profile.
+    public var liveEncoding: Bool
 
     public init(layout: SpatialAudioLayout = .nineOneSix, gainDB: Float = 0,
-                bitRate: Int? = nil, startTime: CMTime = .zero, syncPacketFrequency: Int = 75) {
+                bitRate: Int? = nil, startTime: CMTime = .zero, syncPacketFrequency: Int = 75,
+                liveEncoding: Bool = false) {
         self.layout = layout
         self.gainDB = gainDB
         self.bitRate = bitRate ?? min(layout.channelCount * 256_000, 4_096_000)
         self.startTime = startTime
         inputStartTime = nil
         self.syncPacketFrequency = syncPacketFrequency
+        self.liveEncoding = liveEncoding
     }
 
     /// Frames to drop (positive) or pad with silence (negative) before the first decoded sample.
