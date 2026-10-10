@@ -49,9 +49,12 @@ enum HLSPlaylists {
                 output.append(replacingURI(in: line, baseURL))
             } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 var attributes = String(line.dropFirst("#EXT-X-STREAM-INF:".count))
-                let codecs = (attribute("CODECS", in: line) ?? "").split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !isAudioCodec($0) } + [codec]
-                attributes = setting("CODECS", to: "\"\(codecs.joined(separator: ","))\"", in: attributes)
+                // CODECS must list every format once present, so a variant without it keeps none.
+                if let upstreamCodecs = attribute("CODECS", in: line) {
+                    let codecs = upstreamCodecs.split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !isAudioCodec($0) } + [codec]
+                    attributes = setting("CODECS", to: "\"\(codecs.joined(separator: ","))\"", in: attributes)
+                }
                 attributes = setting("AUDIO", to: "\"\(audioGroup)\"", in: attributes)
                 for key in ["BANDWIDTH", "AVERAGE-BANDWIDTH"] {
                     if let value = attribute(key, in: line).flatMap(Int.init) {

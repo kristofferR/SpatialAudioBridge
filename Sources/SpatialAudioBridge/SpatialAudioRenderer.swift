@@ -89,6 +89,7 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
+            try Task.checkCancellation()
             if inputStart == nil {
                 // Within the transcoder's bound, so a misplaced packet cannot demand minutes of silence.
                 guard time.isNumeric, abs(CMTimeSubtract(timeline, time).seconds) <= 60 else {
@@ -114,6 +115,7 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
+            try Task.checkCancellation()
             let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
             try await play(blocks, final: true, generation: current)
             state = .ended
