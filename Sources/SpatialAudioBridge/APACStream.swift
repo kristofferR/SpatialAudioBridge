@@ -18,7 +18,7 @@ private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream"
 /// player.replaceCurrentItem(with: AVPlayerItem(url: stream.masterPlaylistURL!))
 /// ```
 ///
-/// Native Atmos output also needs ``AtmosOutputActivator`` from SpatialAudioPlayback.
+/// Native Atmos output also needs `AtmosOutputActivator` from SpatialAudioPlayback.
 public final class APACStream: Sendable {
     public struct Options: Sendable {
         /// Layout, bitrate and sync interval. The stream manages the start times and always encodes live.

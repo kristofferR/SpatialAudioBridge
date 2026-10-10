@@ -14,7 +14,7 @@ import AVFoundation
 /// ```
 ///
 /// The host owns the synchronizer's rate and time. Releasing the renderer removes it from the
-/// synchronizer. Native Atmos output also needs ``AtmosOutputActivator`` from SpatialAudioPlayback,
+/// synchronizer. Native Atmos output also needs `AtmosOutputActivator` from SpatialAudioPlayback,
 /// attached to the same synchronizer.
 public actor SpatialAudioRenderer {
     /// Joins the host's synchronizer, which controls its rate and time.

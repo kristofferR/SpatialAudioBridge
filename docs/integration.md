@@ -1,43 +1,60 @@
-# Player integration
+# Integration guide
 
-Keep the player’s existing demuxer. Route the selected TrueHD Atmos or DTS:X payload to `SpatialAudioTranscoder` instead of the conventional audio decoder. The transcoder creates APAC files or fMP4 fragments; `APACHLSOutput` persists fragments into an audio EVENT playlist.
+SpatialAudioBridge plays TrueHD Atmos and DTS:X tracks through Apple's native spatial audio path by converting them to APAC. This page helps choose an integration path and lists what the host keeps. Each path has its own guide.
 
-For streaming video, the host must expose the audio playlist over its local HTTP service and attach it as an alternative audio rendition to the video HLS master playlist. The video rendition must use codecs and containers accepted by AVPlayer. Align audio and video using the first audio PTS in `APACConfiguration.startTime`; sample counts determine all subsequent audio timestamps.
+## Choose a path
 
-Use `hls.layout.apacCodecString` (or `configuration.layout.apacCodecString` for direct segment callbacks) in the variant’s `CODECS` list alongside the video codec. This includes the mandatory APAC profile and level: `apac.31.03` for 7.1.4 and `apac.31.04` for 9.1.6. Set the audio rendition’s `CHANNELS` to `"12"` or `"16"` using `layout.channelCount`; do not label this channel-based APAC output as JOC. The host still supplies rendition grouping, language, URIs and measured bandwidth.
+```mermaid
+flowchart TD
+    Q1{"How does the player<br/>play video?"}
+    Q1 -- "AVPlayer" --> Q2{"Where is the<br/>media?"}
+    Q1 -- "Own renderer on an<br/>AVSampleBufferRenderSynchronizer" --> Renderer["SpatialAudioRenderer<br/>(sample-buffer-playback.md)"]
+    Q1 -- "No playback: convert<br/>or package" --> Convert["SpatialAudioTranscoder<br/>(conversion.md)"]
+    Q2 -- "MKV, local or on a<br/>media server" --> Stream["APACStream<br/>(avplayer.md)"]
+    Q2 -- "M2TS, MP4 or the<br/>host's own demuxer" --> Custom["SpatialAudioTranscoder +<br/>host HLS (conversion.md)"]
+```
 
-A container timestamp gap or a seek needs a new conversion session. Begin at a decodable major sync, discard preroll in the host when necessary, and start a new HLS initialization segment with a discontinuity. TrueHD may begin at any major sync: audio decoded before the first object metadata is kept and rendered at the first known object positions. The library accepts continuous elementary-stream bytes and cannot infer missing packets, container trim metadata or timestamp jumps from those bytes.
+| Path | Guide | Host provides | Library provides |
+|---|---|---|---|
+| `APACStream` | [Play through AVPlayer](avplayer.md) | File URL, video HLS master, `AVPlayer` | Matroska reading, on-demand conversion, playlists, loopback server, seeking |
+| `SpatialAudioRenderer` | [Play through sample buffers](sample-buffer-playback.md) | Packets, synchronizer, video rendering | Conversion into a queued `AVSampleBufferAudioRenderer` |
+| `SpatialAudioTranscoder` | [Convert and package](conversion.md) | Packets or an elementary stream; serving and playlists | Conversion to MP4 files or fragments |
 
-## Reading Matroska sources
+Every playback path also needs [`AtmosOutputActivator`](atmos-output.md) to switch the receiver to Atmos. [Media servers](media-servers.md) covers Jellyfin URLs, and [troubleshooting](troubleshooting.md) covers common failures.
 
-`MatroskaFile` reads one audio track from an MKV or MKA through a `MediaByteSource`: `FileByteSource` for local files or `HTTPByteSource` for range requests, with headers such as a media server's authorization. It lists audio tracks with codec, channels, language, name and default flag. `packets(of:from:)` returns the track's frames with container times, beginning at the last TrueHD major sync or DTS core sync at or before the requested time; discard decoded audio before that time for an exact start. Header-stripping compression and Xiph, EBML and fixed lacing are supported; encrypted or zlib-compressed tracks are rejected.
+## What the host keeps
 
-Seeks start from the cue two seconds before the target, because audio is interleaved near rather than exactly at video keyframes. Clusters are then read in order, so a remote file's video bytes are transferred too: about the file's bitrate, which a local network handles comfortably. Measured against a Jellyfin server on a gigabit LAN, opening a 32.5 GB 4K remux read 2.4 MiB in 0.5 s, and seeking to 10:00 reached a sync 48 ms before the target after 0.5 s and 14 MiB. Files with sparse cues read more: one DTS:X title needed 74 MiB and 2.3 s.
+- **Selection and fallback.** The host decides which track plays. Convert only TrueHD Atmos and DTS:X tracks, and play everything else through the existing path. When the library throws, fall back to that path as well: it rejects metadata it cannot render rather than playing it wrongly.
+- **Video, subtitles and UI.** `APACStream` passes the server's video and subtitle renditions through unchanged. `SpatialAudioRenderer` leaves video entirely to the host.
+- **A native audio route.** APAC needs Apple's playback stack: `AVPlayer` or `AVSampleBufferAudioRenderer`. A software PCM output, as in VLC or mpv, cannot carry it.
+- **Lifecycle.** Stop the stream or renderer when playback ends or the item changes, and detach the activator.
 
-Use the server's direct-play URL rather than its audio-only remux. Jellyfin's `/Audio/{id}/stream?audioCodec=copy&startTimeTicks=…` starts at a cue up to several seconds before the requested time (measured 5.9 s early) and resets timestamps to zero, so the host cannot align it with video.
+## Fit with existing players
 
-The Swift actor rejects overlapping append/finish operations. Backpressure suspends the caller while Apple's writer catches up. PCM is batched into 1024-frame buffers and compressed input is decoded in 4096-byte chunks. A callback failure, malformed/truncated stream or encoder failure ends the session; create a fresh session to recover. Apply `gainDB` explicitly if additional headroom is needed. `peakPCM` reports the largest pre-encoding sample, without automatic clipping or normalization.
+None of the surveyed open-source Apple TV players hand compressed audio packets to the app:
 
-For a player using VLC, mpv or another PCM pipeline, integration includes choosing a native AVPlayer route for this audio/video presentation. A library that produces APAC cannot make a PCM-only audio sink emit spatial HDMI audio by itself. React Native applications can wrap the Swift actor in their native playback module; the public boundary consists of data, URLs, configuration and segment callbacks.
+| Player | Engine | Integration |
+|---|---|---|
+| Swiftfin | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
+| Streamyfin, Yattee | mpv | A native `AVPlayer` route for these tracks, or an mpv hook that hands packets to `SpatialAudioRenderer` |
+| VLC for tvOS | libVLC | Requires patching libVLC for packet access |
+| KSPlayer | FFmpeg, closed core | Needs vendor support for packet access |
 
-The package currently requires tvOS 26. A production integration retaining older OS support will need an availability-gated packaging arrangement and the player's existing audio fallback.
+For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
 
-## Atmos output
+## Requirements
 
-APAC alone did not switch the tested Apple TV's HDMI output to Atmos. Use `AtmosOutputActivator` from the `SpatialAudioPlayback` product, which does not link the Rust core. Create it with a near-silent E-AC-3 + JOC stream and attach it to the host's `AVPlayer`. It plays that stream in a separate, unmuted player while the host plays, or is waiting to play, an item accepted by the `playsAPAC` predicate. It pauses with the host and re-evaluates on item and audio selection changes. For an HLS item that also offers other audio, return true only when the APAC rendition is selected. Call `detach()` when leaving playback.
+- tvOS 26 or macOS 26 for encoding. Apps supporting older systems need availability checks and their existing audio path on those systems.
+- The Rust core is built locally as an XCFramework with `scripts/build-core.sh`; add this checkout as a local Swift package. A checksummed binary release is planned.
+- Ship the [license notices](../THIRD-PARTY-NOTICES.md) of the decoder dependencies with binary distributions.
 
-`AtmosOutputActivator.configureAudioSession()` applies the tested session: playback category, movie playback mode and multichannel content. The A/B example also activates an `MPNowPlayingSession` for the main player. Its launch arguments isolate each part.
+## Timing rules
 
-This is a measured workaround on tvOS 27.2 beta, not an Apple guarantee or proof of correct height/speaker placement. Receiver Atmos activation was confirmed by listening and receiver indication; session channel count, rendering mode and spatial-audio flags were unsuitable detectors on that system. Validate the setup on each target route and OS. The library does not distribute a silent Atmos stream; the host supplies one.
+These apply whenever the host assembles its own presentation:
 
-## Encoder priming
+- Start a new session after a seek, timestamp discontinuity or format change. Begin at a decodable sync point and pass its container time as `inputStartTime`.
+- Set `startTime` to the first audio presentation time. Output advances by decoded samples, without drift.
+- Fragmented output keeps 2048 frames (42.7 ms) of encoder priming before `startTime`. Query `encoderPrimingDuration()` instead of hardcoding it.
+- Coded fragment durations include priming; the conversion report counts source frames. They are different quantities.
 
-`APACConfiguration.encoderPrimingDuration()` queries the installed Core Audio encoder. `APACHLSOutput.encoderPrimingDuration` exposes the same value before writing. On the tested system it is 2048 samples, or 42.667 ms at 48 kHz. MP4 file writing trims this priming from the presented duration. Fragmented output retains it in the coded timeline, so its segment durations total the source duration plus this offset.
-
-Preserve the fragment timestamps and codec/trim metadata when constructing the native presentation. A nonzero start time gives the encoder room to represent priming before the requested source PTS; timestamps are clamped at zero for a zero start. Apple's decoder trims the priming: concatenated fMP4 decoded to exactly the original sample count in the fixture test. Segment duration sums describe the coded timeline, while the conversion report counts source PCM samples. Device playback and seek synchronization still need verification in each host player.
-
-## Encoder configuration
-
-Defaults are 9.1.6, 48 kHz, 256 kbit/s per channel capped at 4.096 Mbit/s, Movie dynamic-range configuration and an APAC sync packet every 75 codec packets. The encoder uses the SDK's `AppleAV_Spatial_Offline` content source. On macOS 27.0.1, the generic `AV_Spatial_Offline` setting failed `canApply`, while the Apple spatial setting succeeded for both output layouts. Treat this as measured platform behavior and recheck on target devices and OS versions.
-
-Apple requires profile and level in the codec string in its [HLS authoring specification](https://developer.apple.com/streaming/hls-authoring-specification-for-apple-devices.html). The strings above follow the platform encoder’s published channel-count mapping. Apple describes APAC and sync-packet requirements in its [APAC technical note](https://developer.apple.com/av-foundation/Apple-Positional-Audio-Codec.pdf). The renderer uses the published metadata timing relationship from [ETSI TS 103 448](https://www.etsi.org/deliver/etsi_ts/103400_103499/103448/01.01.01_60/ts_103448v010101p.pdf), with update offsets in units of 32 samples and gain ramps lasting the signalled duration plus one sample.
+[Architecture](architecture.md#timing) explains how `APACStream` uses these rules to keep segments from different conversion runs on one timeline.
