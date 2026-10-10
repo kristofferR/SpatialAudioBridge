@@ -73,7 +73,7 @@ In two other runs, the three quick skips back made Jellyfin abort a video segmen
 
 ## Coverage
 
-The suite includes 11 Rust unit tests, 3 Rust fixture tests and 31 Swift tests. Without fixture variables, 22 Swift tests run: configuration, playlists and variant filtering, the loopback server, the stream's restart rule and cache window, synthetic Matroska files, the encoder round trip and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and six need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 11 Rust unit tests, 3 Rust fixture tests and 32 Swift tests. Without fixture variables, 23 Swift tests run: configuration, playlists and variant filtering, the loopback server, the stream's restart rule, cache window and run endings, synthetic Matroska files, the encoder round trip and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, and six need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer.
 
