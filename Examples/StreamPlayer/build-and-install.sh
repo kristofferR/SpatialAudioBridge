@@ -14,6 +14,7 @@ xcodebuild -project "$APP_DIR/StreamPlayer.xcodeproj" -scheme StreamPlayer \
   -destination "id=$DEVICE_ID" -derivedDataPath "$APP_DIR/DerivedData" \
   -jobs 1 -allowProvisioningUpdates \
   DEVELOPMENT_TEAM="${SAB_DEVELOPMENT_TEAM:-S5Q742QZEL}" \
-  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build > "$APP_DIR/build.log" 2>&1
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build > "$APP_DIR/build.log" 2>&1 \
+  || { tail -n 30 "$APP_DIR/build.log"; echo "Build failed; see $APP_DIR/build.log" >&2; exit 1; }
 xcrun devicectl device install app --device "$DEVICE_ID" \
   "$APP_DIR/DerivedData/Build/Products/Debug-appletvos/StreamPlayer.app" --json-output "$APP_DIR/install.json"
