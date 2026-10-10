@@ -262,7 +262,10 @@ final class PacketReader {
                 clusterEnd = size.map { window.position + Int64($0) }
                 clusterTime = 0
             case EBML.timestamp:
-                clusterTime = Int64(EBMLData.uint(try await window.read(Int(size ?? 0))))
+                guard let size, size <= 8, let time = Int64(exactly: EBMLData.uint(try await window.read(Int(size)))) else {
+                    throw SpatialAudioError.source("Malformed Matroska cluster timestamp")
+                }
+                clusterTime = time
             case EBML.blockGroup:
                 // Descend into the group; its Block is handled below and other children skipped.
                 continue
@@ -293,8 +296,10 @@ final class PacketReader {
         let relative = Int64(Int16(bitPattern: UInt16(body[body.startIndex]) << 8 | UInt16(body[body.startIndex + 1])))
         let flags = body[body.startIndex + 2]
         let frames = try Self.frames(body.dropFirst(3), lacing: (flags >> 1) & 3)
-        let nanoseconds = (clusterTime + relative) * file.timestampScale
-        let time = CMTime(value: nanoseconds, timescale: 1_000_000_000)
+        let ticks = clusterTime.addingReportingOverflow(relative)
+        let nanoseconds = ticks.partialValue.multipliedReportingOverflow(by: file.timestampScale)
+        guard !ticks.overflow, !nanoseconds.overflow else { throw SpatialAudioError.source("Matroska block time out of range") }
+        let time = CMTime(value: nanoseconds.partialValue, timescale: 1_000_000_000)
         return frames.map { frame in
             let data = track.strippedHeader + frame
             return MatroskaPacket(data: data, time: time, isSyncPoint: Self.isSyncPoint(data, codec: track.codec))
