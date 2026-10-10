@@ -82,7 +82,9 @@ struct FixtureTests {
             let source = try FileHandle(forReadingFrom: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_TRUEHD_FIXTURE"]!))
             defer { try? source.close() }
             let collector = SegmentCollector()
-            let configuration = APACConfiguration(layout: .sevenOneFour, startTime: startTime)
+            var configuration = APACConfiguration(layout: .sevenOneFour, startTime: startTime)
+            // Dropping 480 frames makes the final packet padded, whatever the fixture's length.
+            configuration.inputStartTime = CMTimeSubtract(startTime, CMTime(value: 480, timescale: 48_000))
             let converter = try SpatialAudioTranscoder(codec: .trueHDAtmos,
                 destination: .segments(onSegment: { collector.append($0) }),
                 configuration: configuration)
@@ -106,9 +108,9 @@ struct FixtureTests {
             let priming = try APACConfiguration(layout: .sevenOneFour).encoderPrimingDuration()
             let firstPTS = try #require(media.first?.startTime?.seconds)
             #expect(abs(firstPTS - max(0, startTime.seconds - priming.seconds)) < 0.001)
-            // Fragments cannot trim the final packet's padding, so audio ends on a packet boundary.
-            let paddedFrames = (Int(report.sampleFrames) + 1023) / 1024 * 1024
-            #expect(abs(duration - Double(paddedFrames) / 48_000 - priming.seconds) < 0.001)
+            #expect((Int(report.sampleFrames) + Int(priming.value)) % 1024 != 0)
+            // The last fragment ends at the last source frame, without the final packet's padding.
+            #expect(abs(duration - Double(report.sampleFrames) / 48_000 - priming.seconds) < 1e-6)
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sab-hls-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
             let output = try APACHLSOutput(directory: directory, configuration: configuration)
@@ -139,7 +141,7 @@ struct FixtureTests {
             let first = try #require(pcm.copyNextSampleBuffer())
             var decodedFrames = CMSampleBufferGetNumSamples(first)
             while let buffer = pcm.copyNextSampleBuffer() { decodedFrames += CMSampleBufferGetNumSamples(buffer) }
-            #expect(decodedFrames == paddedFrames)
+            #expect(decodedFrames == Int(report.sampleFrames))
             #expect(reader.status == .completed)
         }
     }

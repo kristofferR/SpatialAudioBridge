@@ -15,16 +15,46 @@ private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked
     let handler: @Sendable (APACSegment) throws -> Void
     private let lock = NSLock()
     private var failure: String?
+    private var holding = false
+    private var held: APACSegment?
+    private var coded = CMTime.zero
     var error: String? { lock.withLock { failure } }
     init(_ handler: @escaping @Sendable (APACSegment) throws -> Void) { self.handler = handler }
+
     func assetWriter(_ writer: AVAssetWriter, didOutputSegmentData data: Data,
                      segmentType: AVAssetSegmentType, segmentReport: AVAssetSegmentReport?) {
         let track = segmentReport?.trackReports.first
-        do {
-            try handler(APACSegment(kind: segmentType == .initialization ? .initialization : .media,
-                                   data: Data(data), startTime: track?.earliestPresentationTimeStamp,
-                                   duration: track?.duration))
-        } catch { lock.withLock { if failure == nil { failure = String(describing: error) } } }
+        let segment = APACSegment(kind: segmentType == .initialization ? .initialization : .media,
+                                  data: Data(data), startTime: track?.earliestPresentationTimeStamp,
+                                  duration: track?.duration)
+        let ready: APACSegment? = lock.withLock {
+            guard segment.kind == .media else { return segment }
+            coded = CMTimeAdd(coded, segment.duration ?? .zero)
+            guard holding else { return segment }
+            // While finishing, each fragment waits until the next shows it is not the last.
+            defer { held = segment }
+            return held
+        }
+        if let ready { deliver(ready) }
+    }
+
+    /// Holds back fragments from now on, so the last one can be trimmed once writing completes.
+    func holdLastSegment() { lock.withLock { holding = true } }
+
+    /// Delivers the held last fragment, ending it at the source's last frame: `sourceFrames` after
+    /// the encoder's priming. Fragments otherwise end with the final packet's padding.
+    func deliverLastSegment(sourceFrames: Int64, priming: Int64) {
+        guard let (segment, coded) = lock.withLock({ held.map { ($0, coded) } }), let duration = segment.duration else { return }
+        let padding = CMTimeConvertScale(coded, timescale: 48_000, method: .default).value - priming - sourceFrames
+        guard (1..<1024).contains(padding), let trimmed = trimmingLastSample(of: segment.data, by: UInt32(padding)) else {
+            return deliver(segment)
+        }
+        deliver(APACSegment(kind: .media, data: trimmed, startTime: segment.startTime,
+                            duration: CMTimeSubtract(duration, CMTime(value: padding, timescale: 48_000))))
+    }
+
+    private func deliver(_ segment: APACSegment) {
+        do { try handler(segment) } catch { lock.withLock { if failure == nil { failure = String(describing: error) } } }
     }
 }
 
@@ -105,6 +135,8 @@ public actor SpatialAudioTranscoder {
                 pendingPCM.removeAll()
             }
             guard let writer, let input, frames > 0 else { throw SpatialAudioError.decoding("The track produced no spatial PCM") }
+            let priming = try configuration.encoderPrimingDuration()
+            delegate?.holdLastSegment()
             input.markAsFinished()
             let cancellation = WriterCancellation(writer)
             await withTaskCancellationHandler {
@@ -116,6 +148,8 @@ public actor SpatialAudioTranscoder {
             }
             try checkActive()
             guard writer.status == .completed else { throw encoderError(writer) }
+            delegate?.deliverLastSegment(sourceFrames: frames, priming: priming.value)
+            try checkActive()
             state = .finished
             return APACConversionReport(sampleRate: sampleRate, sampleFrames: frames,
                                         layout: configuration.layout, peakPCM: peak)

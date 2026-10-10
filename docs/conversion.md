@@ -105,7 +105,7 @@ The encoder has three effort tiers at the same bit rate, and every path uses med
 
 ## Encoder priming
 
-`configuration.encoderPrimingDuration()`, also exposed as `APACHLSOutput.encoderPrimingDuration`, queries the installed encoder: 2048 frames (42.7 ms) on tested systems. MP4 files trim it from the presented duration. Fragmented output keeps it in the coded timeline, so segment durations add up to the source duration plus the priming, and the first fragment starts at `startTime` minus the priming. With a zero `startTime`, timestamps cannot go below zero, so audio lands one priming duration late. Apple's decoder trims the priming. Fragments cannot trim the final packet's padding, so decoded audio ends on a 1024-frame boundary: up to 21 ms of silence after the last source sample. MP4 files trim both.
+`configuration.encoderPrimingDuration()`, also exposed as `APACHLSOutput.encoderPrimingDuration`, queries the installed encoder: 2048 frames (42.7 ms) on tested systems. MP4 files trim it from the presented duration. Fragmented output keeps it in the coded timeline, so segment durations add up to the source duration plus the priming, and the first fragment starts at `startTime` minus the priming. With a zero `startTime`, timestamps cannot go below zero, so audio lands one priming duration late. Apple's decoder trims the priming. The final APAC packet is padded to 1024 frames; MP4 files trim the padding in their edit list. `AVAssetWriter` ignores end trims in fragments, so the transcoder shortens the last fragment's final sample instead, and its reported duration with it. Decoded audio then ends at the last source sample rather than up to 21 ms later.
 
 ## Command line
 
