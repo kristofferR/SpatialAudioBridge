@@ -30,15 +30,18 @@ enum HLSPlaylists {
     /// Rewrites a video multivariant playlist so every variant plays the APAC rendition: other audio
     /// renditions are removed, audio codecs in CODECS are replaced, bandwidth includes the APAC
     /// bitrate and URIs become absolute, because the result is served from the loopback address.
-    static func master(rewriting upstream: String, baseURL: URL, rendition: String, codec: String, bitRate: Int) -> String {
+    /// Variants whose URI `includesVariant` rejects are left out.
+    static func master(rewriting upstream: String, baseURL: URL, rendition: String, codec: String, bitRate: Int,
+                       includesVariant: (URL) -> Bool = { _ in true }) -> String {
         var output: [String] = []
-        var expectsURI = false
+        var variant: String?
         for raw in upstream.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
             let line = String(raw).trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
-            if expectsURI && !line.hasPrefix("#") {
-                output.append(absolute(line, baseURL))
-                expectsURI = false
+            if let pending = variant, !line.hasPrefix("#") {
+                let uri = absolute(line, baseURL)
+                if URL(string: uri).map(includesVariant) ?? true { output += [pending, uri] }
+                variant = nil
                 continue
             }
             if line.hasPrefix("#EXT-X-MEDIA:") {
@@ -55,8 +58,7 @@ enum HLSPlaylists {
                         attributes = setting(key, to: String(value + bitRate), in: attributes)
                     }
                 }
-                output.append("#EXT-X-STREAM-INF:" + attributes)
-                expectsURI = true
+                variant = "#EXT-X-STREAM-INF:" + attributes
             } else if line.hasPrefix("#"), attribute("URI", in: line) != nil {
                 // I-frame and trick-play image playlists, session data and keys.
                 output.append(replacingURI(in: line, baseURL))
