@@ -101,7 +101,9 @@ struct FixtureTests {
             let priming = try APACConfiguration(layout: .sevenOneFour).encoderPrimingDuration()
             let firstPTS = try #require(media.first?.startTime?.seconds)
             #expect(abs(firstPTS - max(0, startTime.seconds - priming.seconds)) < 0.001)
-            #expect(abs(duration - report.duration - priming.seconds) < 0.001)
+            // Fragments cannot trim the final packet's padding, so audio ends on a packet boundary.
+            let paddedFrames = (Int(report.sampleFrames) + 1023) / 1024 * 1024
+            #expect(abs(duration - Double(paddedFrames) / 48_000 - priming.seconds) < 0.001)
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sab-hls-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
             let output = try APACHLSOutput(directory: directory, configuration: configuration)
@@ -132,7 +134,7 @@ struct FixtureTests {
             let first = try #require(pcm.copyNextSampleBuffer())
             var decodedFrames = CMSampleBufferGetNumSamples(first)
             while let buffer = pcm.copyNextSampleBuffer() { decodedFrames += CMSampleBufferGetNumSamples(buffer) }
-            #expect(decodedFrames == Int(report.sampleFrames))
+            #expect(decodedFrames == paddedFrames)
             #expect(reader.status == .completed)
         }
     }
