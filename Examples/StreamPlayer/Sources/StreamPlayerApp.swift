@@ -30,6 +30,13 @@ import SwiftUI
     private var synchronizer: AVSampleBufferRenderSynchronizer?
     private var atmos: AtmosOutputActivator?
     private var monitor: Task<Void, Never>?
+    /// The latest seek target and when it was requested, until playback has resumed after it, so a
+    /// stall recovery resumes there.
+    private var pendingSeek: (target: CMTime, since: ContinuousClock.Instant)?
+    private var recoveries = 0
+
+    /// Records a seek from the remote or the seek test.
+    func noteSeek(to target: CMTime) { pendingSeek = (target, .now) }
 
     func start() async {
         let environment = ProcessInfo.processInfo.environment
@@ -137,15 +144,18 @@ import SwiftUI
             try? await Task.sleep(for: .seconds(10))
             guard player.currentItem?.status == .readyToPlay else { break }
             var target = player.currentTime().seconds
-            let clock = ContinuousClock.now
+            let clock = ContinuousClock.now, recovered = recoveries
             for offset in scenario.offsets {
                 target = max(0, target + offset)
-                player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+                let time = CMTime(seconds: target, preferredTimescale: 600)
+                noteSeek(to: time)
+                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
                 try? await Task.sleep(for: scenario.gap)
             }
             var resumed: Duration?
             var pressedPlay = false
-            while ContinuousClock.now - clock < .seconds(40), player.currentItem?.status == .readyToPlay {
+            // A stall recovery replaces the item, which then loads before it is ready again.
+            while ContinuousClock.now - clock < .seconds(40), let item = player.currentItem, item.status != .failed {
                 // AVPlayer pauses itself when a server segment times out; a viewer would press play.
                 if player.timeControlStatus == .paused {
                     player.play()
@@ -161,7 +171,7 @@ import SwiftUI
             }
             let result = "\(scenario.name) to \(Int(target)) s: " + (resumed.map { String(format: "%.2f s", $0 / .seconds(1)) }
                 ?? (player.currentItem?.status == .failed ? "item failed" : "did not resume in 40 s"))
-                + (pressedPlay ? " (pressed play)" : "")
+                + (pressedPlay ? " (pressed play)" : "") + (recoveries > recovered ? " (recovered a stall)" : "")
             log("SEEKTEST \(result)")
             results.append(result)
         }
@@ -193,12 +203,19 @@ import SwiftUI
                            (now - changed) / .seconds(1), player.currentTime().seconds))
                 (status, changed) = (player.timeControlStatus, now)
             }
-            // AVPlayer can wedge when a server aborts a segment mid-response, as Jellyfin does when
-            // rapid seeks restart its remux. A fresh item at the same position recovers.
+            // Five seconds of playback since the seek mean it resolved, wherever it landed.
+            if let seek = pendingSeek, status == .playing, ContinuousClock.now - max(changed, seek.since) > .seconds(5) {
+                pendingSeek = nil
+            }
+            // AVPlayer can wedge after rapid seeks, when Jellyfin aborts a segment mid-response or
+            // AVPlayer drops a connection, and then stops requesting media. A fresh item recovers:
+            // at the seek target if playback never reached it, otherwise where it stopped. Seeks
+            // took up to 15 s to resume on a long-GOP title, so 20 s of waiting means a wedge.
             if status == .waitingToPlayAtSpecifiedRate, ContinuousClock.now - changed > .seconds(20),
                let asset = player.currentItem?.asset as? AVURLAsset {
-                let position = player.currentTime()
-                log(String(format: "recovering a stalled item at t=%.1f", position.seconds))
+                let position = pendingSeek?.target ?? player.currentTime()
+                log(String(format: "recovering a stalled item at t=%.1f, resuming at %.1f", player.currentTime().seconds, position.seconds))
+                recoveries += 1
                 player.replaceCurrentItem(with: AVPlayerItem(url: asset.url))
                 await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
                 player.play()
@@ -234,7 +251,7 @@ struct PlayerScreen: View {
     @State private var session = StreamSession()
 
     var body: some View {
-        PlayerView(player: session.player)
+        PlayerView(player: session.player, onSeek: session.noteSeek(to:))
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 Text(session.status).font(.caption).padding(12).background(.black.opacity(0.5)).padding(40)
@@ -245,12 +262,28 @@ struct PlayerScreen: View {
 
 struct PlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
+    /// Receives the target of each skip or scrub from the remote.
+    let onSeek: (CMTime) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSeek: onSeek) }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
+        controller.delegate = context.coordinator
         return controller
     }
 
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
+        let onSeek: (CMTime) -> Void
+        init(onSeek: @escaping (CMTime) -> Void) { self.onSeek = onSeek }
+
+        func playerViewController(_ playerViewController: AVPlayerViewController,
+                                  timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) -> CMTime {
+            onSeek(targetTime)
+            return targetTime
+        }
+    }
 }

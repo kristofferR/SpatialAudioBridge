@@ -50,7 +50,9 @@ After a seek, `AVPlayer` asks for audio from the start of the video segment befo
 
 ## Playback stays waiting after rapid seeks
 
-Three quick skips back made Jellyfin restart its remux twice within two seconds and abort a video segment mid-response (`The response has already started` in its log). `AVPlayer` then waited indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. Replace the item: [StreamPlayer](../Examples/StreamPlayer/README.md) does so after 20 s of waiting, which restored playback on the device. It replaces the item at the stalled position, so the seek's target is lost; a player's own stall handling can replace it at the target instead.
+Three quick skips back sometimes left `AVPlayer` waiting indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. In one run Jellyfin had aborted a video segment mid-response (`The response has already started` in its log); in another, `AVPlayer` reset the connection while an audio segment was being sent.
+
+Recover in the host: when the player has waited 20 s, replace the item and seek it to the pending seek target, or to the current position when no seek is pending. On the tested title, legitimate waits after a seek lasted up to 15 s, so 20 s does not cut a slow seek short. On tvOS, `AVPlayerViewControllerDelegate`'s `playerViewController(_:timeToSeekAfterUserNavigatedFrom:to:)` reports the remote's seek targets. [StreamPlayer](../Examples/StreamPlayer/README.md) does this. On an Apple TV its earlier version, which reloaded at the stuck position, recovered a wedge and the next skip resumed in 0.7 s; the pending target was lost. A player's own stall handling can do the same.
 
 ## Other audio stutters
 
