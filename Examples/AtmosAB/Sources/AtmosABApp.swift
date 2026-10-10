@@ -445,7 +445,7 @@ struct ComparisonView: View {
                 }
                 .focused($focused, equals: .auto)
                 .onMoveCommand { direction in
-                    if direction == .right { focused = .version(playback.version) }
+                    if direction == .right { focused = versionFocus }
                 }
                 AutoStatusView(playback: playback)
                 if playback.awaitingVerdict {
@@ -471,7 +471,7 @@ struct ComparisonView: View {
                             }
                             .focused($focused, equals: .sample(sample.id))
                             .onMoveCommand { direction in
-                                if direction == .right { focused = .version(playback.version) }
+                                if direction == .right { focused = versionFocus }
                             }
                         }
                     }
@@ -552,6 +552,11 @@ struct ComparisonView: View {
             if ProcessInfo.processInfo.arguments.contains("--probe") { await RouteProbe.run(playback: playback) }
             if ProcessInfo.processInfo.arguments.contains("--auto-probe") { await RouteProbe.runAuto(playback: playback) }
         }
+    }
+
+    /// Where moving right lands in the version row. Blind Auto must not focus the playing version.
+    private var versionFocus: FocusTarget {
+        .version(playback.blind && playback.autoRunning ? Version.available[0] : playback.version)
     }
 
     private func clock(_ seconds: Double) -> String {
