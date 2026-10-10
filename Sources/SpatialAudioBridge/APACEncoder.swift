@@ -42,7 +42,12 @@ final class APACEncoder {
             for (property, value) in [(kAudioConverterEncodeBitRate, UInt32(configuration.bitRate)),
                                       (kAudioCodecPropertyContentSource, UInt32(configuration.contentSource.rawValue)),
                                       (kAudioCodecPropertyDynamicRangeControlConfiguration, UInt32(configuration.dynamicRangeConfiguration.rawValue)),
-                                      (kAudioCodecPropertyASPFrequency, UInt32(configuration.syncPacketFrequency))] {
+                                      (kAudioCodecPropertyASPFrequency, UInt32(configuration.syncPacketFrequency)),
+                                      // Medium matched high on real Atmos content (48.4 against 47.0 dB
+                                      // signal-to-error) and encodes 1.25 to 1.5 times as fast. Low is
+                                      // faster still but lost up to 42 dB on height-only content.
+                                      // AVAssetWriter ignores the equivalent quality setting for APAC.
+                                      (kAudioConverterCodecQuality, kAudioConverterQuality_Medium)] {
                 var value = value
                 try Self.check(AudioConverterSetProperty(converter, property, 4, &value))
             }
