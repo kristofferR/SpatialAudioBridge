@@ -8,17 +8,19 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 
 | Check | Result |
 |---|---|
-| Angular panning | Canonical anchors, equal-power midpoints, room depth, bed/height separation, unit power over a room grid and continuity across angular boundaries pass |
+| Atmos source panner | Every panner target routes to its own speaker, interior and ceiling positions match values worked by hand from TS 103 448, and point gains have unit power on at most eight speakers and are continuous over a room grid |
+| Atmos panner against the specification | 2,880 point, size and divergence cases over both layouts match a literal transcription of TS 103 448 pseudocode 3 to 15 within 3.2 × 10⁻⁷ |
+| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, custom trims and extended precision pass; remaining unsupported controls produce explicit errors |
+| DTS:X angular panning | Physical speaker angles, overhead symmetry, unit power and absent channels on their own ring pass |
 | DTS:X alternate routing | All seven presentations in both layouts pass synthetic fold cleanup, role separation and physical-angle tests; object ramps and fallback errors pass |
 | IMAX three-component metadata | Upstream payload parsed and C/L/R components routed correctly in both layouts, using synthetic PCM |
-| Atmos rendering controls | Elevation disable and extended precision pass; unsupported controls produce explicit errors |
 | Full TrueHD Atmos elementary stream | 58-second fixture passes chunking, finite PCM, height-energy and truncation checks |
 | Full DTS:X Object Emulator elementary stream | 95-second fixture passes chunking, finite PCM, height-energy and truncation checks |
 | Full alternate DTS:X elementary stream | 44.426667-second Trinnov Experience fixture: 4,165 D4 frames, 1,558 distinct object positions; chunking, finite PCM, height-energy and truncation checks pass |
 | Decoder chunking | Bit-identical PCM and sample counts with 4096-byte and 317-byte chunks for all three full fixtures |
 | Truncation | Removing the final compressed byte produces an error for all three fixtures |
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
-| Rendered peaks | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
+| Rendered peaks, earlier panner | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
 
 ### Encoding and packaging
 
@@ -80,9 +82,28 @@ In three of six runs, the three quick skips back left `AVPlayer` waiting without
 
 On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted test from 20:00 resumed scrubs and jumps in 5.1–8.2 s and three skips back in 6.8 s; skips within converted audio took 0.7–0.9 s. Its first segments after restarts took 3.0–3.5 s and `AVPlayer` logged three −12889 timeouts without failing a seek: the reader transfers the video too, about 85 MB for the 7 s of file a restart's first segment needs.
 
+### Atmos metadata census
+
+`examples/census.rs` reports which object metadata controls a TrueHD stream uses, where the renderer first rejects it and the rendered peaks in both layouts. It accepts a stream starting mid-access-unit, so FFmpeg can cut windows from a film. It ran on three 60-second windows (at 20%, 50% and 80%) from each of 16 TrueHD Atmos titles in the Jellyfin library, from *Ben-Hur* (1959) to *Project Hail Mary* (2026), plus the four Dolby demo fixtures:
+
+| Finding | Result |
+|---|---|
+| Rejected streams | None |
+| Trim, size, snap, zones, screen anchoring, distance, divergence, bed distribution or downmix, ISF | Not used in any window |
+| Bed | LFE only in every title, with 11 to 15 objects alongside |
+| Object blocks inside the room (at least 2.5% of the room size from every wall) | In 23 of 48 windows, up to 35% of active blocks |
+| Dialogue level | −31 dB in most titles, −27 dB in *Encanto*, −23 and −24 dB in *Apocalypse Now* |
+| Peaks above full scale with the TS 103 448 panner | Three windows from two titles; highest +3.6 dBFS in a centre channel |
+
+### Reference rendering
+
+| Check | Result |
+|---|---|
+| Dolby rendering on macOS | Apple's E-AC-3 decoder, through `ExtAudioFile` and `AVAssetReader`, returned only the 5.1 core of a DD+ Atmos fixture into a 7.1.4 layout, with silent heights, so it gives no reference object rendering |
+
 ## Coverage
 
-The suite includes 19 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 27 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 
@@ -93,7 +114,8 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Plex and Emby sources.
-- Whether the playback output clips rendered peaks above full scale. APAC preserves them; one 20-second film excerpt reached +4 dBFS in a height channel, while 38 minutes of another film stayed below −0.2 dBFS. See [levels](rendering.md#levels).
+- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#atmos-metadata-census) found them in two of 16 titles. See [levels](rendering.md#levels).
+- Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.
 

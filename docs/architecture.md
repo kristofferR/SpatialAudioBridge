@@ -89,4 +89,4 @@ Apple's APAC encoder was about 85% of the conversion work in a macOS profile; Tr
 
 ## Boundaries
 
-The host keeps video, track selection, subtitles, the player UI and its fallback for unsupported tracks. The library rejects what it cannot render correctly, including Atmos object size, trims and bed downmix metadata, multiple beds and unrecognized DTS:X presentations, so the host can fall back to its existing audio path. The [current support table](../README.md#current-support) lists the details.
+The host keeps video, track selection, subtitles, the player UI and its fallback for unsupported tracks. The library rejects what it cannot render correctly, including Atmos objects outside the room, bed downmix metadata, multiple beds and unrecognized DTS:X presentations, so the host can fall back to its existing audio path. The [current support table](../README.md#current-support) lists the details.
