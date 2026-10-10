@@ -57,6 +57,12 @@ public struct APACConfiguration: Sendable {
         self.liveEncoding = liveEncoding
     }
 
+    /// Whether the gain, bit rate and sync interval are within the encoder's range.
+    var hasValidEncoderSettings: Bool {
+        gainDB.isFinite && (-60...12).contains(gainDB) && (1...4_096_000).contains(bitRate)
+            && (3...600).contains(syncPacketFrequency)
+    }
+
     /// Frames to drop (positive) or pad with silence (negative) before the first decoded sample.
     func leadingFrames(rate: Int) -> Int {
         guard let inputStartTime else { return 0 }

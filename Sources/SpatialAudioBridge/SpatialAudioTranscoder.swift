@@ -50,11 +50,9 @@ public actor SpatialAudioTranscoder {
 
     public init(codec: SpatialAudioCodec, destination: APACDestination,
                 configuration: APACConfiguration = .init()) throws {
-        guard configuration.gainDB.isFinite, (-60...12).contains(configuration.gainDB),
-              configuration.bitRate > 0, configuration.bitRate <= 4_096_000,
+        guard configuration.hasValidEncoderSettings,
               configuration.startTime.isNumeric, configuration.startTime >= .zero,
-              configuration.inputStartTime.map({ $0.isNumeric && abs(CMTimeSubtract(configuration.startTime, $0).seconds) <= 60 }) ?? true,
-              (3...600).contains(configuration.syncPacketFrequency) else {
+              configuration.inputStartTime.map({ $0.isNumeric && abs(CMTimeSubtract(configuration.startTime, $0).seconds) <= 60 }) ?? true else {
             throw SpatialAudioError.invalidConfiguration("Invalid APAC gain, bitrate, timestamp or sync interval")
         }
         if case .segments(let periods, _) = destination, !(1...20).contains(periods) {
