@@ -1,6 +1,6 @@
 # Media servers
 
-`APACStream` needs two things from a media server: the original file over HTTP range requests, for the audio, and an HLS remux that `AVPlayer` can play, for the video. Jellyfin 12.2 provides both. Plex and Emby have equivalent endpoints but are untested.
+`APACStream` needs two things from a media server: the original file over HTTP range requests, for the audio, and an HLS remux that `AVPlayer` can play, for the video. Jellyfin 12.2 provides both. Emby 4.10 and Plex 1.43 do not; see [Emby and Plex](#emby-and-plex).
 
 ## Jellyfin
 
@@ -71,6 +71,20 @@ Over Wi-Fi or a remote connection the transfer rate matters more: conversion sta
 Any server works that offers:
 
 1. the original file with HTTP range requests (status 206), and
-2. an HLS multivariant playlist whose video `AVPlayer` can play.
+2. an HLS multivariant playlist whose video `AVPlayer` can play, with segment timestamps that stay on the playlist's timeline when the server restarts its remux after a seek.
 
-Plex's direct-play part URLs and Emby's static stream URLs should satisfy the first, and their HLS endpoints the second. Neither is tested yet.
+### Emby and Plex
+
+Both servers are closed source and the targeted players use Jellyfin, so neither is supported. Tested with Emby 4.10.1 and Plex 1.43.4:
+
+| | Emby | Plex |
+|---|---|---|
+| Original file | `/emby/Videos/{itemId}/stream.mkv?Static=true&MediaSourceId={mediaSourceId}&api_key={token}`; `X-Emby-Token` also works as a query parameter or header, Jellyfin's `ApiKey` returns 401 | `/library/parts/{partId}/{updatedAt}/file.mkv`, from the item's `Part` key; tested on an unclaimed server, without a token |
+| Video playlist | `/emby/Videos/{itemId}/master.m3u8` with the Jellyfin parameters above copies HEVC into fMP4 segments on a fixed 6-second grid | `/video/:/transcode/universal/start.m3u8` copies HEVC only into MPEG-TS segments |
+| With `APACStream` on macOS | Plays from the start; fails after Emby restarts its remux | No video |
+
+Converting 10 seconds from 10:00 of a TrueHD Atmos and a DTS:X title over HTTP gave the same APAC from both servers, so a host that plays video itself can feed `SpatialAudioRenderer` from either; that path was not run against them.
+
+**Emby** restarts FFmpeg when a request lies beyond its running remux, as for a resume position or a long seek. The restarted remux begins at the keyframe before the segment, and its fMP4 decode timestamps start at zero. `AVPlayer` places that segment at its playlist time and applies the same offset to the APAC rendition, whose timestamps are absolute: a start at 10:00 jumped to 19:58 and never played. With Emby's own audio, the picture instead trails the playlist clock by the distance to that keyframe, 2.8 s in the test. `BreakOnNonKeyFrames`, `CopyTimestamps` and `SegmentContainer=m4s` did not change the timestamps.
+
+**Plex** rejects `start.m3u8` until the session has requested `/video/:/transcode/universal/decision` with the same parameters. Its built-in tvOS profile transcodes to 1080p H.264. The profile augmentation `X-Plex-Client-Profile-Extra=append-transcode-target-codec(type=videoProfile&context=streaming&protocol=hls&videoCodec=hevc)` makes it copy the HEVC video, but every HLS target in Plex's 79 built-in profiles uses MPEG-TS, and `AVPlayer` played only the audio of the HEVC stream. Plex ignores a container in a profile augmentation and always transcodes for DASH.

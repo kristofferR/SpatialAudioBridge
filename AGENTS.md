@@ -36,7 +36,7 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 ## Next priorities
 
 1. Measure lip sync and memory over a full film on Apple TV, including Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
-2. Validate other Apple TV models, receivers and media servers (Plex, Emby).
+2. Validate other Apple TV models and receivers. Emby and Plex are out of scope; see [media servers](docs/media-servers.md#emby-and-plex).
 3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
 4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations, starting with Swiftfin's native player.
 

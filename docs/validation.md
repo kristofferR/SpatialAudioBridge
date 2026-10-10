@@ -45,6 +45,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Matroska reader | Synthetic files cover track metadata, header stripping, all lacing modes, block groups, cues and metadata found through the seek head, seeking to the last sync at or before the target, seeking into a laced block and rejecting malformed lacing |
 | Real Matroska file | The Helicopter MKV's TrueHD track is byte-identical to the FFmpeg extraction; a 30-second seek starts at a sync within 0.1 s |
 | Matroska over HTTP | From Jellyfin, 8-second conversions from 10:00 succeeded for one TrueHD Atmos and two DTS:X 4K remuxes; seeks reached a sync 21–64 ms before the target |
+| Emby and Plex | From Emby 4.10.1 and Plex 1.43.4, 10-second conversions from 10:00 gave the same APAC for one TrueHD Atmos and one DTS:X 4K remux. On macOS, `APACStream` with Emby's HEVC video played from the start but not after Emby restarted its remux; Plex's HEVC playlist played without video. See [media servers](media-servers.md#emby-and-plex) |
 | `APACStream` segment grid | Every segment starts at N × 153,600 frames and lasts 153,600 frames, including after jumps forward and back; a restarted segment correlates above 0.99 with the continuous one after the priming |
 | `APACStream` pacing | Conversion holds at the lookahead while no requests arrive, then serves later segments without restarting; a request served from the cache does not hold back one waiting further ahead |
 | `APACStream` helper run | Played on from the first run's segment, the helper's first segment matches continuous conversion across the join, correlating above 0.99 over the 2048 frames a restart's priming would replace. Replaying `AVPlayer`'s 11 sequential requests after a jump on a busy Apple Silicon Mac: typically 1.4–1.7 s with the helper, 2.1–2.9 s without. On Apple TV, see the seek results below |
@@ -143,7 +144,6 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Lip sync with dialogue, measured rather than observed.
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
-- Plex and Emby sources.
 - Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
 - Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
