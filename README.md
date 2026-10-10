@@ -123,6 +123,10 @@ A future release can replace the local binary target with a downloadable, checks
 
 SpatialAudioCore adds metadata checks, channel routing and bed/height panning. Revisions are pinned in [Cargo.toml](Rust/SpatialAudioCore/Cargo.toml) and [Cargo.lock](Rust/SpatialAudioCore/Cargo.lock).
 
+## Acknowledgements
+
+Thanks to [Native Player](https://apps.apple.com/app/native-player/id6760623926) for the idea. It showed that TrueHD Atmos converted to APAC could play on Apple TV with its height channels intact, and that started this library.
+
 ## License
 
 Apache 2.0. Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
