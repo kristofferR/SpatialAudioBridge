@@ -5,7 +5,7 @@ import AVFoundation
 ///
 /// ```swift
 /// let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: synchronizer)
-/// await renderer.begin(at: seekTime)
+/// try await renderer.begin(at: seekTime)
 /// for try await packet in file.packets(of: track, from: seekTime) {
 ///     try await renderer.enqueue(packet.data, time: packet.time)
 /// }
