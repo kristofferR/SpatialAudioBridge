@@ -47,6 +47,8 @@ import SpatialAudioPlayback
 }
 ```
 
+`videoHeaders` authorizes only the request for the master playlist inside `start`. `AVPlayer` then loads the variant playlists and video segments itself, without those headers, so the master and every URL it references must authenticate on their own, for example with Jellyfin's `ApiKey` parameter.
+
 On failure, `start` throws a `SpatialAudioError` and the host plays the item through its usual path. [StreamPlayer](../Examples/StreamPlayer/README.md) is a complete tvOS app built this way.
 
 ## Choose the track
@@ -54,7 +56,9 @@ On failure, `start` throws a `SpatialAudioError` and the host plays the item thr
 By default the stream converts the first default TrueHD or DTS track, otherwise the first one. To honor the user's language or track choice, pick one from `file.audioTracks`:
 
 ```swift
-let track = file.audioTracks.first { $0.codec != nil && $0.language == "de" }
+guard let track = file.audioTracks.first(where: { $0.codec != nil && $0.language == "de" }) else {
+    return playThroughUsualPath() // no convertible track in the chosen language
+}
 let stream = try await APACStream.start(file: file, track: track, videoMaster: videoMaster)
 ```
 
