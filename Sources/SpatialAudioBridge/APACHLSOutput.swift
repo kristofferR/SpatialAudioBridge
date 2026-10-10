@@ -4,7 +4,9 @@ import CoreMedia
 /// Persists AVFoundation fragments and an EVENT playlist. Serve this directory over HTTP.
 /// Call finish() only after the transcoder finishes; the player owns serving and cleanup.
 public final class APACHLSOutput: @unchecked Sendable {
+    /// `audio.m3u8` in the output directory, beside `init.mp4` and numbered `.m4s` fragments.
     public let playlistURL: URL
+    /// See ``APACConfiguration/encoderPrimingDuration()``.
     public let encoderPrimingDuration: CMTime
     /// Use apacCodecString and channelCount when authoring the host's multivariant playlist.
     public let layout: SpatialAudioLayout
@@ -16,6 +18,8 @@ public final class APACHLSOutput: @unchecked Sendable {
     private var ended = false
     private var durations: [TimeInterval] = []
 
+    /// Creates `directory`, which must not exist yet. Segments last `syncPeriodsPerSegment` APAC
+    /// sync periods: about 3.2 s by default.
     public init(directory: URL, configuration: APACConfiguration = .init(), syncPeriodsPerSegment: Int = 2) throws {
         guard directory.isFileURL, !FileManager.default.fileExists(atPath: directory.path),
               (1...20).contains(syncPeriodsPerSegment), (3...600).contains(configuration.syncPacketFrequency) else {
@@ -35,6 +39,7 @@ public final class APACHLSOutput: @unchecked Sendable {
         .segments(syncPeriodsPerSegment: periods, onSegment: { [self] in try consume($0) })
     }
 
+    /// Ends the playlist with `#EXT-X-ENDLIST`.
     public func finish() throws {
         try lock.withLock {
             guard initialized, !durations.isEmpty else { throw SpatialAudioError.encoding("HLS output has no media segments") }
