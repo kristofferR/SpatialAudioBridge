@@ -50,7 +50,7 @@ After a seek, `AVPlayer` asks for audio from the start of the video segment befo
 
 ## Playback stays waiting after rapid seeks
 
-Three quick skips back made Jellyfin restart its remux twice within two seconds and abort a video segment mid-response (`The response has already started` in its log). `AVPlayer` then waited indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. Replace the item at the same position: [StreamPlayer](../Examples/StreamPlayer/README.md) does so after 20 s of waiting, though that recovery has not yet been observed on a device. A player's own stall handling can do the same.
+Three quick skips back made Jellyfin restart its remux twice within two seconds and abort a video segment mid-response (`The response has already started` in its log). `AVPlayer` then waited indefinitely without requesting anything more, while the stream kept answering, and seeking again did not help. Replace the item: [StreamPlayer](../Examples/StreamPlayer/README.md) does so after 20 s of waiting, which restored playback on the device. It replaces the item at the stalled position, so the seek's target is lost; a player's own stall handling can replace it at the target instead.
 
 ## Other audio stutters
 
