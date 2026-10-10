@@ -4,7 +4,7 @@
 
 Build a small, reusable library that lets Apple TV media players convert TrueHD Atmos and DTS:X audio tracks into Apple Positional Audio Codec (APAC) media for native Apple playback. Preserve spatial placement, including height audio, as accurately as the supported input metadata allows.
 
-The first deliverable is the library: a simple Swift API for file conversion and incremental compressed input, with APAC MP4 and fragmented MP4 / HLS output, plus the playback pieces every host needs: Matroska reading, an on-demand HLS session for `AVPlayer`, a sample-buffer renderer and Atmos output activation. Once correctness, device playback and packaging are established, the intended integrations are Swiftfin and Streamyfin. Keep player adapters separate from the core library.
+The first deliverable is the library: a simple Swift API for file conversion and incremental compressed input, with APAC MP4 and fragmented MP4 / HLS output, plus the playback pieces every host needs: Matroska reading, an on-demand HLS session for `AVPlayer`, a sample-buffer renderer and Atmos output activation. Once correctness, device playback and packaging are established, the intended integrations are the open-source Apple TV players in the [integration guide](docs/integration.md#fit-with-existing-players). Keep player adapters separate from the core library.
 
 ## Architecture and boundaries
 
@@ -19,7 +19,7 @@ The first deliverable is the library: a simple Swift API for file conversion and
 
 The pipeline is compressed audio → spatial speaker PCM → APAC. Rendering and encoding do not preserve the original compressed bitstream or object stream.
 
-None of the surveyed open-source Apple TV players expose compressed audio packets, so the library reads Matroska audio itself and serves APAC to `AVPlayer` or a sample-buffer renderer. The host keeps track selection, video, subtitles, UI, its fallback for unsupported tracks and its playback engine; other containers use the host's demuxer. Do not add a video playback engine. Native spatial output requires an appropriate Apple playback route; an existing software PCM sink is insufficient.
+Most open-source Apple TV players do not expose compressed audio packets, so the library reads Matroska audio itself and serves APAC to `AVPlayer` or a sample-buffer renderer. Engines that demux on the device and serve `AVPlayer` loopback HLS can feed their packets to `SpatialAudioTranscoder` instead. The host keeps track selection, video, subtitles, UI, its fallback for unsupported tracks and its playback engine; other containers use the host's demuxer. Do not add a video playback engine. Native spatial output requires an appropriate Apple playback route; an existing software PCM sink is insufficient.
 
 ## Current baseline
 
@@ -38,7 +38,7 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 1. Measure lip sync and memory over a full film on Apple TV, including Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
 2. Validate other Apple TV models and receivers. Emby and Plex are out of scope; see [media servers](docs/media-servers.md#emby-and-plex).
 3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
-4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations, starting with Swiftfin's native player.
+4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations in the [integration guide](docs/integration.md#fit-with-existing-players).
 
 ## Implementation guidance
 

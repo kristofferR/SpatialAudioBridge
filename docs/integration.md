@@ -31,14 +31,20 @@ Every playback path also needs [`AtmosOutputActivator`](atmos-output.md) to swit
 
 ## Fit with existing players
 
-None of the surveyed open-source Apple TV players hand compressed audio packets to the app:
+Some open-source Apple TV players read the file on the device and hand `AVPlayer` a loopback HLS stream, so they already hold the compressed packets. They convert TrueHD and DTS to E-AC-3 5.1 or FLAC, which drops the objects. The others leave demuxing to the server or to an engine that decodes to PCM.
 
 | Player | Engine | Integration |
 |---|---|---|
-| Swiftfin | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
-| Streamyfin, Yattee | mpv | A native `AVPlayer` route for these tracks, or an mpv hook that hands packets to `SpatialAudioRenderer` |
+| [AetherEngine](https://github.com/superuser404notfound/AetherEngine), and [Sodalite](https://github.com/superuser404notfound/Sodalite) on it | FFmpeg demux into loopback HLS for `AVPlayer`; TrueHD and DTS become E-AC-3 5.1 or FLAC | Feed the packets to `SpatialAudioTranscoder` and serve the APAC segments as the HLS audio |
+| [Tomo TV](https://github.com/keiver/tomotv) | Its own FFmpeg engine, into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | The same, in its engine |
+| [Lumen](https://github.com/joaoalvess/lumen-player) | KSPlayer, with an MKV remux into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | The same, in its remux engine |
+| [Swiftfin](https://github.com/jellyfin/Swiftfin), and its fork [Reefy](https://github.com/jmhunter83/reefy) | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
+| [Stingray](https://github.com/benjaminRoberts01375/Stingray) | `AVPlayer` with Jellyfin's HLS | `APACStream` with Jellyfin URLs |
+| [Streamyfin](https://github.com/streamyfin/streamyfin), Yattee | mpv | A native `AVPlayer` route for these tracks, or an mpv hook that hands packets to `SpatialAudioRenderer` |
 | VLC for tvOS | libVLC | Requires patching libVLC for packet access |
 | KSPlayer | FFmpeg, closed core | Needs vendor support for packet access |
+
+The engines that remux on the device fit best: they work with any server that serves the original file, and only their audio conversion step changes. Segments from a [`.segments`](conversion.md#write-hls) destination start with an APAC sync packet; after a seek, start a new session on the same segment grid, as [`APACStream` does](architecture.md#the-segment-grid). For MKV, `APACStream` given the engine's loopback video playlist is a shortcut, at the cost of reading the file twice.
 
 For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
 
