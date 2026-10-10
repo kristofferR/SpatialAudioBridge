@@ -280,11 +280,11 @@ actor StreamEngine {
     /// Holds the run while it is `lookahead` segments ahead of the latest request.
     private func paceRun(_ id: UUID) async {
         guard run?.id == id, store.highest >= requested + lookahead else { return }
-        let held = ContinuousClock.now
+        store.holding(true, run: id)
         while run?.id == id, !Task.isCancelled, store.highest >= requested + lookahead {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        store.hold(ContinuousClock.now - held, run: id)
+        store.holding(false, run: id)
     }
 }
 
@@ -298,6 +298,7 @@ final class SegmentStore: @unchecked Sendable {
     private var produced = -1
     private var started = ContinuousClock.now
     private var held = Duration.zero
+    private var holdStarted: ContinuousClock.Instant?
     private var ends: [UUID: (any Error)?] = [:]
 
     var initialization: Data? { lock.withLock { initData } }
@@ -307,7 +308,7 @@ final class SegmentStore: @unchecked Sendable {
     func segment(_ index: Int) -> Data? { lock.withLock { segments[index] } }
 
     func begin(run: UUID) {
-        lock.withLock { current = run; produced = -1; started = .now; held = .zero }
+        lock.withLock { current = run; produced = -1; started = .now; held = .zero; holdStarted = nil }
     }
 
     /// Stores a fragment under the grid index of its start time; repeated fragments replace nothing.
@@ -327,9 +328,17 @@ final class SegmentStore: @unchecked Sendable {
         }
     }
 
-    /// Records time the run spent waiting for playback.
-    func hold(_ duration: Duration, run: UUID) {
-        lock.withLock { if run == current { held += duration } }
+    /// Marks the run as waiting for playback, or as converting again.
+    func holding(_ waiting: Bool, run: UUID) {
+        lock.withLock {
+            guard run == current else { return }
+            if waiting {
+                holdStarted = .now
+            } else if let holdStarted {
+                held += .now - holdStarted
+                self.holdStarted = nil
+            }
+        }
     }
 
     /// Seconds of audio produced per second of conversion since the run began at segment `start`.
@@ -337,7 +346,8 @@ final class SegmentStore: @unchecked Sendable {
         lock.withLock {
             guard produced >= start else { return nil }
             let audio = Double(Int64(produced - start + 1) * segmentFrames) / 48_000
-            let busy = ContinuousClock.now - started - held
+            let now = ContinuousClock.now
+            let busy = now - started - held - (holdStarted.map { now - $0 } ?? .zero)
             return audio / (Double(busy.components.seconds) + Double(busy.components.attoseconds) / 1e18)
         }
     }
