@@ -4,39 +4,40 @@
 
 Build a small, reusable library that lets Apple TV media players convert TrueHD Atmos and DTS:X audio tracks into Apple Positional Audio Codec (APAC) media for native Apple playback. Preserve spatial placement, including height audio, as accurately as the supported input metadata allows.
 
-The first deliverable is the library: a simple Swift API for file conversion and incremental compressed input, with APAC MP4 and fragmented MP4 / HLS output. Once correctness, device playback and packaging are established, the intended integrations are Swiftfin and Streamyfin. Keep player adapters separate from the core library.
+The first deliverable is the library: a simple Swift API for file conversion and incremental compressed input, with APAC MP4 and fragmented MP4 / HLS output, plus the playback pieces every host needs: Matroska reading, an on-demand HLS session for `AVPlayer`, a sample-buffer renderer and Atmos output activation. Once correctness, device playback and packaging are established, the intended integrations are Swiftfin and Streamyfin. Keep player adapters separate from the core library.
 
 ## Architecture and boundaries
 
 - `Rust/SpatialAudioCore`: compressed decoding, metadata interpretation and rendering into 7.1.4 or 9.1.6 speaker feeds. Exposes a small C ABI.
-- `Sources/SpatialAudioBridge`: Swift session management, PCM sample buffers, Apple's APAC encoder, file output and timed fragment callbacks.
-- `Sources/SpatialAudioPlayback`: AVPlayer playback-route helpers without the Rust core, including Atmos output activation.
+- `Sources/SpatialAudioBridge`: Swift session management, Apple's APAC encoder, file output and timed fragment callbacks; Matroska reading from files or HTTP ranges; `APACStream` (VOD playlist on a fixed segment grid, on-demand conversion, loopback server, master rewrite); `SpatialAudioRenderer` (APAC into `AVSampleBufferAudioRenderer`).
+- `Sources/SpatialAudioPlayback`: playback-route helpers without the Rust core, including Atmos output activation for `AVPlayer` and render synchronizers.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
 - `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV device and Apple TV simulator.
 - `Tests` and the Rust tests: focused checks for spatial rendering, stream handling, timing and native APAC round trips.
+- `Examples`: Apple TV apps for listening comparisons (AtmosAB) and end-to-end media-server playback (StreamPlayer).
 
 The pipeline is compressed audio → spatial speaker PCM → APAC. Rendering and encoding do not preserve the original compressed bitstream or object stream.
 
-The host player owns demuxing, track selection, networking, video, HTTP serving, seeks and A/V synchronization. Accept the selected continuous elementary stream rather than adding a container parser or playback engine. Native spatial output requires an appropriate Apple playback route; an existing software PCM sink is insufficient.
+None of the surveyed open-source Apple TV players expose compressed audio packets, so the library reads Matroska audio itself and serves APAC to `AVPlayer` or a sample-buffer renderer. The host keeps track selection, video, subtitles, UI, its fallback for unsupported tracks and its playback engine; other containers use the host's demuxer. Do not add a video playback engine. Native spatial output requires an appropriate Apple playback route; an existing software PCM sink is insufficient.
 
 ## Current baseline
 
 - Experimental, with tvOS 26+ and macOS 26+ encoding requirements.
 - 48 kHz TrueHD Atmos with one bed and point objects; room position, extended precision, gain, activity, elevation enable, timed updates and ramps are implemented with separate bed/height angular panning.
 - 48 kHz DTS:X standard four-height presentation; known height folds are removed from the compatible bed before recombination.
-- APAC 7.1.4 and 9.1.6 output, including files and HLS fragments.
+- APAC 7.1.4 and 9.1.6 output, including files, HLS fragments and sample buffers. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).
+- On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K remux with video and Atmos output, converting at about 2.6× real time; `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`.
 - Atmos ISF, multiple beds, nonzero object sizes and alternate/IMAX DTS:X profiles are rejected.
 - Atmos trim/bed-downmix metadata, bed distribution, enabled divergence and active size/snap/screen/distance/zone controls are rejected. The [rendering model](docs/rendering.md) documents the approximation; it is not a licensed reference renderer.
 
-Real fixtures have passed decoding and Apple APAC round trips. This does not establish correct receiver/MAT output, sustained Apple TV performance or host-player A/V synchronization. Keep those distinctions explicit in documentation and reports.
+Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV and receiver have confirmed Atmos activation and channel placement. This does not establish the HDMI payload (MAT or otherwise), measured lip sync, full-film memory use or behavior on other devices and receivers. Keep those distinctions explicit in documentation and reports.
 
 ## Next priorities
 
-1. Verify native Apple TV playback, spatial channel placement and receiver output on actual hardware.
-2. Measure sustained decoding/encoding speed and memory use on Apple TV, including cancellation and backpressure.
-3. Validate host HLS timing, encoder priming, seeks and discontinuities with video.
-4. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
-5. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations.
+1. Measure lip sync, seek recovery and memory over a full film on Apple TV, including Wi-Fi playback.
+2. Validate other Apple TV models, receivers and media servers (Plex, Emby).
+3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
+4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations, starting with Swiftfin's native player.
 
 ## Implementation guidance
 
@@ -62,6 +63,6 @@ swift build -j 1 -Xswiftc -warnings-as-errors
 swift test -j 1 -Xswiftc -warnings-as-errors
 ```
 
-Media tests require `SAB_TRUEHD_FIXTURE` and `SAB_DTSX_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
+Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE` and `SAB_MKV_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
 
-Keep [README.md](README.md), [docs/integration.md](docs/integration.md) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
+Keep [README.md](README.md), the guides in [docs](docs/) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
