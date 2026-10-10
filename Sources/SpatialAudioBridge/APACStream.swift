@@ -311,15 +311,6 @@ actor StreamEngine {
         !ended && index >= runStart && index > converted && index <= max(runStart + 1, converted + 2)
     }
 
-    /// Whether a block continues the previous one's timeline. The previous block's `frames` share
-    /// its time, so the step may span them all, at most a TrueHD access unit or the longest DTS frame
-    /// each. A step half a second longer than that, or back by more than 0.1 s, is a discontinuity.
-    static func continues(from previous: CMTime, to time: CMTime, frames: Int, codec: SpatialAudioCodec) -> Bool {
-        let longestFrame = codec == .trueHDAtmos ? 40.0 / 48_000 : 4096.0 / 48_000
-        let step = CMTimeSubtract(time, previous).seconds
-        return step >= -0.1 && step < 0.5 + Double(frames) * longestFrame
-    }
-
     /// Throws a failure that ends the stream, recording one the current run has just reported.
     /// Transport failures, such as a dropped connection or a server error, may succeed on a new run.
     /// A `SpatialAudioError`, including malformed container data, would repeat with every restart,
@@ -355,22 +346,8 @@ actor StreamEngine {
         let task = Task.detached { [weak self] in
             do {
                 var transcoder: SpatialAudioTranscoder?
-                var previous: CMTime?
-                var laced = 0
                 for try await packet in file.packets(of: track, from: start) {
                     try Task.checkCancellation()
-                    // The transcoder times audio by its samples, so past a gap or reset in the track's
-                    // timestamps the audio would drift from the video. Every run that reaches it would
-                    // stop there again, so the stream ends and the host falls back.
-                    if let previous, packet.time != previous {
-                        guard Self.continues(from: previous, to: packet.time, frames: laced, codec: codec) else {
-                            throw SpatialAudioError.source(String(format: "The audio timestamps jump from %.3f to %.3f s",
-                                                                  previous.seconds, packet.time.seconds))
-                        }
-                        laced = 0
-                    }
-                    previous = packet.time
-                    laced += 1
                     if transcoder == nil {
                         var settings = configuration
                         settings.startTime = start
@@ -380,7 +357,9 @@ actor StreamEngine {
                             onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
                             configuration: settings)
                     }
-                    try await transcoder?.append(packet.data)
+                    // A gap or reset in the timestamps fails the run; every run reaching it would fail
+                    // again, so the stream ends and the host falls back.
+                    try await transcoder?.append(packet.data, time: packet.time)
                     // The engine is gone once its stream is released; stop converting.
                     guard let self else { break }
                     await self.paceRun(id)

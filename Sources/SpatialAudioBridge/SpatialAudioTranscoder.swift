@@ -47,6 +47,10 @@ public actor SpatialAudioTranscoder {
     private var busy = false
     private enum State { case accepting, finished, cancelled, failed }
     private var state = State.accepting
+    private let codec: SpatialAudioCodec
+    /// The latest packet time passed to `append`, and how many packets have shared it.
+    private var packetTime: CMTime?
+    private var laced = 0
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
@@ -62,15 +66,19 @@ public actor SpatialAudioTranscoder {
         }
         self.configuration = configuration
         self.destination = destination
+        self.codec = codec
         self.decoder = try Decoder(codec: codec, layout: configuration.layout)
     }
 
     /// Pass the compressed audio payload, including DTS-HD extensions. MKV/TS bytes must be demuxed first.
     /// Await each call before appending again. Timestamps advance by decoded samples without drift.
-    public func append(_ data: Data) async throws {
+    /// With `time`, the packet's container time, a gap or reset in those times fails the session,
+    /// because decoded samples alone cannot span it. Frames laced into one block may share a time.
+    public func append(_ data: Data, time: CMTime? = nil) async throws {
         try beginOperation()
         defer { busy = false }
         do {
+            if let time { try follow(time) }
             var offset = 0
             while offset < data.count {
                 try checkActive()
@@ -119,6 +127,28 @@ public actor SpatialAudioTranscoder {
         guard state == .accepting else { return }
         state = .cancelled
         writer?.cancelWriting()
+    }
+
+    private func follow(_ time: CMTime) throws {
+        if let previous = packetTime, time != previous {
+            guard Self.continues(from: previous, to: time, frames: laced, codec: codec) else {
+                throw SpatialAudioError.source(String(format: "The audio timestamps jump from %.3f to %.3f s",
+                                                      previous.seconds, time.seconds))
+            }
+            laced = 0
+        }
+        packetTime = time
+        laced += 1
+    }
+
+    /// Whether a packet continues the previous one's timeline. The previous time's `frames` packets
+    /// were laced into one block, so the step may span them all, at most a TrueHD access unit or the
+    /// longest DTS frame each. A step half a second longer than that, or back by more than 0.1 s,
+    /// is a discontinuity.
+    static func continues(from previous: CMTime, to time: CMTime, frames: Int, codec: SpatialAudioCodec) -> Bool {
+        let longestFrame = codec == .trueHDAtmos ? 40.0 / 48_000 : 4096.0 / 48_000
+        let step = CMTimeSubtract(time, previous).seconds
+        return step >= -0.1 && step < 0.5 + Double(frames) * longestFrame
     }
 
     private func beginOperation() throws {
