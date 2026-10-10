@@ -69,6 +69,6 @@ STREAM t=3275.0 rate=1.0 item=1 silentAtmos=on conversion=2.27x available=2165 M
 
 In renderer mode, lines report the synchronizer's time and rate and the renderer's status (1 is rendering).
 
-The app also shows a recovery a host may want. When Jellyfin restarts its remux for rapid seeks, it can abort a video segment mid-response, and `AVPlayer` then waited indefinitely. If the player waits for more than 20 s, the app replaces the item at the same position and logs `recovering a stalled item`. The wedge appeared in two of four scripted runs; the recovery itself has not yet been observed on the device.
+The app also shows a recovery a host may want. When Jellyfin restarts its remux for rapid seeks, it can abort a video segment mid-response, and `AVPlayer` then waited indefinitely. If the player waits for more than 20 s, the app replaces the item at the same position and logs `recovering a stalled item`. The wedge appeared in three of five scripted runs. In the latest, replacing the item restored playback, but at the position where it stalled rather than at the seek's target.
 
 An Apple TV that goes to sleep suspends the app mid-run, which looks like a hang: the log simply stops. Wake it before testing; `devicectl` then reports "System is asleep" on launch.

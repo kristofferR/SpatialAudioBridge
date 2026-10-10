@@ -69,7 +69,7 @@ Scripted seeks on the Release build, from 55:06 into the Jellyfin title, whose s
 | Jump back 5 min | 13.3 s |
 | Two 1-minute jumps forward, 0.5 s apart | 11.9 s |
 
-In two other runs, the three quick skips back made Jellyfin abort a video segment mid-response, after which `AVPlayer` waited without requesting anything more; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks).
+In two other runs, the three quick skips back made Jellyfin abort a video segment mid-response, after which `AVPlayer` waited without requesting anything more; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). A run on the final code stalled the same way in that scenario, and StreamPlayer's watchdog replaced the item after 20 s, which restored playback. Its other seven seeks resumed in 0.7–14.7 s, within about a second of the times above.
 
 ## Coverage
 
