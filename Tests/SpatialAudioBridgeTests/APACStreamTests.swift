@@ -75,6 +75,16 @@ import Testing
     #expect(!StreamEngine.waits(for: 16, runStart: 10, converted: 15, ended: true))
 }
 
+@Test func segmentStoreRecordsCleanEndsAndFailures() {
+    let store = SegmentStore()
+    let clean = UUID(), failed = UUID(), running = UUID()
+    store.end(run: clean, failure: nil)
+    store.end(run: failed, failure: SpatialAudioError.decoding("bad"))
+    #expect(store.ended(run: clean) && store.failure(run: clean) == nil)
+    #expect(store.ended(run: failed) && store.failure(run: failed) != nil)
+    #expect(!store.ended(run: running))
+}
+
 @Test func segmentStoreKeepsRecentSegmentsBehindTheRequest() {
     let store = SegmentStore()
     let run = UUID()
