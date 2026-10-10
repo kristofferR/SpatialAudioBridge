@@ -22,7 +22,7 @@ import Foundation
         do {
             playback.startAuto()
             var steps: [AutoStep] = []
-            let perExcerpt = playback.blind ? 3 : 2
+            let perExcerpt = playback.stepsPerExcerpt
             let deadline = Date().addingTimeInterval(Double(Sample.all.count * perExcerpt * 24 + 30))
             while playback.autoRunning, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(250))

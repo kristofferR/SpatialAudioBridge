@@ -30,23 +30,33 @@ enum Version: String, CaseIterable {
     case baseline = "Baseline APAC"
     case apac = "TrueHD → APAC 9.1.6"
     case ddp = "DDP Atmos (Deezy)"
+    case pcm = "TrueHD → PCM 7.1"
     var suffix: String {
         switch self {
         case .baseline: "APAC-baseline"
         case .apac: "APAC"
         case .ddp: "DDP"
+        case .pcm: "PCM"
         }
     }
-    var isAPAC: Bool { self != .ddp }
-
-    /// The baseline, an APAC conversion from an earlier library build, is offered when every
-    /// sample has one. Auto mode then becomes a blind comparison against the DDP reference.
-    static let available: [Version] = {
-        let hasBaseline = Sample.all.allSatisfy {
-            Bundle.main.url(forResource: "\($0.id).\(Version.baseline.suffix)", withExtension: "mp4", subdirectory: "Media") != nil
+    var shortName: String {
+        switch self {
+        case .baseline: "Baseline"
+        case .apac: "TrueHD → APAC"
+        case .ddp: "DDP"
+        case .pcm: "PCM 7.1"
         }
-        return hasBaseline ? allCases : [.apac, .ddp]
-    }()
+    }
+    var isAPAC: Bool { self == .baseline || self == .apac }
+
+    /// APAC and DDP are always offered. The baseline, an APAC conversion from an earlier
+    /// library build, and plain PCM are offered when every sample has one. With a baseline,
+    /// Auto mode becomes a blind comparison against the DDP reference.
+    static let available: [Version] = allCases.filter { version in
+        version == .apac || version == .ddp || Sample.all.allSatisfy {
+            Bundle.main.url(forResource: "\($0.id).\(version.suffix)", withExtension: "mp4", subdirectory: "Media") != nil
+        }
+    }
 }
 
 struct AutoExcerpt {
@@ -101,6 +111,8 @@ struct BlindResult {
     private(set) var awaitingVerdict = false
     private(set) var results: [BlindResult] = []
     let blind = Version.available.contains(.baseline)
+    /// Blind Auto plays the reference, X and Y; otherwise every available version plays in turn.
+    var stepsPerExcerpt: Int { blind ? 3 : Version.available.count }
     private var autoExcerpts: [AutoExcerpt] = []
     private(set) var autoSteps: [AutoStep] = []
     private var autoPreparation: Task<Void, Never>?
@@ -274,8 +286,7 @@ struct BlindResult {
                 self.autoExcerpts = excerpts
                 self.autoSteps = excerpts.indices.flatMap { index -> [AutoStep] in
                     guard self.blind else {
-                        return [AutoStep(excerpt: index, version: .apac, label: "TrueHD → APAC"),
-                                AutoStep(excerpt: index, version: .ddp, label: "DDP")]
+                        return Version.available.map { AutoStep(excerpt: index, version: $0, label: $0.shortName) }
                     }
                     let (x, y) = Bool.random() ? (Version.apac, Version.baseline) : (.baseline, .apac)
                     return [AutoStep(excerpt: index, version: .ddp, label: "Reference"),
@@ -539,6 +550,9 @@ struct ComparisonView: View {
                 if playback.blind {
                     Text("Baseline APAC comes from an earlier library build. Auto plays the DDP reference, then both APAC versions as X and Y in random order.").font(.callout).foregroundStyle(.secondary)
                 }
+                if Version.available.contains(.pcm) {
+                    Text("PCM 7.1 is the track’s own 7.1 presentation decoded to LPCM, as players without this library output it: no heights and no Atmos.").font(.callout).foregroundStyle(.secondary)
+                }
                 Text("Output: \(playback.route) • Keep Apple TV audio on Auto with Dolby Atmos enabled.").font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .focusSection()
@@ -571,7 +585,7 @@ private struct AutoStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let step = playback.autoStep, let excerpt = playback.autoExcerpt {
-                Text("\(playback.blind ? "Excerpt" : "Pair") \(step.excerpt + 1) of \(Sample.all.count) • \(step.label)")
+                Text("Excerpt \(step.excerpt + 1) of \(Sample.all.count) • \(step.label)")
                 Text("\(Int(min(20, max(0, playback.position - excerpt.start.seconds)))) / 20 seconds")
                     .monospacedDigit()
                 ProgressView(value: min(20, max(0, playback.position - excerpt.start.seconds)), total: 20)
@@ -585,11 +599,11 @@ private struct AutoStatusView: View {
                     Text("\(result.sample.name): X \(result.x == .apac ? "new" : "baseline"), picked \(result.verdict.rawValue)")
                 }
             } else if playback.autoCompleted {
-                Text("Auto complete • All \(Sample.all.count) pairs played")
+                Text("Auto complete • All \(Sample.all.count) excerpts played")
             } else if playback.blind {
                 Text("Reference, X and Y for 20 seconds each, all \(Sample.all.count) excerpts.")
             } else {
-                Text("20 seconds per format, all \(Sample.all.count) pairs.")
+                Text("20 seconds per version, all \(Sample.all.count) excerpts.")
             }
         }
         .font(.callout)
