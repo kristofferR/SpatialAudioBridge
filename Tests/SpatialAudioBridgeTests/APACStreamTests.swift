@@ -162,3 +162,26 @@ struct APACStreamFixtureTests {
         await stream.stop()
     }
 }
+
+/// The live profile must emit each segment within one sync period of its end, or seeks stall.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil))
+func liveEncodingEmitsSegmentsSoonAfterTheirInput() async throws {
+    let file = try await MatroskaFile.open(FileByteSource(url: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"]!)))
+    let track = try #require(file.audioTracks.first { $0.codec == .trueHDAtmos })
+    final class Lag: @unchecked Sendable {
+        let lock = NSLock()
+        var input = 0.0, worst = 0.0
+    }
+    let lag = Lag()
+    let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .segments(onSegment: { segment in
+        guard segment.kind == .media, let start = segment.startTime, let duration = segment.duration else { return }
+        lag.lock.withLock { lag.worst = max(lag.worst, lag.input - (start + duration).seconds) }
+    }), configuration: APACConfiguration(liveEncoding: true))
+    for try await packet in file.packets(of: track) {
+        if packet.time.seconds > 30 { break }
+        try await transcoder.append(packet.data)
+        lag.lock.withLock { lag.input = packet.time.seconds }
+    }
+    _ = try await transcoder.finish()
+    #expect(lag.lock.withLock { lag.worst } < 2.0, "segments must follow their input by about one sync period")
+}
