@@ -81,7 +81,7 @@ The master rewrite removes the server's audio renditions, replaces audio codecs 
 Seek the player as usual. Segments lie on a fixed grid, so every conversion run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
 
 - Segments already converted are served at once: the lookahead ahead of the playhead, and the last 20 segments (about 64 s) behind it, so skipping back over recent audio is immediate.
-- Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 1 s apart on Apple TV 4K (2nd generation). The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s.
+- Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 1 s apart on Apple TV 4K (2nd generation). The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s. A second run converts from 5 segments ahead at the same time, so the segments `AVPlayer` asks for next are often ready; see [concurrency](architecture.md#concurrency-bounds-and-failure).
 - While scrubbing, `AVPlayer` requests a segment at each intermediate position. Each restarts conversion, and requests a later restart replaced are answered with status 503 at once.
 - A gap or reset in the track's own timestamps ends the stream with an error. Conversion times audio by its samples, so it cannot keep audio aligned past the jump; the host falls back as for any other conversion failure.
 
@@ -103,7 +103,7 @@ options.includesVideoVariant = { $0.query?.contains("AllowVideoStreamCopy=true")
 let stream = try await APACStream.start(file: file, videoMaster: videoMaster, options: options)
 ```
 
-The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 9.1.6 layout uses 4.096 Mbit/s, about 1.6 MB per segment, so the defaults keep at most about 50 MB of converted audio.
+The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 9.1.6 layout uses 4.096 Mbit/s, about 1.6 MB per segment, so the defaults keep at most about 56 MB of converted audio.
 
 `includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
 

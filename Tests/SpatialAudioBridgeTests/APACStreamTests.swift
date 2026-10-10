@@ -137,19 +137,37 @@ import Testing
     #expect(!store.ended(run: running))
 }
 
+private func mediaSegment(_ index: Int) -> APACSegment {
+    APACSegment(kind: .media, data: Data([UInt8(index)]), startTime: CMTime(value: Int64(index) * 153_600, timescale: 48_000),
+                duration: CMTime(value: 153_600, timescale: 48_000))
+}
+
 @Test func segmentStoreKeepsRecentSegmentsBehindTheRequest() {
     let store = SegmentStore()
     let run = UUID()
-    store.begin(run: run)
-    for index in 0..<40 {
-        store.deliver(APACSegment(kind: .media, data: Data([UInt8(index)]), startTime: CMTime(value: Int64(index) * 153_600, timescale: 48_000),
-                                  duration: CMTime(value: 153_600, timescale: 48_000)), run: run, segmentFrames: 153_600)
-    }
+    store.begin(run: run, first: 0)
+    for index in 0..<40 { store.deliver(mediaSegment(index), run: run, segmentFrames: 153_600) }
     store.keep(around: 30, behind: 20, ahead: 6)
     #expect(store.segment(9) == nil)
     #expect(store.segment(10) != nil)
     #expect(store.segment(38) != nil)
     #expect(store.segment(39) == nil)
+}
+
+/// A helper run's first fragment carries encoder priming, and a retired run may still emit one.
+@Test func segmentStoreTakesEachRunFromItsFirstSegmentUntilRetired() {
+    let store = SegmentStore()
+    let run = UUID(), helper = UUID()
+    store.begin(run: run, first: 10)
+    store.begin(run: helper, first: 15)
+    for index in 10...12 { store.deliver(mediaSegment(index), run: run, segmentFrames: 153_600) }
+    for index in 14...16 { store.deliver(mediaSegment(index), run: helper, segmentFrames: 153_600) }
+    #expect(store.segment(14) == nil, "the helper's priming fragment")
+    #expect(store.segment(15) != nil && store.highest(run: helper) == 16)
+    #expect(store.highest(run: run) == 12)
+    store.retire(run: run)
+    store.deliver(mediaSegment(13), run: run, segmentFrames: 153_600)
+    #expect(store.segment(13) == nil && store.highest(run: run) == -1)
 }
 
 @Test func loopbackServerAnswersGetsRangesAndUnknownPaths() async throws {
@@ -264,6 +282,64 @@ struct APACStreamFixtureTests {
             dot += Double(a[i]) * Double(b[i]); energyA += Double(a[i] * a[i]); energyB += Double(b[i] * b[i])
         }
         #expect(dot / sqrt(energyA * energyB) > 0.99, "restarted audio must be sample-aligned with continuous audio")
+    }
+
+    /// The helper run converts segment 5 onward from the start. Its segment must play on from
+    /// segment 4 without the 42.7 ms of priming a restarted run's first segment carries.
+    @Test func helperSegmentsMatchContinuousConversionFromTheirFirstSample() async throws {
+        let file = try await open()
+        let stream = try await APACStream.start(file: file)
+        let base = stream.audioPlaylistURL.deletingLastPathComponent()
+        let initial = try await get(base.appendingPathComponent("init.mp4"))
+        let helped = try await get(base.appendingPathComponent("seg5.m4s"))
+        await stream.stop()
+        // The same segment from one run through the file, as steady playback converts it.
+        final class Collector: @unchecked Sendable {
+            let lock = NSLock()
+            var segments: [Int: Data] = [:]
+        }
+        let collector = Collector()
+        let track = try #require(file.audioTracks.first { $0.codec == .trueHDAtmos })
+        let priming = try APACConfiguration().encoderPrimingDuration()
+        var transcoder: SpatialAudioTranscoder?
+        for try await packet in file.packets(of: track, from: priming) {
+            if packet.time.seconds > 22 { break }
+            if transcoder == nil {
+                var configuration = APACConfiguration(startTime: priming, liveEncoding: true)
+                configuration.inputStartTime = packet.time
+                transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .segments(onSegment: { segment in
+                    guard let start = segment.startTime else { return }
+                    collector.lock.withLock { collector.segments[Int(start.value * 48_000 / Int64(start.timescale)) / 153_600] = segment.data }
+                }), configuration: configuration)
+            }
+            try await transcoder?.append(packet.data)
+        }
+        _ = try await transcoder?.finish()
+        let (previous, continuous) = try collector.lock.withLock {
+            (try #require(collector.segments[4]), try #require(collector.segments[5]))
+        }
+        #expect(try fragmentTiming(helped).decodeTime == 5 * 153_600)
+        // Played on from segment 4, as AVPlayer does. Decoding trims priming only at the start, so
+        // the join is where a restarted run's priming would replace 2048 frames of audio. A file
+        // reader, unlike HLS, also needs the runs' fragment sequence numbers to continue.
+        func renumbered(_ fragment: Data, after previous: Data) throws -> Data {
+            let at = try #require(fragment.range(of: Data("mfhd".utf8))).upperBound + 4
+            let sequence = try #require(previous.range(of: Data("mfhd".utf8))).upperBound + 4
+            var result = fragment
+            let next = previous[sequence..<sequence + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) } + 1
+            result.replaceSubrange(at..<at + 4, with: withUnsafeBytes(of: next.bigEndian) { Data($0) })
+            return result
+        }
+        let a = try await decodedMono([initial, previous, continuous])
+        let b = try await decodedMono([initial, previous, try renumbered(helped, after: previous)])
+        let join = 153_600 - Int(priming.value)
+        try #require(a.count > join + 2048 && b.count > join + 2048)
+        var dot = 0.0, energyA = 0.0, energyB = 0.0
+        for i in join..<join + 2048 {
+            dot += Double(a[i]) * Double(b[i]); energyA += Double(a[i] * a[i]); energyB += Double(b[i] * b[i])
+        }
+        #expect(energyA > 1e-4, "the fixture has audio at 16 s")
+        #expect(dot / sqrt(energyA * energyB) > 0.99, "the helper's segment must start with source audio")
     }
 
     /// A paused player stops requesting; conversion must wait instead of running past what it keeps.
