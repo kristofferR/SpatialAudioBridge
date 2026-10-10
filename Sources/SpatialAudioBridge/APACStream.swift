@@ -36,7 +36,7 @@ public final class APACStream: Sendable {
     public let masterPlaylistURL: URL?
     public let renditionName: String
     private let server: LoopbackServer
-    private let engine: StreamEngine
+    let engine: StreamEngine
 
     /// Starts serving `track` (by default the first convertible default track) and converts the
     /// segment containing `startTime`, failing early when the track cannot be converted.
@@ -104,8 +104,9 @@ public final class APACStream: Sendable {
         self.engine = engine
     }
 
-    /// Audio converted per second of conversion since the latest start or seek, as a multiple of
-    /// real time; nil before the first segment. Below about 1.2, playback will stall.
+    /// Audio converted per second spent converting since the latest start or seek, as a multiple
+    /// of real time, excluding time held at the lookahead; nil before the first segment. Below
+    /// about 1.2, playback will stall.
     public var conversionSpeed: Double? {
         get async { await engine.conversionSpeed }
     }
@@ -170,7 +171,7 @@ actor StreamEngine {
     private var requested = 0
 
     private struct Run {
-        let id = UUID()
+        let id: UUID
         let start: Int
         let task: Task<Void, Never>
     }
@@ -206,9 +207,12 @@ actor StreamEngine {
         requested = index
         store.keep(around: index, ahead: lookahead)
         if let data = store.segment(index) { return data }
-        // Restart behind the run or beyond what it will reach soon; otherwise wait for it.
+        // Restart behind the run, at a segment it passed but no longer holds, or beyond what it
+        // will reach soon; otherwise wait for it.
         let reach = max(run?.start ?? -1, store.highest) + lookahead + 1
-        if run == nil || index < run!.start || index > reach || store.ended(run: run!.id) { startRun(at: index) }
+        if run == nil || index < run!.start || index <= store.highest || index > reach || store.ended(run: run!.id) {
+            startRun(at: index)
+        }
         return try await wait { $0.segment(index) }
     }
 
@@ -221,6 +225,9 @@ actor StreamEngine {
         guard let run else { return nil }
         return store.speed(from: run.start, segmentFrames: segmentFrames)
     }
+
+    /// The highest segment the current run has produced.
+    var converted: Int { store.highest }
 
     private func wait(for value: (SegmentStore) -> Data?) async throws -> Data {
         let deadline = ContinuousClock.now + timeout
@@ -267,14 +274,17 @@ actor StreamEngine {
                 store.end(run: id, failure: error)
             }
         }
-        run = Run(start: index, task: task)
+        run = Run(id: id, start: index, task: task)
     }
 
     /// Holds the run while it is `lookahead` segments ahead of the latest request.
     private func paceRun(_ id: UUID) async {
+        guard run?.id == id, store.highest >= requested + lookahead else { return }
+        let held = ContinuousClock.now
         while run?.id == id, !Task.isCancelled, store.highest >= requested + lookahead {
             try? await Task.sleep(for: .milliseconds(50))
         }
+        store.hold(ContinuousClock.now - held, run: id)
     }
 }
 
@@ -287,6 +297,7 @@ final class SegmentStore: @unchecked Sendable {
     private var current: UUID?
     private var produced = -1
     private var started = ContinuousClock.now
+    private var held = Duration.zero
     private var ends: [UUID: (any Error)?] = [:]
 
     var initialization: Data? { lock.withLock { initData } }
@@ -296,7 +307,7 @@ final class SegmentStore: @unchecked Sendable {
     func segment(_ index: Int) -> Data? { lock.withLock { segments[index] } }
 
     func begin(run: UUID) {
-        lock.withLock { current = run; produced = -1; started = .now }
+        lock.withLock { current = run; produced = -1; started = .now; held = .zero }
     }
 
     /// Stores a fragment under the grid index of its start time; repeated fragments replace nothing.
@@ -316,13 +327,18 @@ final class SegmentStore: @unchecked Sendable {
         }
     }
 
-    /// Seconds of audio produced per second since the run began at segment `start`.
+    /// Records time the run spent waiting for playback.
+    func hold(_ duration: Duration, run: UUID) {
+        lock.withLock { if run == current { held += duration } }
+    }
+
+    /// Seconds of audio produced per second of conversion since the run began at segment `start`.
     func speed(from start: Int, segmentFrames: Int64) -> Double? {
         lock.withLock {
             guard produced >= start else { return nil }
             let audio = Double(Int64(produced - start + 1) * segmentFrames) / 48_000
-            let elapsed = ContinuousClock.now - started
-            return audio / (Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18)
+            let busy = ContinuousClock.now - started - held
+            return audio / (Double(busy.components.seconds) + Double(busy.components.attoseconds) / 1e18)
         }
     }
 

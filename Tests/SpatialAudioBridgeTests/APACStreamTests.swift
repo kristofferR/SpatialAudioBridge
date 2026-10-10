@@ -145,6 +145,21 @@ struct APACStreamFixtureTests {
         #expect(dot / sqrt(energyA * energyB) > 0.99, "restarted audio must be sample-aligned with continuous audio")
     }
 
+    /// A paused player stops requesting; conversion must wait instead of running past what it keeps.
+    @Test func conversionHoldsAtTheLookaheadUntilPlaybackCatchesUp() async throws {
+        var options = APACStream.Options()
+        options.lookahead = 2
+        options.segmentTimeout = .seconds(10)
+        let stream = try await APACStream.start(file: try await open(), options: options)
+        let base = stream.audioPlaylistURL.deletingLastPathComponent()
+        // Unpaced, conversion would pass segment 6 within this pause even on a slow Mac.
+        try await Task.sleep(for: .seconds(6))
+        #expect(await stream.engine.converted == 2)
+        for index in 1...4 { _ = try await get(base.appendingPathComponent("seg\(index).m4s")) }
+        #expect(await stream.engine.converted <= 6)
+        await stream.stop()
+    }
+
     @Test func avPlayerPlaysAndSeeksTheStream() async throws {
         let stream = try await APACStream.start(file: try await open())
         let player = AVPlayer(url: stream.audioPlaylistURL)
