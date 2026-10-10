@@ -45,6 +45,10 @@ Update offsets count in units of 32 samples. Metadata ramps interpolate channel 
 
 Bed channels are speaker-anchored (clause 5.2.5) and route directly to their speaker. On 7.1.4, the 3/4/4 column of table 6 plays top middle bed channels from the front and back top pairs at −3 dB each, and wides from the front left or right at −3 dB. Objects never feed LFE. Every surveyed title had an LFE-only bed, with everything else in 11 to 15 objects.
 
+### Dialogue normalisation
+
+TrueHD signals a dialogue level for the object presentation. Native decoders attenuate by the difference from −31 dB, for example 4 dB at −27, and the renderer does the same, from each major sync. When the level changes, the gain ramps over one access unit. DTS:X output is not normalised: the pinned decoder does not expose a DTS dialogue level.
+
 ### Metadata boundary
 
 A stream entered at a later major sync, after a seek or from a server-side remux, usually carries its first object metadata a few access units in: 7.5–20 ms in measured Blu-ray streams, which then repeat it every 32 ms. The decoder holds up to 0.5 s of audio until that metadata arrives and renders it at the first metadata block's positions. Every sample is kept, so timing is unchanged. A stream without object metadata within 0.5 s is rejected.
@@ -88,6 +92,6 @@ Before recombination, `dca::FoldPlan` removes every known spatial contribution f
 
 ## Levels
 
-Rendering is linear: no normalization, limiting or headroom gain. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
+Apart from TrueHD dialogue normalisation, rendering is linear, with no limiting or headroom gain. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
 
 With the earlier panner, 38 minutes of a TrueHD Atmos film peaked at −0.2 dBFS before encoding, the DTS:X fixture at −0.3 dBFS and the Helicopter fixture at −9.8 dBFS, while one 20-second film excerpt reached +4 dBFS in a 9.1.6 height channel. With this panner, the [library census](validation.md#atmos-metadata-census) found three of 48 one-minute windows above full scale, from two titles, the highest at +3.6 dBFS in a centre channel. APAC keeps such peaks: tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder. Whether tvOS or the HDMI output then clips them is unverified. A limiter would also change the measured peaks just below full scale, so the renderer leaves the level to the mix and the host's `gainDB`.
