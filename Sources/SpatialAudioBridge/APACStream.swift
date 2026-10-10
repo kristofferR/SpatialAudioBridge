@@ -310,14 +310,22 @@ actor StreamEngine {
         !ended && index >= runStart && index > converted && index <= max(runStart + 1, converted + 2)
     }
 
+    /// Whether a packet continues the previous one's timeline. Laced frames share a time and blocks
+    /// follow within milliseconds, so a jump of half a second or a step back of more than 0.1 s
+    /// is a discontinuity.
+    static func continues(from previous: CMTime, to time: CMTime) -> Bool {
+        let step = CMTimeSubtract(time, previous).seconds
+        return step >= -0.1 && step < 0.5
+    }
+
     /// Throws a failure that ends the stream, recording one the current run has just reported.
-    /// Malformed or unsupported media fails the same way on every attempt, while network errors
-    /// may not, so only decoding, encoding and configuration failures end the stream.
+    /// Only a source failure, such as a network error, may succeed on a new run; every other
+    /// failure would repeat with each restart, so it ends the stream.
     private func checkFailure() throws {
         if failure == nil, let run, let error = store.failure(run: run.id), let spatial = error as? SpatialAudioError {
             switch spatial {
-            case .decoding, .encoding, .invalidConfiguration: failure = spatial
-            case .source, .invalidState, .coreMedia: break
+            case .source: break
+            case .decoding, .encoding, .invalidConfiguration, .invalidState, .coreMedia: failure = spatial
             }
         }
         if let failure { throw failure }
@@ -349,8 +357,16 @@ actor StreamEngine {
         let task = Task.detached { [weak self] in
             do {
                 var transcoder: SpatialAudioTranscoder?
+                var previous: CMTime?
                 for try await packet in file.packets(of: track, from: start) {
                     try Task.checkCancellation()
+                    // The transcoder times audio by its samples, so a gap or reset in the track's
+                    // timestamps ends the run; a request past it starts a new one aligned to the gap.
+                    if let previous, !Self.continues(from: previous, to: packet.time) {
+                        log.info("Timestamp discontinuity at \(packet.time.seconds) s; run ends")
+                        break
+                    }
+                    previous = packet.time
                     if transcoder == nil {
                         var settings = configuration
                         settings.startTime = start

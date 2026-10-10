@@ -144,6 +144,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(exact.first.map { $0.time.seconds } == 1.02)
     let inFirstCluster = try await collect(file.packets(of: track, from: CMTime(value: 25, timescale: 1000)))
     #expect(inFirstCluster.first.map { $0.time.seconds } == 0.02)
+    await #expect(throws: SpatialAudioError.self) { try await collect(file.packets(of: track, from: .invalid)) }
 }
 
 @Test func matroskaSplitsLacedFrames() async throws {
