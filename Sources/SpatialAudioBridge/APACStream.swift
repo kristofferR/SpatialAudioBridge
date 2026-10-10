@@ -17,7 +17,7 @@ import Foundation
 /// Native Atmos output also needs ``AtmosOutputActivator`` from SpatialAudioPlayback.
 public final class APACStream: Sendable {
     public struct Options: Sendable {
-        /// Layout, bitrate and sync interval. The stream manages the start times.
+        /// Layout, bitrate and sync interval. The stream manages the start times and always encodes live.
         public var configuration = APACConfiguration()
         /// The rendition name in the playlist and the player's audio menu.
         public var renditionName = "Spatial Audio"
@@ -53,7 +53,9 @@ public final class APACStream: Sendable {
         guard let duration = file.duration, duration.seconds > 0 else {
             throw SpatialAudioError.source("The file does not declare its duration")
         }
-        let configuration = options.configuration
+        var configuration = options.configuration
+        // The offline profile would delay every segment by about 20 s of audio.
+        configuration.liveEncoding = true
         let segmentFrames = Int64(configuration.syncPacketFrequency * 1024 * StreamEngine.periods)
         let engine = StreamEngine(file: file, track: track, codec: codec, configuration: configuration,
                                   segmentFrames: segmentFrames,
