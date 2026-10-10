@@ -35,7 +35,7 @@ try await audio.endOfStream()
 
 - **Start.** Call `begin(at:)` with the presentation time, then enqueue packets from a sync point at or before it. The first packet's time anchors the timeline; audio before `start` is discarded, and a source that begins after it is padded with silence, so audio starts exactly at `start`.
 - **Readiness.** The live encoder holds about 1.6 s of input before its first packet. Start the synchronizer only when `isReadyToPlay` is true.
-- **Seek.** Pause the synchronizer, call `begin(at:)` with the target, which flushes queued audio and resets the decoder and encoder, then feed packets from the target and start the clock again once ready.
+- **Seek.** Pause the synchronizer, call `begin(at:)` with the target, which flushes queued audio and resets the decoder and encoder, then feed packets from the target and start the clock again once ready. An `enqueue` still waiting from before the seek throws `CancellationError` instead of queuing stale audio.
 - **Pause and rate.** The host sets the synchronizer's rate. `AtmosOutputActivator` follows it.
 - **Discontinuities.** A timestamp jump or a format change needs `begin(at:)`, just like a seek.
 
@@ -43,7 +43,7 @@ Each packet's timestamp is shifted back by the encoder priming, so decoded audio
 
 ## Status and errors
 
-`renderingStatus` is `.rendering` once APAC plays and `.failed` if the renderer rejects it. `enqueue` throws for malformed or unsupported input; treat that as the end of the session and fall back to the host's audio path. After `endOfStream()`, call `begin(at:)` to play again.
+`renderingStatus` is `.rendering` once APAC plays and `.failed` if the renderer rejects it. `enqueue` throws for malformed or unsupported input and for a failed renderer; treat that as the end of the session and fall back to the host's audio path. Any failure, including cancellation, ends the timeline: further input is refused until `begin(at:)`, as after `endOfStream()`. Releasing the `SpatialAudioRenderer` removes it from the synchronizer.
 
 ## Device results
 
