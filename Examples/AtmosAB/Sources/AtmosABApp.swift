@@ -11,9 +11,9 @@ struct Sample: Identifiable, Hashable, Decodable {
     /// starts with the object path test, rendered by the Rust crate's `object_path` example, when bundled.
     static let listed: [Sample] = {
         guard Version.compareLayouts else { return all }
-        let test = Bundle.main.url(forResource: "object-path.APAC", withExtension: "mp4", subdirectory: "Media") == nil
-            ? [] : [Sample(id: "object-path", name: "Object path: ear level, then overhead")]
-        return test + all.filter { !$0.id.hasPrefix("channel-check") }
+        let test = Sample(id: "object-path", name: "Object path: ear level, then overhead")
+        let bundled = [Version.apac, .apac916].allSatisfy { $0.url(for: test) != nil }
+        return (bundled ? [test] : []) + all.filter { !$0.id.hasPrefix("channel-check") }
     }()
     static let all: [Sample] = {
         let originals = [

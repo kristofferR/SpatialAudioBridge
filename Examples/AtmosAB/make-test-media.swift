@@ -67,6 +67,10 @@ func encode(_ samples: inout [Float], to url: URL) {
 
 if arguments[1] == "encode" {
     let data = try Data(contentsOf: URL(fileURLWithPath: arguments[3]))
+    guard !data.isEmpty, data.count % (count * 4) == 0 else {
+        print("\(arguments[3]) is not whole frames of \(count)-channel Float32: \(data.count) bytes")
+        exit(1)
+    }
     var samples = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     encode(&samples, to: URL(fileURLWithPath: arguments[4]))
     exit(0)
