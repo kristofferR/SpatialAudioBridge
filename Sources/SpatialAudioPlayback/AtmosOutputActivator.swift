@@ -12,6 +12,8 @@ public final class AtmosOutputActivator {
     let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private weak var host: AVPlayer?
+    private weak var synchronizer: AVSampleBufferRenderSynchronizer?
+    private var rateObserver: NSObjectProtocol?
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
     private var observations: [NSKeyValueObservation] = []
     private var selectionObserver: NSObjectProtocol?
@@ -48,11 +50,27 @@ public final class AtmosOutputActivator {
         ]
     }
 
+    /// Plays the silent stream while `synchronizer` runs, for hosts that render APAC with
+    /// `SpatialAudioRenderer` instead of AVPlayer.
+    public func attach(to synchronizer: AVSampleBufferRenderSynchronizer) {
+        detach()
+        self.synchronizer = synchronizer
+        rateObserver = NotificationCenter.default.addObserver(
+            forName: AVSampleBufferRenderSynchronizer.rateDidChangeNotification, object: synchronizer, queue: .main
+        ) { [weak self] _ in
+            Self.onMain { self?.update() }
+        }
+        update()
+    }
+
     /// Stops following the host and releases the silent stream.
     public func detach() {
         observations.forEach { $0.invalidate() }
         observations = []
+        if let rateObserver { NotificationCenter.default.removeObserver(rateObserver) }
+        rateObserver = nil
         host = nil
+        synchronizer = nil
         follow(nil)
     }
 
@@ -68,6 +86,10 @@ public final class AtmosOutputActivator {
     }
 
     private func update() {
+        if let synchronizer {
+            if synchronizer.rate != 0 { play() } else { player.pause() }
+            return
+        }
         guard let host, let item = host.currentItem, playsAPAC(item) else {
             // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
             release()
@@ -77,6 +99,10 @@ public final class AtmosOutputActivator {
             player.pause()
             return
         }
+        play()
+    }
+
+    private func play() {
         if looper == nil {
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: stream))
         }

@@ -37,6 +37,19 @@ import Testing
         host.pause()
     }
 
+    @Test func followsARenderSynchronizer() async throws {
+        let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
+        let synchronizer = AVSampleBufferRenderSynchronizer()
+        activator.attach(to: synchronizer)
+        #expect(!activator.isActive)
+        synchronizer.setRate(1, time: .zero)
+        #expect(await eventually { activator.isActive })
+        synchronizer.rate = 0
+        #expect(await eventually { !activator.isActive })
+        activator.detach()
+        #expect(activator.player.items().isEmpty)
+    }
+
     @Test func unplayableStreamReportsAnErrorInsteadOfActivity() async throws {
         let invalid = FileManager.default.temporaryDirectory.appendingPathComponent("invalid-\(UUID().uuidString).mp4")
         try Data("not media".utf8).write(to: invalid)
