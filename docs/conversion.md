@@ -99,7 +99,7 @@ In the multivariant playlist, list `layout.apacCodecString` (`apac.31.04` for 9.
 
 Offline encoding uses the `AppleAV_Spatial_Offline` content source with Movie dynamic range; live encoding uses `AppleAV_Spatial_Live` with Capture. On macOS 27.0.1 the generic `AV_Spatial_Offline` source failed `canApply`, while the Apple spatial sources succeeded for both layouts. Recheck this on target OS versions.
 
-The encoder has three effort tiers at the same bit rate. Medium matched the default high tier on real Atmos content (48.4 against 47.0 dB signal-to-error on a film) and encodes 1.25 to 1.5 times as fast; low is three times as fast but lost up to 42 dB on height-only content. `AVAssetWriter` ignores the quality setting for APAC, so files and HLS fragments use the default tier, while `SpatialAudioRenderer` uses medium.
+The encoder has three effort tiers at the same bit rate, and every path uses medium, Core Audio's default. `AVAssetWriter` ignores the quality setting for APAC, but its packets are bit-identical to `AudioConverter` at medium; `SpatialAudioRenderer` sets medium explicitly. Medium matched high on real Atmos content (48.4 against 47.0 dB signal-to-error on a film) and needs less CPU: 1.25 to 1.5 times as fast on a synthetic 16-channel signal, 1.1 to 1.2 times on Atmos content. Low is three times as fast but lost up to 42 dB on height-only content.
 
 `report.peakPCM` is the largest sample before encoding. Values above 1 exceed full scale; lower `gainDB` if that matters for the material.
 

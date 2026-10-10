@@ -44,9 +44,9 @@ final class APACEncoder {
                                       (kAudioCodecPropertyDynamicRangeControlConfiguration, UInt32(configuration.dynamicRangeConfiguration.rawValue)),
                                       (kAudioCodecPropertyASPFrequency, UInt32(configuration.syncPacketFrequency)),
                                       // Medium matched high on real Atmos content (48.4 against 47.0 dB
-                                      // signal-to-error) and encodes 1.25 to 1.5 times as fast. Low is
-                                      // faster still but lost up to 42 dB on height-only content.
-                                      // AVAssetWriter ignores the equivalent quality setting for APAC.
+                                      // signal-to-error) at less CPU. Low is faster still but lost up to
+                                      // 42 dB on height-only content. Medium is Core Audio's default and
+                                      // the tier AVAssetWriter encodes APAC at, whatever its settings say.
                                       (kAudioConverterCodecQuality, kAudioConverterQuality_Medium)] {
                 var value = value
                 try Self.check(AudioConverterSetProperty(converter, property, 4, &value))
@@ -85,6 +85,9 @@ final class APACEncoder {
     func encode(_ samples: ArraySlice<Float>, final: Bool = false) throws -> [Data] {
         pending.append(contentsOf: samples)
         draining = final
+        // A call per TrueHD access unit is common. Waiting for a packet's worth of PCM avoids a
+        // conversion pass and its output buffer for each one, saving about 20% of encoding CPU.
+        guard final || pending.count >= 1024 * channels else { return [] }
         let batch = 16
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: maximumPacketSize * batch, alignment: 16)
         defer { buffer.deallocate() }
