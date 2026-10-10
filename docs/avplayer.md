@@ -85,7 +85,7 @@ Seek the player as usual. Segments lie on a fixed grid, so every conversion run 
 - While scrubbing, `AVPlayer` requests a segment at each intermediate position. Each restarts conversion, and requests a later restart replaced are answered with status 503 at once.
 - A gap or reset in the track's own timestamps ends the stream with an error. Conversion times audio by its samples, so it cannot keep audio aligned past the jump; the host falls back as for any other conversion failure.
 
-After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7 s and long jumps after 9–11 s with the helper run, 11–14 s before it. Skips within already converted audio resumed after about 1 s.
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7 s and long jumps after 9–11 s with the helper run, 11–14 s before it. On a remux with keyframes under a second apart, jumps resumed after 5–8 s. Skips within already converted audio resumed after about 1 s.
 
 Pass the intended start position as `startTime`, so the first segment is ready when `AVPlayer` asks for it, and seek exactly (`toleranceBefore: .zero`) before playing.
 

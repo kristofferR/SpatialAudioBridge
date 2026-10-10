@@ -78,6 +78,8 @@ Scripted seeks on the Release build, from 55:06 into the Jellyfin title, whose s
 
 In three of six runs, the three quick skips back left `AVPlayer` waiting without requesting anything more, after Jellyfin aborted a video segment mid-response or `AVPlayer` reset an audio connection. StreamPlayer's 20-second watchdog recovered the one wedge that occurred while it was in place, by replacing the item; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). In the two runs on the final code, every other seek resumed in 0.7–14.7 s, within about a second of the times above. The last column is one run of a Debug build with the helper run; Debug converts as fast as Release. A run that started the helper together with the first run resumed long jumps as fast, but delayed first segments after restarts to up to 4.2 s, past the 3 s `AVPlayer` allows a seek; starting the helper after the first segment kept them at 1.6–3.1 s, as without it (1.8–3.7 s).
 
+On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted test from 20:00 resumed scrubs and jumps in 5.1–8.2 s and three skips back in 6.8 s; skips within converted audio took 0.7–0.9 s. Its first segments after restarts took 3.0–3.5 s and `AVPlayer` logged three −12889 timeouts without failing a seek: the reader transfers the video too, about 85 MB for the 7 s of file a restart's first segment needs.
+
 ## Coverage
 
 The suite includes 19 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
@@ -89,7 +91,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Correct speaker placement beyond the channel check and informal listening, and the HDMI payload (MAT or otherwise).
 - Lip sync with dialogue, measured rather than observed.
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
-- Memory use over a full film, Wi-Fi playback, titles with short keyframe intervals, and other Apple TV models and receivers.
+- Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Plex and Emby sources.
 - Whether the playback output clips rendered peaks above full scale. APAC preserves them; one 20-second film excerpt reached +4 dBFS in a height channel, while 38 minutes of another film stayed below −0.2 dBFS. See [levels](rendering.md#levels).
 
