@@ -424,9 +424,9 @@ actor StreamEngine {
     }
 
     /// Starts the planned helper once run `id` has delivered its first segment. Ends the run once it
-    /// has delivered everything before the helper's first segment, and makes the helper the run.
-    /// A helper whose transport failed is dropped and the run carries on; any other failure would
-    /// repeat in the run, so it ends the stream.
+    /// has delivered everything before the helper's first segment and the helper is ahead of it,
+    /// and makes the helper the run. A helper whose transport failed is dropped and the run carries
+    /// on; any other failure would repeat in the run, so it ends the stream.
     private func handOver(from id: UUID) -> Bool {
         guard let run, run.id == id else { return false }
         let converted = store.highest(run: id)
@@ -442,8 +442,18 @@ actor StreamEngine {
             self.helper = nil
             return false
         }
-        guard store.highest(run: id) >= helper.start - 1 else { return false }
-        log.info("seg\(helper.start - 1) reached the helper; it continues from seg\(helper.start)")
+        let helped = store.highest(run: helper.id)
+        // A helper that is not ahead once the run reaches its start would only slow the run's next
+        // segment, so the run carries on alone.
+        if converted >= helper.start, helped <= converted {
+            log.info("seg\(converted) passed the helper from seg\(helper.start); the helper stops")
+            helper.task.cancel()
+            store.retire(run: helper.id)
+            self.helper = nil
+            return false
+        }
+        guard converted >= helper.start - 1, helped > converted else { return false }
+        log.info("seg\(converted) reached the helper; it continues from seg\(helped)")
         store.retire(run: id)
         (self.run, self.helper) = (helper, nil)
         return true
