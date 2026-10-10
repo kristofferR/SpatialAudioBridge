@@ -93,12 +93,14 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidState(String)
     case decoding(String)
     case encoding(String)
+    /// The media source could not be read or is not a supported container.
+    case source(String)
     case coreMedia(OSStatus)
 
     public var description: String {
         switch self {
         case .invalidConfiguration(let message), .invalidState(let message),
-             .decoding(let message), .encoding(let message): message
+             .decoding(let message), .encoding(let message), .source(let message): message
         case .coreMedia(let code): "CoreMedia error \(code)"
         }
     }
