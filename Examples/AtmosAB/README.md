@@ -46,10 +46,11 @@ Or run `./prepare-media.sh "/path/to/prepared/media"`, generate with `xcodegen g
 
 ### Plain PCM playback
 
-To hear what players without this library output, also supply `<id>.PCM.mp4` for every sample: the track's own 7.1 presentation decoded to 24-bit PCM. It plays as 7.1 LPCM without the near-silent Atmos stream, so it has no heights. Lossless FLAC in MP4 keeps the files at about half the size of raw PCM, and Apple's decoder maps FFmpeg's 7.1 side and back channels to their speakers:
+To hear what players without this library output, also supply `<id>.PCM.mov` for every sample: the track's own 7.1 presentation decoded to 24-bit PCM. It plays as 7.1 LPCM without the near-silent Atmos stream, so it has no heights. Use uncompressed PCM in QuickTime: FLAC in MP4 decoded on macOS but produced playback errors on the tested Apple TV. Reorder the channels to sides before rears, so FFmpeg writes Apple's explicit 7.1 layout (L R C LFE Ls Rs Rls Rrs) instead of a channel bitmap that Apple labels ambiguously:
 
 ```sh
-ffmpeg -i film.thd -c:a flac -f mp4 film.PCM.mp4
+ffmpeg -i film.thd -af "channelmap=map=FL-FL|FR-FR|FC-FC|LFE-LFE|SL-SL|SR-SR|BL-BL|BR-BR:channel_layout=FL+FR+FC+LFE+SL+SR+BL+BR" \
+  -c:a pcm_s24le -f mov film.PCM.mov
 ```
 
 ### Blind comparison against a baseline

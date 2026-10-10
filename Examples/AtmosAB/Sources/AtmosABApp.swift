@@ -27,10 +27,10 @@ struct Sample: Identifiable, Hashable, Decodable {
 }
 
 enum Version: String, CaseIterable {
-    case baseline = "Baseline APAC"
-    case apac = "TrueHD → APAC 9.1.6"
-    case ddp = "DDP Atmos (Deezy)"
-    case pcm = "TrueHD → PCM 7.1"
+    case apac = "APAC"
+    case baseline = "Old APAC"
+    case ddp = "DD+ Atmos"
+    case pcm = "PCM 7.1"
     var suffix: String {
         switch self {
         case .baseline: "APAC-baseline"
@@ -39,23 +39,26 @@ enum Version: String, CaseIterable {
         case .pcm: "PCM"
         }
     }
-    var shortName: String {
+    var detail: String {
         switch self {
-        case .baseline: "Baseline"
-        case .apac: "TrueHD → APAC"
-        case .ddp: "DDP"
-        case .pcm: "PCM 7.1"
+        case .apac: "TrueHD rendered to APAC 9.1.6 by this build"
+        case .baseline: "TrueHD rendered to APAC 9.1.6 by an earlier build"
+        case .ddp: "Deezy’s Dolby Digital Plus Atmos conversion of the same source"
+        case .pcm: "The TrueHD track’s own 7.1 mix as PCM, as other players output it, without heights"
         }
     }
     var isAPAC: Bool { self == .baseline || self == .apac }
 
-    /// APAC and DDP are always offered. The baseline, an APAC conversion from an earlier
+    /// Plain PCM is uncompressed LPCM in QuickTime; FLAC in MP4 failed on the tested Apple TV.
+    func url(for sample: Sample) -> URL? {
+        Bundle.main.url(forResource: "\(sample.id).\(suffix)", withExtension: self == .pcm ? "mov" : "mp4", subdirectory: "Media")
+    }
+
+    /// APAC and DD+ are always offered. The baseline, an APAC conversion from an earlier
     /// library build, and plain PCM are offered when every sample has one. With a baseline,
-    /// Auto mode becomes a blind comparison against the DDP reference.
+    /// Auto mode becomes a blind comparison against the DD+ reference.
     static let available: [Version] = allCases.filter { version in
-        version == .apac || version == .ddp || Sample.all.allSatisfy {
-            Bundle.main.url(forResource: "\($0.id).\(version.suffix)", withExtension: "mp4", subdirectory: "Media") != nil
-        }
+        version == .apac || version == .ddp || Sample.all.allSatisfy { version.url(for: $0) != nil }
     }
 }
 
@@ -184,7 +187,7 @@ struct BlindResult {
         operation?.cancel()
         let token = UUID()
         generation = token
-        guard let url = Bundle.main.url(forResource: "\(sample.id).\(version.suffix)", withExtension: "mp4", subdirectory: "Media") else {
+        guard let url = version.url(for: sample) else {
             fail("Sample file is missing. Run prepare-media.sh and rebuild.")
             return
         }
@@ -268,7 +271,7 @@ struct BlindResult {
                 for sample in Sample.all {
                     var sharedDuration = Double.infinity
                     for version in Version.available {
-                        guard let url = Bundle.main.url(forResource: "\(sample.id).\(version.suffix)", withExtension: "mp4", subdirectory: "Media") else {
+                        guard let url = version.url(for: sample) else {
                             throw NSError(domain: "AtmosAB", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sample file is missing: \(sample.name) \(version.suffix)."])
                         }
                         let duration = try await AVURLAsset(url: url).load(.duration).seconds
@@ -286,7 +289,7 @@ struct BlindResult {
                 self.autoExcerpts = excerpts
                 self.autoSteps = excerpts.indices.flatMap { index -> [AutoStep] in
                     guard self.blind else {
-                        return Version.available.map { AutoStep(excerpt: index, version: $0, label: $0.shortName) }
+                        return Version.available.map { AutoStep(excerpt: index, version: $0, label: $0.rawValue) }
                     }
                     let (x, y) = Bool.random() ? (Version.apac, Version.baseline) : (.baseline, .apac)
                     return [AutoStep(excerpt: index, version: .ddp, label: "Reference"),
@@ -496,6 +499,10 @@ struct ComparisonView: View {
                 Text(playback.sample.name).font(.largeTitle)
                 Label("\(playback.trackStatus): \(playback.versionLabel)", systemImage: playback.playing ? "speaker.wave.2.fill" : "pause.circle")
                     .font(.title2)
+                // Blind Auto keeps the description hidden along with the version.
+                if !(playback.blind && playback.autoRunning) {
+                    Text(playback.version.detail).font(.callout).foregroundStyle(.secondary)
+                }
                 HStack(spacing: 24) {
                     let versions = Version.available
                     ForEach(versions, id: \.self) { version in
@@ -546,12 +553,8 @@ struct ComparisonView: View {
                     }.disabled(playback.loading || playback.autoRunning)
                 }
                 Text("Switching keeps the position and play/pause state. There is a short switching gap.").font(.callout).foregroundStyle(.secondary)
-                Text("APAC is our rendering of the TrueHD source. DDP Atmos is Deezy’s conversion of the same source.").font(.callout).foregroundStyle(.secondary)
                 if playback.blind {
-                    Text("Baseline APAC comes from an earlier library build. Auto plays the DDP reference, then both APAC versions as X and Y in random order.").font(.callout).foregroundStyle(.secondary)
-                }
-                if Version.available.contains(.pcm) {
-                    Text("PCM 7.1 is the track’s own 7.1 presentation decoded to LPCM, as players without this library output it: no heights and no Atmos.").font(.callout).foregroundStyle(.secondary)
+                    Text("Auto plays the DD+ reference, then both APAC versions as X and Y in random order.").font(.callout).foregroundStyle(.secondary)
                 }
                 Text("Output: \(playback.route) • Keep Apple TV audio on Auto with Dolby Atmos enabled.").font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -594,9 +597,9 @@ private struct AutoStatusView: View {
             } else if playback.autoCompleted, playback.blind {
                 let closer = { (version: Version) in playback.results.filter { $0.closer == version }.count }
                 Text("Blind comparison complete")
-                Text("New closer: \(closer(.apac)) • Baseline closer: \(closer(.baseline)) • No difference: \(playback.results.filter { $0.closer == nil }.count)")
+                Text("APAC closer: \(closer(.apac)) • Old APAC closer: \(closer(.baseline)) • No difference: \(playback.results.filter { $0.closer == nil }.count)")
                 ForEach(playback.results, id: \.sample.id) { result in
-                    Text("\(result.sample.name): X \(result.x == .apac ? "new" : "baseline"), picked \(result.verdict.rawValue)")
+                    Text("\(result.sample.name): X was \(result.x.rawValue), picked \(result.verdict.rawValue)")
                 }
             } else if playback.autoCompleted {
                 Text("Auto complete • All \(Sample.all.count) excerpts played")
