@@ -41,8 +41,13 @@ import AVFoundation
 
     /// Converts one Matroska audio track, optionally from a start time, reporting seek cost.
     private static func convertMatroska(input: String, output: URL, options: [String]) async throws -> APACConversionReport {
-        func option(_ name: String) -> Double? {
-            options.firstIndex(of: name).flatMap { options.indices.contains($0 + 1) ? Double(options[$0 + 1]) : nil }
+        // A given option needs a number; a missing or malformed one must not fall back to the default.
+        func option(_ name: String) throws -> Double? {
+            guard let index = options.firstIndex(of: name) else { return nil }
+            guard options.indices.contains(index + 1), let value = Double(options[index + 1]), value.isFinite else {
+                throw SpatialAudioError.invalidConfiguration("\(name) needs a number")
+            }
+            return value
         }
         var headers: [String: String] = [:]
         if let header = ProcessInfo.processInfo.environment["SAB_HTTP_HEADER"], let colon = header.firstIndex(of: ":") {
@@ -70,8 +75,8 @@ import AVFoundation
         } ?? file.audioTracks.first { $0.codec != nil && $0.isDefault } ?? file.audioTracks.first { $0.codec != nil }
         guard let track, let codec = track.codec else { throw SpatialAudioError.source("No TrueHD or DTS track") }
         print("opened in \(String(format: "%.2f", Date().timeIntervalSince(opened)))s, \(source.bytes / 1024) KiB read")
-        let target = CMTime(seconds: option("--start") ?? 0, preferredTimescale: 48000)
-        let end = option("--duration").map { target.seconds + $0 }
+        let target = CMTime(seconds: try option("--start") ?? 0, preferredTimescale: 48000)
+        let end = try option("--duration").map { target.seconds + $0 }
         var transcoder: SpatialAudioTranscoder?
         let seekStarted = Date(), seekBytes = source.bytes
         for try await packet in file.packets(of: track, from: target) {

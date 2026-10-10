@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Network
 import Testing
 @testable import SpatialAudioBridge
 
@@ -72,10 +73,34 @@ import Testing
 /// The transcoder times audio by its samples, so a gap or reset in packet times must end a run.
 @Test func timestampGapsAndResetsBreakContinuity() {
     func at(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1000) }
-    #expect(StreamEngine.continues(from: at(10), to: at(10)))
-    #expect(StreamEngine.continues(from: at(10), to: at(10.04)))
-    #expect(!StreamEngine.continues(from: at(10), to: at(11)))
-    #expect(!StreamEngine.continues(from: at(10), to: at(0)))
+    #expect(StreamEngine.continues(from: at(10), to: at(10.04), frames: 1, codec: .trueHDAtmos))
+    #expect(!StreamEngine.continues(from: at(10), to: at(11), frames: 1, codec: .trueHDAtmos))
+    #expect(!StreamEngine.continues(from: at(10), to: at(0), frames: 1, codec: .trueHDAtmos))
+    // Laced frames share their block's time, so after 48 laced DTS frames the next block is 0.51 s on.
+    #expect(StreamEngine.continues(from: at(10), to: at(10.512), frames: 48, codec: .dtsX))
+}
+
+/// HTTP/1.1 lets a client send its next request before the previous response arrives.
+@Test(.timeLimit(.minutes(1))) func loopbackServerAnswersPipelinedRequests() async throws {
+    let server = try await LoopbackServer { path in .init(status: 200, body: Data(path.utf8)) }
+    defer { server.stop() }
+    let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: server.port)!, using: .tcp)
+    connection.start(queue: .global())
+    defer { connection.cancel() }
+    let requests = "GET /a HTTP/1.1\r\nHost: localhost\r\n\r\nGET /b HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    connection.send(content: Data(requests.utf8), completion: .idempotent)
+    var received = ""
+    while received.components(separatedBy: "HTTP/1.1 200").count < 3 || !received.hasSuffix("/b") {
+        let chunk: Data? = try await withCheckedThrowingContinuation { continuation in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: data) }
+            }
+        }
+        guard let chunk, !chunk.isEmpty else { break }
+        received += String(decoding: chunk, as: UTF8.self)
+    }
+    #expect(received.components(separatedBy: "HTTP/1.1 200").count == 3)
+    #expect(received.hasSuffix("/b"))
 }
 
 /// After a seek, AVPlayer allows about 3 s for the first segment and requests every scrub

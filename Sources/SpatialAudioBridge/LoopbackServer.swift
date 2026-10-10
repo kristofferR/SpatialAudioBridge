@@ -65,6 +65,8 @@ final class LoopbackServer: @unchecked Sendable {
     }
 
     private func receive(_ connection: NWConnection, buffered: Data) {
+        // A pipelined request may already be buffered; answer it before waiting for more bytes.
+        if let end = buffered.range(of: Data("\r\n\r\n".utf8)) { return answer(connection, buffer: buffered, headEnd: end) }
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             guard let self else { return }
             var buffer = buffered
@@ -73,15 +75,19 @@ final class LoopbackServer: @unchecked Sendable {
                 if complete || error != nil || buffer.count > 64 * 1024 { connection.cancel() } else { self.receive(connection, buffered: buffer) }
                 return
             }
-            let head = String(decoding: buffer[..<end.lowerBound], as: UTF8.self)
-            let remainder = Data(buffer[end.upperBound...])
-            let handler = self.handler
-            Task {
-                let (bytes, keepAlive) = await Self.respond(to: head, handler: handler)
-                connection.send(content: bytes, completion: .contentProcessed { error in
-                    if error == nil, keepAlive { self.receive(connection, buffered: remainder) } else { connection.cancel() }
-                })
-            }
+            self.answer(connection, buffer: buffer, headEnd: end)
+        }
+    }
+
+    private func answer(_ connection: NWConnection, buffer: Data, headEnd end: Range<Data.Index>) {
+        let head = String(decoding: buffer[..<end.lowerBound], as: UTF8.self)
+        let remainder = Data(buffer[end.upperBound...])
+        let handler = self.handler
+        Task {
+            let (bytes, keepAlive) = await Self.respond(to: head, handler: handler)
+            connection.send(content: bytes, completion: .contentProcessed { error in
+                if error == nil, keepAlive { self.receive(connection, buffered: remainder) } else { connection.cancel() }
+            })
         }
     }
 
