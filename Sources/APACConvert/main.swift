@@ -78,8 +78,11 @@ import AVFoundation
             if let end, packet.time.seconds >= end { break }
             if transcoder == nil {
                 print("first packet at \(String(format: "%.3f", packet.time.seconds))s (sync \(packet.isSyncPoint)) after \(String(format: "%.2f", Date().timeIntervalSince(seekStarted)))s, \((source.bytes - seekBytes) / 1024) KiB read")
+                // Decoding starts at the sync point; output starts exactly at the requested time.
+                var configuration = APACConfiguration(startTime: target)
+                configuration.inputStartTime = packet.time
                 transcoder = try SpatialAudioTranscoder(codec: codec, destination: .file(output),
-                                                        configuration: .init(startTime: packet.time))
+                                                        configuration: configuration)
             }
             try await transcoder!.append(packet.data)
         }
