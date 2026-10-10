@@ -138,6 +138,16 @@ import Testing
     #expect((missing as? HTTPURLResponse)?.statusCode == 404)
 }
 
+/// A failing server may recover, so its errors fail like the network and a stream retries them;
+/// a rejection repeats on every request and ends the stream.
+@Test func httpSourceTellsServerErrorsFromRejections() async throws {
+    let server = try await LoopbackServer { path in path == "/busy" ? .init(status: 503) : .notFound() }
+    defer { server.stop() }
+    let base = "http://127.0.0.1:\(server.port)"
+    await #expect(throws: URLError.self) { try await HTTPByteSource(url: URL(string: "\(base)/busy")!).read(0..<10) }
+    await #expect(throws: SpatialAudioError.self) { try await HTTPByteSource(url: URL(string: "\(base)/missing")!).read(0..<10) }
+}
+
 /// The base media decode time and sample count of a single-fragment segment.
 private func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames: Int) {
     var decodeTime: UInt64?, packets = 0

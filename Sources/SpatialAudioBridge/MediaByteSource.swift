@@ -86,7 +86,7 @@ private final class RangedDownload: NSObject, URLSessionDataDelegate, @unchecked
     private let lock = NSLock()
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>?
     private var response: HTTPURLResponse?
-    private var failure: SpatialAudioError?
+    private var failure: (any Error)?
     private var data = Data()
 
     init(host: String) { self.host = host }
@@ -99,11 +99,17 @@ private final class RangedDownload: NSObject, URLSessionDataDelegate, @unchecked
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
         guard let response = response as? HTTPURLResponse else {
-            lock.withLock { failure = .source("Unexpected response from \(host)") }
+            lock.withLock { failure = SpatialAudioError.source("Unexpected response from \(host)") }
             return completionHandler(.cancel)
         }
         guard response.statusCode == 206 else {
-            lock.withLock { failure = .source("HTTP \(response.statusCode) for a range request to \(host)") }
+            let message = "HTTP \(response.statusCode) for a range request to \(host)"
+            // A busy or failing server may recover, so it fails like the network; other statuses repeat.
+            let transient = response.statusCode >= 500 || [408, 429].contains(response.statusCode)
+            lock.withLock {
+                failure = transient ? URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: message])
+                    : SpatialAudioError.source(message)
+            }
             return completionHandler(.cancel)
         }
         lock.withLock { self.response = response }
