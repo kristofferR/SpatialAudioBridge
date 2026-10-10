@@ -208,7 +208,11 @@ actor StreamEngine {
     private let keptBehind: Int
     private let timeout: Duration
     private let store = SegmentStore()
+    /// Converts from the segment that started it, and on through playback.
     private var run: Run?
+    /// After a restart, converts from a few segments ahead in parallel, until `run` reaches it
+    /// and hands over. One encoder runs on one thread, so two runs fill a seek's gap sooner.
+    private var helper: Run?
     private var requested = 0
     /// Segments that requests are waiting for, one entry per request.
     private var waiting: [Int] = []
@@ -218,12 +222,20 @@ actor StreamEngine {
 
     /// The furthest segment playback wants: the latest request, or a waiting one further ahead.
     private var demand: Int { max(requested, waiting.max() ?? requested) }
+    /// Where conversion runs ahead from: what playback wants, or the helper's start, which playback
+    /// will want soon after a seek.
+    private var frontier: Int { max(demand, helper?.start ?? 0) }
 
     private struct Run {
         let id: UUID
+        /// The first segment the run delivers.
         let start: Int
         let task: Task<Void, Never>
     }
+
+    /// How far ahead of a restart the helper starts. After a seek, AVPlayer requested about 12
+    /// segments in order before resuming; this splits them between the two runs.
+    static let helperOffset = 5
 
     init(file: MatroskaFile, track: MatroskaAudioTrack, codec: SpatialAudioCodec, configuration: APACConfiguration,
          segmentFrames: Int64, priming: Int64, totalFrames: Int64, lookahead: Int, keptBehind: Int, timeout: Duration) {
@@ -251,7 +263,7 @@ actor StreamEngine {
         guard !stopped else { throw StreamError.stopped }
         try checkFailure()
         if let data = store.initialization { return data }
-        if run == nil { startRun(at: requested) }
+        if run == nil { restart(at: requested) }
         return try await wait(until: { $0.initialization })
     }
 
@@ -260,14 +272,15 @@ actor StreamEngine {
         guard !stopped else { throw StreamError.stopped }
         try checkFailure()
         requested = index
-        store.keep(around: index, behind: keptBehind, ahead: demand - index + lookahead)
+        keepSegments(around: index)
         if let data = store.segment(index) {
             log.debug("seg\(index) from cache")
             return data
         }
         if !waitsForRun(index) {
-            log.info("seg\(index) restarts conversion; run started at \(self.run?.start ?? -1), converted \(self.store.highest)")
-            startRun(at: index)
+            log.info("seg\(index) restarts conversion; run started at \(self.run?.start ?? -1), converted \(self.converted)")
+            restart(at: index)
+            keepSegments(around: index)
         }
         let waited = ContinuousClock.now
         waiting.append(index)
@@ -282,25 +295,32 @@ actor StreamEngine {
         }
     }
 
+    /// Keeps the played segments behind `index` and everything conversion may run ahead to.
+    private func keepSegments(around index: Int) {
+        store.keep(around: index, behind: keptBehind, ahead: frontier - index + lookahead)
+    }
+
     /// Ends conversion for good; requests already on their way are refused.
     func stop() {
         stopped = true
-        run?.task.cancel()
-        run = nil
+        for run in [run, helper].compactMap({ $0 }) { run.task.cancel() }
+        (run, helper) = (nil, nil)
     }
 
     var conversionSpeed: Double? {
         guard let run else { return nil }
-        return store.speed(from: run.start, segmentFrames: segmentFrames)
+        return store.speed(run: run.id, segmentFrames: segmentFrames)
     }
 
     /// The highest segment the current run has produced.
-    var converted: Int { store.highest }
+    var converted: Int { run.map { store.highest(run: $0.id) } ?? -1 }
 
-    /// Whether the current run will deliver segment `index` sooner than a new run would.
+    /// Whether a running conversion will deliver segment `index` sooner than a new run would.
     private func waitsForRun(_ index: Int) -> Bool {
-        guard let run else { return false }
-        return Self.waits(for: index, runStart: run.start, converted: store.highest, ended: store.ended(run: run.id))
+        [run, helper].contains { run in
+            guard let run else { return false }
+            return Self.waits(for: index, runStart: run.start, converted: store.highest(run: run.id), ended: store.ended(run: run.id))
+        }
     }
 
     /// A new run delivers its first segment in about two segments' conversion time, while each
@@ -316,7 +336,9 @@ actor StreamEngine {
     /// A `SpatialAudioError`, including malformed container data, would repeat with every restart,
     /// so it ends the stream.
     private func checkFailure() throws {
-        if failure == nil, let run, let error = store.failure(run: run.id) as? SpatialAudioError { failure = error }
+        for run in [run, helper] where failure == nil {
+            if let run, let error = store.failure(run: run.id) as? SpatialAudioError { failure = error }
+        }
         if let failure { throw failure }
     }
 
@@ -334,18 +356,34 @@ actor StreamEngine {
         }
     }
 
+    /// Restarts conversion at segment `index`, with a helper converting from a few segments ahead.
+    private func restart(at index: Int) {
+        for run in [run, helper].compactMap({ $0 }) {
+            run.task.cancel()
+            store.retire(run: run.id)
+        }
+        run = launch(from: index, early: false)
+        // The helper stays within the segments the store keeps for the request.
+        let offset = min(Self.helperOffset, lookahead)
+        helper = offset >= 2 && index + offset < segmentCount ? launch(from: index + offset, early: true) : nil
+    }
+
     /// Converts from segment `index`: decoding starts at the last sync before its first presented
     /// sample, which follows the encoder priming so the fragment begins exactly on the grid.
-    private func startRun(at index: Int) {
-        run?.task.cancel()
-        let start = CMTime(value: Int64(index) * segmentFrames + priming, timescale: 48_000)
+    ///
+    /// A run's first fragment carries the encoder priming in place of its first 42.7 ms of audio.
+    /// That is expected right after a seek, but a helper's first segment plays on from the run
+    /// before it, so a helper starts one segment `early` and discards that fragment.
+    private func launch(from index: Int, early: Bool) -> Run {
+        let start = CMTime(value: Int64(index - (early ? 1 : 0)) * segmentFrames + priming, timescale: 48_000)
         let (file, track, codec, configuration, store, segmentFrames) =
             (self.file, self.track, self.codec, self.configuration, self.store, self.segmentFrames)
         let id = UUID()
-        store.begin(run: id)
+        store.begin(run: id, first: index)
         let task = Task.detached { [weak self] in
             do {
                 var transcoder: SpatialAudioTranscoder?
+                var handedOver = false
                 for try await packet in file.packets(of: track, from: start) {
                     try Task.checkCancellation()
                     if transcoder == nil {
@@ -362,9 +400,15 @@ actor StreamEngine {
                     try await transcoder?.append(packet.data, time: packet.time)
                     // The engine is gone once its stream is released; stop converting.
                     guard let self else { break }
+                    if await self.handOver(from: id) {
+                        handedOver = true
+                        break
+                    }
                     await self.paceRun(id)
                 }
-                if let transcoder { _ = try await transcoder.finish() }
+                // Finishing a run that handed over would flush a partial fragment where the
+                // helper's full one belongs.
+                if handedOver { await transcoder?.cancel() } else if let transcoder { _ = try await transcoder.finish() }
                 store.end(run: id, failure: nil)
             } catch is CancellationError {
                 store.end(run: id, failure: nil)
@@ -372,14 +416,32 @@ actor StreamEngine {
                 store.end(run: id, failure: error)
             }
         }
-        run = Run(id: id, start: index, task: task)
+        return Run(id: id, start: index, task: task)
     }
 
-    /// Holds the run while it is `lookahead` segments ahead of what playback wants.
+    /// Ends run `id` once it has delivered everything before the helper's first segment, and
+    /// makes the helper the run. A helper whose transport failed is dropped and the run carries on;
+    /// any other failure would repeat in the run, so it ends the stream.
+    private func handOver(from id: UUID) -> Bool {
+        guard run?.id == id, let helper else { return false }
+        if let error = store.failure(run: helper.id) {
+            log.error("The helper from seg\(helper.start) failed: \(String(describing: error), privacy: .public)")
+            if failure == nil, let error = error as? SpatialAudioError { failure = error }
+            self.helper = nil
+            return false
+        }
+        guard store.highest(run: id) >= helper.start - 1 else { return false }
+        log.info("seg\(helper.start - 1) reached the helper; it continues from seg\(helper.start)")
+        store.retire(run: id)
+        (run, self.helper) = (helper, nil)
+        return true
+    }
+
+    /// Holds a run while it is `lookahead` segments past the frontier.
     private func paceRun(_ id: UUID) async {
-        guard run?.id == id, store.highest >= demand + lookahead else { return }
+        guard [run?.id, helper?.id].contains(id), store.highest(run: id) >= frontier + lookahead else { return }
         store.holding(true, run: id)
-        while run?.id == id, !Task.isCancelled, store.highest >= demand + lookahead {
+        while [run?.id, helper?.id].contains(id), !Task.isCancelled, store.highest(run: id) >= frontier + lookahead {
             try? await Task.sleep(for: .milliseconds(50))
         }
         store.holding(false, run: id)
@@ -392,27 +454,36 @@ final class SegmentStore: @unchecked Sendable {
     private var initData: Data?
     private var segments: [Int: Data] = [:]
     private var window = 0..<Int.max
-    private var current: UUID?
-    private var produced = -1
-    private var started = ContinuousClock.now
-    private var held = Duration.zero
-    private var holdStarted: ContinuousClock.Instant?
+    /// Runs whose fragments are accepted, with their progress.
+    private var runs: [UUID: Progress] = [:]
     private var ends: [UUID: (any Error)?] = [:]
 
+    private struct Progress {
+        /// The first segment the run contributes; earlier fragments are discarded.
+        let first: Int
+        var produced = -1
+        let started = ContinuousClock.now
+        var held = Duration.zero
+        var holdStarted: ContinuousClock.Instant?
+    }
+
     var initialization: Data? { lock.withLock { initData } }
-    /// The highest segment the current run has produced.
-    var highest: Int { lock.withLock { produced } }
 
     func segment(_ index: Int) -> Data? { lock.withLock { segments[index] } }
 
-    func begin(run: UUID) {
-        lock.withLock { current = run; produced = -1; started = .now; held = .zero; holdStarted = nil }
-    }
+    /// Accepts fragments of `run` from segment `first` on.
+    func begin(run: UUID, first: Int) { lock.withLock { runs[run] = Progress(first: first) } }
+
+    /// Ignores further fragments of `run`, such as those a cancelled writer still emits.
+    func retire(run: UUID) { lock.withLock { _ = runs.removeValue(forKey: run) } }
+
+    /// The highest segment `run` has produced, or -1.
+    func highest(run: UUID) -> Int { lock.withLock { runs[run]?.produced ?? -1 } }
 
     /// Stores a fragment under the grid index of its start time; repeated fragments replace nothing.
     func deliver(_ segment: APACSegment, run: UUID, segmentFrames: Int64) {
         lock.withLock {
-            guard run == current else { return }
+            guard var progress = runs[run] else { return }
             switch segment.kind {
             case .initialization:
                 // Every run writes the same initialization apart from creation times.
@@ -420,8 +491,10 @@ final class SegmentStore: @unchecked Sendable {
             case .media:
                 guard let start = segment.startTime else { return }
                 let index = Int((start.seconds * 48_000 / Double(segmentFrames)).rounded())
+                guard index >= progress.first else { return }
                 if window.contains(index), segments[index] == nil { segments[index] = segment.data }
-                produced = max(produced, index)
+                progress.produced = max(progress.produced, index)
+                runs[run] = progress
             }
         }
     }
@@ -429,23 +502,24 @@ final class SegmentStore: @unchecked Sendable {
     /// Marks the run as waiting for playback, or as converting again.
     func holding(_ waiting: Bool, run: UUID) {
         lock.withLock {
-            guard run == current else { return }
+            guard var progress = runs[run] else { return }
             if waiting {
-                holdStarted = .now
-            } else if let holdStarted {
-                held += .now - holdStarted
-                self.holdStarted = nil
+                progress.holdStarted = .now
+            } else if let holdStarted = progress.holdStarted {
+                progress.held += .now - holdStarted
+                progress.holdStarted = nil
             }
+            runs[run] = progress
         }
     }
 
-    /// Seconds of audio produced per second of conversion since the run began at segment `start`.
-    func speed(from start: Int, segmentFrames: Int64) -> Double? {
+    /// Seconds of audio `run` produced per second of conversion since it began.
+    func speed(run: UUID, segmentFrames: Int64) -> Double? {
         lock.withLock {
-            guard produced >= start else { return nil }
-            let audio = Double(Int64(produced - start + 1) * segmentFrames) / 48_000
+            guard let progress = runs[run], progress.produced >= progress.first else { return nil }
+            let audio = Double(Int64(progress.produced - progress.first + 1) * segmentFrames) / 48_000
             let now = ContinuousClock.now
-            let busy = now - started - held - (holdStarted.map { now - $0 } ?? .zero)
+            let busy = now - progress.started - progress.held - (progress.holdStarted.map { now - $0 } ?? .zero)
             return audio / (Double(busy.components.seconds) + Double(busy.components.attoseconds) / 1e18)
         }
     }
