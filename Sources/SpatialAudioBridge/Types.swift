@@ -33,6 +33,10 @@ public struct APACConfiguration: Sendable {
     public var gainDB: Float
     public var bitRate: Int
     public var startTime: CMTime
+    /// Container time of the first decoded sample, when it differs from `startTime`.
+    /// Earlier audio is discarded and a later start is padded with silence, so the output begins
+    /// exactly at `startTime`. Use it after a seek, which starts decoding at an earlier sync point.
+    public var inputStartTime: CMTime?
     /// APAC sync packets occur every 75 * 1024 / sampleRate seconds.
     public var syncPacketFrequency: Int
 
@@ -42,7 +46,14 @@ public struct APACConfiguration: Sendable {
         self.gainDB = gainDB
         self.bitRate = bitRate ?? min(layout.channelCount * 256_000, 4_096_000)
         self.startTime = startTime
+        inputStartTime = nil
         self.syncPacketFrequency = syncPacketFrequency
+    }
+
+    /// Frames to drop (positive) or pad with silence (negative) before the first decoded sample.
+    func leadingFrames(rate: Int) -> Int {
+        guard let inputStartTime else { return 0 }
+        return Int((CMTimeSubtract(startTime, inputStartTime).seconds * Double(rate)).rounded())
     }
 
     /// Leading frames are retained in fragmented-media timelines.

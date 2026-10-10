@@ -42,6 +42,8 @@ public actor SpatialAudioTranscoder {
     private var peak: Float = 0
     private var pendingPCM: [Float] = []
     private var pendingRate = 0
+    /// Decoded frames still to drop before `startTime`; nil until the first block.
+    private var discarding: Int?
     private var busy = false
     private enum State { case accepting, finished, cancelled, failed }
     private var state = State.accepting
@@ -51,6 +53,7 @@ public actor SpatialAudioTranscoder {
         guard configuration.gainDB.isFinite, (-60...12).contains(configuration.gainDB),
               configuration.bitRate > 0, configuration.bitRate <= 4_096_000,
               configuration.startTime.isNumeric, configuration.startTime >= .zero,
+              configuration.inputStartTime.map({ $0.isNumeric && abs(CMTimeSubtract(configuration.startTime, $0).seconds) <= 60 }) ?? true,
               (3...600).contains(configuration.syncPacketFrequency) else {
             throw SpatialAudioError.invalidConfiguration("Invalid APAC gain, bitrate, timestamp or sync interval")
         }
@@ -137,7 +140,19 @@ public actor SpatialAudioTranscoder {
             throw SpatialAudioError.encoding("Audio format changed; begin a new session at a discontinuity")
         }
         pendingRate = block.sampleRate
-        pendingPCM.append(contentsOf: block.samples)
+        var samples = block.samples[...]
+        if discarding == nil {
+            let leading = configuration.leadingFrames(rate: block.sampleRate)
+            // A source starting after startTime is padded so its timestamps stay aligned.
+            if leading < 0 { pendingPCM.append(contentsOf: repeatElement(0, count: -leading * block.channels)) }
+            discarding = max(leading, 0)
+        }
+        if let remaining = discarding, remaining > 0 {
+            let dropped = min(remaining, block.frames)
+            samples = samples.dropFirst(dropped * block.channels)
+            discarding = remaining - dropped
+        }
+        pendingPCM.append(contentsOf: samples)
         let size = 1024 * configuration.layout.channelCount
         while pendingPCM.count >= size {
             let pcm = Array(pendingPCM.prefix(size))

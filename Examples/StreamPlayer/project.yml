@@ -1,0 +1,47 @@
+name: StreamPlayer
+options:
+  deploymentTarget:
+    tvOS: '26.0'
+packages:
+  SpatialAudioBridge:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: S5Q742QZEL
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: '3'
+targets:
+  StreamPlayer:
+    type: application
+    platform: tvOS
+    sources:
+      - Sources
+      - path: Media
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: SpatialAudioBridge
+        product: SpatialAudioBridge
+      - package: SpatialAudioBridge
+        product: SpatialAudioPlayback
+    info:
+      path: Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kristofferr.SpatialAudioBridge.StreamPlayer
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Stream Player
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        ASSETCATALOG_COMPILER_APPICON_NAME: ''
+schemes:
+  StreamPlayer:
+    build:
+      targets:
+        StreamPlayer: all

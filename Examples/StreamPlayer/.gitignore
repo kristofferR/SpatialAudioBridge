@@ -1,0 +1,6 @@
+Media/
+DerivedData/
+StreamPlayer.xcodeproj/
+Info.plist
+*.log
+*.json
