@@ -107,3 +107,20 @@ func rendererPlaysMatroskaAudioFromASeek() async throws {
     #expect(synchronizer.currentTime().seconds > 20.5)
     synchronizer.rate = 0
 }
+
+@Test func rendererRejectsInvalidSettings() {
+    #expect(throws: SpatialAudioError.self) {
+        try SpatialAudioRenderer(codec: .trueHDAtmos, configuration: APACConfiguration(bitRate: -1),
+                                 synchronizer: AVSampleBufferRenderSynchronizer())
+    }
+}
+
+@Test func rendererRefusesInputAfterAFailureUntilANewTimeline() async throws {
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
+    try await renderer.begin(at: .zero)
+    // A first packet two minutes from the timeline fails, and the timeline stays failed.
+    await #expect(throws: SpatialAudioError.self) { try await renderer.enqueue(Data([0]), time: CMTime(seconds: 120, preferredTimescale: 1)) }
+    await #expect(throws: SpatialAudioError.self) { try await renderer.enqueue(Data([0]), time: .zero) }
+    try await renderer.begin(at: .zero)
+    try await renderer.enqueue(Data([0]), time: .zero)
+}

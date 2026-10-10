@@ -86,16 +86,19 @@ import SwiftUI
         try await renderer.begin(at: start)
         status = "Renderer: \(track.codecID)"
         var started = false
+        func play() {
+            started = true
+            synchronizer.setRate(1, time: start)
+            log("renderer playing \(track.codecID) after \(ContinuousClock.now - clock)")
+            monitor = Task { [weak self] in await self?.reportRenderer(renderer) }
+        }
         for try await packet in file.packets(of: track, from: start) {
             try await renderer.enqueue(packet.data, time: packet.time)
-            if !started, await renderer.isReadyToPlay {
-                started = true
-                synchronizer.setRate(1, time: start)
-                log("renderer playing \(track.codecID) after \(ContinuousClock.now - clock)")
-                monitor = Task { [weak self] in await self?.reportRenderer(renderer) }
-            }
+            if !started, await renderer.isReadyToPlay { play() }
         }
         try await renderer.endOfStream()
+        // A track shorter than the encoder's buffering queues its audio only when flushed.
+        if !started { play() }
     }
 
     private func activateAtmos(_ attach: (AtmosOutputActivator) -> Void) {
