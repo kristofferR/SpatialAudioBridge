@@ -249,14 +249,23 @@ import SwiftUI
 
 struct PlayerScreen: View {
     @State private var session = StreamSession()
+    @State private var showsStatus = true
 
     var body: some View {
         PlayerView(player: session.player, onSeek: session.noteSeek(to:))
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
-                Text(session.status).font(.caption).padding(12).background(.black.opacity(0.5)).padding(40)
+                if showsStatus {
+                    Text(session.status).font(.caption).padding(12).background(.black.opacity(0.5)).padding(40)
+                }
             }
             .task { await session.start() }
+            // Shown briefly after each change: a label left on screen through a film burns into OLED panels.
+            .task(id: session.status) {
+                showsStatus = true
+                guard (try? await Task.sleep(for: .seconds(5))) != nil else { return }
+                showsStatus = false
+            }
     }
 }
 
