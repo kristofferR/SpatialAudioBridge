@@ -92,8 +92,7 @@ public actor SpatialAudioTranscoder {
             let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
             for block in blocks { try await accumulate(block) }
             if !pendingPCM.isEmpty {
-                try await encode(PCMBlock(samples: pendingPCM, frames: pendingPCM.count / configuration.layout.channelCount,
-                                          sampleRate: pendingRate, channels: configuration.layout.channelCount))
+                try await encode(pendingPCM[...], rate: pendingRate)
                 pendingPCM.removeAll()
             }
             guard let writer, let input, frames > 0 else { throw SpatialAudioError.decoding("The track produced no spatial PCM") }
@@ -154,11 +153,12 @@ public actor SpatialAudioTranscoder {
         }
         pendingPCM.append(contentsOf: samples)
         let size = 1024 * configuration.layout.channelCount
-        while pendingPCM.count >= size {
-            let pcm = Array(pendingPCM.prefix(size))
-            pendingPCM.removeFirst(size)
-            try await encode(PCMBlock(samples: pcm, frames: 1024, sampleRate: block.sampleRate, channels: block.channels))
+        var offset = 0
+        while pendingPCM.count - offset >= size {
+            try await encode(pendingPCM[offset..<offset + size], rate: block.sampleRate)
+            offset += size
         }
+        pendingPCM.removeFirst(offset)
     }
 
     private func prepare(rate: Int) throws {
@@ -200,25 +200,26 @@ public actor SpatialAudioTranscoder {
         self.input = input
     }
 
-    private func encode(_ block: PCMBlock) async throws {
+    /// Encodes interleaved PCM in the configured layout.
+    private func encode(_ samples: ArraySlice<Float>, rate: Int) async throws {
         try checkActive()
-        if writer == nil { try prepare(rate: block.sampleRate) }
-        guard block.sampleRate == sampleRate, block.channels == configuration.layout.channelCount else {
+        if writer == nil { try prepare(rate: rate) }
+        guard rate == sampleRate else {
             throw SpatialAudioError.encoding("Audio format changed; begin a new session at a discontinuity")
         }
         guard let writer, let input, let format else { throw SpatialAudioError.encoding("APAC writer was not initialized") }
-        let gain = powf(10, configuration.gainDB / 20)
-        let pcm = block.samples.map { $0 * gain }
-        peak = max(peak, pcm.lazy.map { abs($0) }.max() ?? 0)
+        let count = samples.count / configuration.layout.channelCount
         let time = CMTimeAdd(configuration.startTime, CMTime(value: frames, timescale: CMTimeScale(sampleRate)))
-        let sample = try pcmSampleBuffer(pcm, frames: block.frames, format: format, time: time, rate: sampleRate)
+        let (sample, blockPeak) = try pcmSampleBuffer(samples, gain: powf(10, configuration.gainDB / 20), frames: count,
+                                                      format: format, time: time, rate: sampleRate)
+        peak = max(peak, blockPeak)
         while !input.isReadyForMoreMediaData {
             try checkActive()
             guard writer.status == .writing else { throw encoderError(writer) }
             try await Task.sleep(for: .milliseconds(2))
         }
         guard input.append(sample) else { throw encoderError(writer) }
-        frames += Int64(block.frames)
+        frames += Int64(count)
     }
 }
 
