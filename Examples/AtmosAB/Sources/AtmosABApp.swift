@@ -47,6 +47,8 @@ struct AutoExcerpt {
     var playing = false
     var loading = false
     var error: String?
+    /// A failure to set up Atmos output, kept apart from track errors so loading cannot clear it.
+    private(set) var setupError: String?
     private(set) var autoRunning = false
     private(set) var autoCompleted = false
     private(set) var autoIndex = 0
@@ -83,7 +85,7 @@ struct AutoExcerpt {
             } else {
                 try AtmosOutputActivator.configureAudioSession()
             }
-        } catch { self.error = error.localizedDescription }
+        } catch { setupError = error.localizedDescription }
         if !arguments.contains("--without-now-playing") {
             nowPlaying = MPNowPlayingSession(players: [player])
             nowPlaying?.automaticallyPublishesNowPlayingInfo = true
@@ -93,7 +95,7 @@ struct AutoExcerpt {
                 atmos = AtmosOutputActivator(silentAtmosStream: url)
                 atmos?.attach(to: player) { [weak self] _ in self?.version == .apac }
             } else {
-                error = "The silent Atmos stream is missing. Rebuild the app with its media."
+                setupError = "The silent Atmos stream is missing. Rebuild the app with its media."
             }
         }
         print("ATMOS SETUP session=\(arguments.contains("--plain-session") ? "plain" : "multichannel") nowPlaying=\(nowPlaying != nil) silentAtmos=\(atmos != nil)")
@@ -403,6 +405,7 @@ struct ComparisonView: View {
                     Button("Restart") { playback.seek(0) }.disabled(playback.autoRunning)
                 }.disabled(playback.loading)
                 if playback.loading { Text("Loading sample…").foregroundStyle(.secondary) }
+                if let error = playback.setupError { Text(error).foregroundStyle(.red) }
                 if let error = playback.error { Text(error).foregroundStyle(.red) }
                 if playback.sample.id == "channel-check-7.1.4" {
                     Text("Jump into a speaker’s test section").font(.headline)
