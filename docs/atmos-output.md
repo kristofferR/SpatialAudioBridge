@@ -65,7 +65,17 @@ Only bundle media you have the rights to distribute.
 
 ## How to tell it works
 
-Use the receiver's format indicator and a channel check. On the tested tvOS 27.2 beta, `AVAudioSession.outputNumberOfChannels` reported eight channels for both APAC and Dolby Digital Plus, and the session's rendering mode and spatial audio flags did not distinguish Atmos output either.
+Use the receiver's format indicator and a channel check. On the tested tvOS 27.2 beta, `AVAudioSession.outputNumberOfChannels` reported eight channels for both APAC and Dolby Digital Plus, and the session's rendering mode and spatial audio flags did not distinguish Atmos output either. For diagnosis, the [AtmosAB output probe](../Examples/AtmosAB/README.md#output-probe) reads the session's private current hardware format: `'mat+'` with Atmos output, `'lpcm'` without.
+
+## Output format
+
+With the activator, the tested Apple TV switched its HDMI output to Dolby MAT Atmos with 12 output channels. tvOS mixes into 7.1.4 before HDMI, so a 9.1.6 stream still plays but its extra channels are folded: on a soundbar with wide drivers, a 9.1.6 channel sweep played the wides and top middles from neighbouring speakers, the top middles from both the front and rear heights.
+
+The default layout is therefore 7.1.4. In a blind comparison of our 7.1.4 and 9.1.6 renders of seven Dolby demo and film excerpts and a synthetic object circling the room, neither layout was consistently preferred, while 9.1.6 costs a third more bit rate and about half again the encoding time. `.nineOneSix` remains available for routes that keep 16 channels.
+
+## Requesting Atmos output directly
+
+The session also takes a preferred hardware format through the private `-[AVAudioSession setPreferredAudioFormat:error:]`. Requesting `'mat+'` switched the output to MAT Atmos without the silent stream, and the soundbar showed Atmos. In an A/B of the same height channels, though, the heights sounded lower, vaguer and quieter than with the activator. The public `setPreferredOutputNumberOfChannels(_:)` with 12 or 16 channels left the output at 8-channel LPCM. The library keeps the silent stream, which also needs no private API.
 
 ## Tested
 
@@ -77,4 +87,4 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, HDMI to an Atmos receiver:
 | `AVPlayer`, `APACStream` with Jellyfin video | Not tested | Atmos, with video |
 | `AVSampleBufferAudioRenderer`, APAC packets | No Atmos | Atmos; a 7.1.4 channel check played every speaker in its place |
 
-This is a measured workaround, not an Apple guarantee. Validate each target receiver and OS version. Atmos indication alone does not prove speaker placement, and the HDMI payload (Dolby MAT or otherwise) has not been inspected.
+This is a measured workaround, not an Apple guarantee. Validate each target receiver and OS version. Atmos indication alone does not prove speaker placement, and while tvOS reports Dolby MAT Atmos output, the HDMI payload itself has not been inspected.

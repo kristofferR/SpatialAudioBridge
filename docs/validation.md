@@ -36,6 +36,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Samples above full scale | 9.1.6 tones at +4, +6 and +12 dBFS kept their level within 0.1 dB through the APAC encoder and Apple's float decoder |
 | Encoder input batching | Passing PCM to `AudioConverter` once a packet's worth is pending, instead of once per 40-frame TrueHD access unit, cut encoding CPU by about 20% with identical packets |
 | Conversion profile | In a macOS profile, Apple's APAC encoder was about 85% of conversion work. After moving PCM scaling to Accelerate, Debug and Release builds convert at the same speed |
+| Conversion speed by layout | On an Apple Silicon Mac, one conversion at a time, 21 minutes of TrueHD Atmos in eight files converted at 12.0× real time to 7.1.4 and 7.8× to 9.1.6 |
 
 ### Sources and streaming
 
@@ -60,6 +61,10 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | A/B Auto playback | Eight matched 20-second excerpts completed in pair order; silent Atmos stream only during APAC, stop after the final pair, preparation/playback cancellation pass |
 | Blind renderer comparison | Four Dolby demos and four film scenes chosen for objects inside the room, level-matched: the DD+ Atmos reference, then the TS 103 448 panner and the previous one as X and Y in random order. They sounded different, but neither was consistently closer to the reference; the TS 103 448 panner was kept |
 | Activator and Dolby Digital Plus | Direct Dolby Digital Plus no longer stutters once the activator unloads its stream for non-APAC items |
+| Atmos output format | With the activator playing, the session's private current hardware format read `'mat+'` (MAT Atmos) and the output unit reported 12 channels (`DiscreteInOrder`); idle, `'lpcm'` and 2 channels. `outputNumberOfChannels` reported 8 meanwhile |
+| 9.1.6 output | With the activator, a Samsung HW-Q990C soundbar played a 9.1.6 sweep's wides and top middles from neighbouring speakers, the top middles from both front and rear heights: tvOS folds 9.1.6 into its 12-channel output |
+| Blind layout comparison | Our 7.1.4 and 9.1.6 renders of a synthetic object circling the room at ear level and overhead and of seven Dolby demo and film excerpts, as X and Y in random order without a reference: 7.1.4 was preferred five times and 9.1.6 three, while the second-played version won seven of eight. No consistent difference; 7.1.4 became the default |
+| MAT Atmos without the activator | Requesting `'mat+'` through the private `-[AVAudioSession setPreferredAudioFormat:error:]` switched the output to MAT Atmos with 12 channels, and the soundbar showed Atmos. In an A/B of the same height channels, the heights sounded lower, vaguer and quieter than with the activator. `setPreferredOutputNumberOfChannels(_:)` with 12 or 16 left 8-channel LPCM |
 | `APACStream` with Jellyfin | A 4K HDR10 title with TrueHD Atmos played with stream-copied HEVC video and Atmos on the receiver; stream ready 2.0–2.5 s and playing 4–5 s after launch; about 1 s of conversion per 3.2-second segment, in Debug and Release builds alike |
 | Sustained `APACStream` playback | After the pacing fix, no stalls in 37 minutes of steady playback; before it, playback stopped after 111 s when a dropped segment was requested. Available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes |
 | Seeks with `AVPlayer` | Before the restart rule changed, a long scrub failed the item (`-12880`) and skips back waited up to 30 s. Afterwards, a scripted test of eight skips, scrubs and jumps recovered every time; times below |
@@ -132,7 +137,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 
 ## Not yet established
 
-- Correct speaker placement beyond the channel check and informal listening, and the HDMI payload (MAT or otherwise).
+- Correct speaker placement beyond the channel check and informal listening, and the HDMI payload itself; tvOS reports MAT Atmos output.
 - Lip sync with dialogue, measured rather than observed.
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
@@ -140,7 +145,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
 - Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
-`AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta.
+`AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta. The private current hardware format, which the AtmosAB output probe reads, did distinguish them.
 
 The DTS:X fixture container's first audio PTS is approximately 53 ms; its elementary stream begins at zero. A host must preserve that container offset when configuring the transcoder.
 
