@@ -46,7 +46,7 @@ Playback needs conversion faster than real time. Apple TV 4K (2nd generation) co
 
 ## Seeks take several seconds
 
-After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, and each segment that is not yet converted costs about 1 s on Apple TV 4K (2nd generation). Titles with long keyframe intervals, whose stream-copy video segments are long, therefore take longest: 6–14 s with 10.4-second segments. Skips within the last minute of played audio, or within the lookahead, resume in about 1 s. See [seeking](avplayer.md#seeking-and-synchronization).
+After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, and each segment that is not yet converted costs about 1 s on Apple TV 4K (2nd generation). Titles with long keyframe intervals, whose stream-copy video segments are long, therefore take longest: 6–11 s with 10.4-second segments. Skips within the last minute of played audio, or within the lookahead, resume in about 1 s. See [seeking](avplayer.md#seeking-and-synchronization).
 
 ## Playback stays waiting after rapid seeks
 

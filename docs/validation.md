@@ -44,7 +44,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Matroska over HTTP | From Jellyfin, 8-second conversions from 10:00 succeeded for one TrueHD Atmos and two DTS:X 4K remuxes; seeks reached a sync 21–64 ms before the target |
 | `APACStream` segment grid | Every segment starts at N × 153,600 frames and lasts 153,600 frames, including after jumps forward and back; a restarted segment correlates above 0.99 with the continuous one after the priming |
 | `APACStream` pacing | Conversion holds at the lookahead while no requests arrive, then serves later segments without restarting; a request served from the cache does not hold back one waiting further ahead |
-| `APACStream` helper run | Played on from the first run's segment, the helper's first segment matches continuous conversion across the join, correlating above 0.99 over the 2048 frames a restart's priming would replace. Replaying `AVPlayer`'s 11 sequential requests after a jump on a busy Apple Silicon Mac: typically 1.4–1.7 s with the helper, 2.1–2.9 s without. Not yet measured on Apple TV, which has two performance cores |
+| `APACStream` helper run | Played on from the first run's segment, the helper's first segment matches continuous conversion across the join, correlating above 0.99 over the 2048 frames a restart's priming would replace. Replaying `AVPlayer`'s 11 sequential requests after a jump on a busy Apple Silicon Mac: typically 1.4–1.7 s with the helper, 2.1–2.9 s without. On Apple TV, see the seek results below |
 | `APACStream` with `AVPlayer` | macOS `AVPlayer` plays the audio playlist and continues after an exact seek to 0:40 |
 | Playlist rewriting and loopback server | Video masters keep absolute URIs, subtitles and I-frame and image playlists; the server answers GET, HEAD, byte ranges and unknown paths |
 | `SpatialAudioRenderer` | From a 20-second seek into the MKV fixture, macOS renders APAC and the synchronizer advances |
@@ -65,18 +65,18 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 
 Scripted seeks on the Release build, from 55:06 into the Jellyfin title, whose stream-copy video segments last 10.4 s. Each seek was issued as a remote does, without waiting for the previous one, and timed until playback moved past the target:
 
-| Seek | Resumed after |
-|---|---|
-| Skip forward 10 s, within converted audio | 1.1 s |
-| Skip back 10 s, before the first converted segment | 6.8 s |
-| Three skips back 10 s, 0.3 s apart | 6.2 s |
-| Scrub forward 2 min, twelve steps 0.17 s apart | 13.6 s |
-| Scrub back 1 min, six steps | 12.2 s |
-| Jump forward 10 min | 13.7 s |
-| Jump back 5 min | 13.3 s |
-| Two 1-minute jumps forward, 0.5 s apart | 11.9 s |
+| Seek | Resumed after | With the helper run |
+|---|---|---|
+| Skip forward 10 s, within converted audio | 1.1 s | 1.5 s |
+| Skip back 10 s, before the first converted segment | 6.8 s | 6.0 s |
+| Three skips back 10 s, 0.3 s apart | 6.2 s | 6.7 s |
+| Scrub forward 2 min, twelve steps 0.17 s apart | 13.6 s | 11.4 s |
+| Scrub back 1 min, six steps | 12.2 s | 9.3 s |
+| Jump forward 10 min | 13.7 s | 9.0 s |
+| Jump back 5 min | 13.3 s | 9.8 s |
+| Two 1-minute jumps forward, 0.5 s apart | 11.9 s | 10.0 s |
 
-In three of six runs, the three quick skips back left `AVPlayer` waiting without requesting anything more, after Jellyfin aborted a video segment mid-response or `AVPlayer` reset an audio connection. StreamPlayer's 20-second watchdog recovered the one wedge that occurred while it was in place, by replacing the item; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). In the two runs on the final code, every other seek resumed in 0.7–14.7 s, within about a second of the times above.
+In three of six runs, the three quick skips back left `AVPlayer` waiting without requesting anything more, after Jellyfin aborted a video segment mid-response or `AVPlayer` reset an audio connection. StreamPlayer's 20-second watchdog recovered the one wedge that occurred while it was in place, by replacing the item; see [troubleshooting](troubleshooting.md#playback-stays-waiting-after-rapid-seeks). In the two runs on the final code, every other seek resumed in 0.7–14.7 s, within about a second of the times above. The last column is one run of a Debug build with the helper run; Debug converts as fast as Release. A run that started the helper together with the first run resumed long jumps as fast, but delayed first segments after restarts to up to 4.2 s, past the 3 s `AVPlayer` allows a seek; starting the helper after the first segment kept them at 1.6–3.1 s, as without it (1.8–3.7 s).
 
 ## Coverage
 
