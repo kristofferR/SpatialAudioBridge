@@ -68,7 +68,10 @@ import SwiftUI
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             let item = player.currentItem
-            let errors = item?.errorLog()?.events.suffix(2).map { "\($0.errorStatusCode) \($0.errorComment ?? "")" } ?? []
+            // Only the file name: server URLs can carry credentials.
+            let errors = item?.errorLog()?.events.suffix(2).map {
+                "\($0.errorStatusCode) \($0.uri.flatMap(URL.init(string:))?.lastPathComponent ?? "-") \($0.errorComment ?? "")"
+            } ?? []
             let speed = await stream?.conversionSpeed ?? 0
             log(String(format: "t=%.1f rate=%.1f item=%d silentAtmos=%@ conversion=%.2fx errors=%@", player.currentTime().seconds,
                        player.rate, item?.status.rawValue ?? -1, atmos?.isActive == true ? "on" : "off", speed,
