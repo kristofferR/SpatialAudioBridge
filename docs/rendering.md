@@ -37,7 +37,7 @@ Inside the room this keeps sound near its position. Halfway between the front wa
 
 Object gain applies in decibels. Inactive object blocks target silence, including when they retain stale rendering controls.
 
-Both layouts use trim configuration 8 (four or more surrounds and more than two top speakers), where the default trim is 0 dB and the centre trim does not apply. A custom trim attenuates by the surround trim, scaled by `y` up to the room's midpoint, plus the height trim scaled by `|z|`. Per-object trim disables apply. TS 103 448 has no balance control, so balance metadata is ignored.
+The trim configuration follows the surround and top speakers left after an object's zone constraints. Both full layouts use configuration 8 (four or more surrounds and more than two top speakers), where the default trim is 0 dB. Excluding speakers selects a smaller configuration: with elevation disabled, for example, configuration 2's default trim lowers rear positions by up to 1.5 dB. The default trim also applies when a stream carries no trim metadata. A custom trim attenuates by the surround trim, scaled by `y` up to the room's midpoint, plus the height trim scaled by `|z|`. Per-object trim disables apply, and the centre trim applies only to stereo. TS 103 448 has no balance control, so balance metadata is ignored.
 
 Update offsets count in units of 32 samples. Metadata ramps interpolate channel gains over the signalled duration plus one sample. A stationary point has unit total gain power; sums of signals and gain ramps need not.
 

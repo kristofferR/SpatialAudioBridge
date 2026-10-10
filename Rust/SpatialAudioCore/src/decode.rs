@@ -1,4 +1,4 @@
-use crate::render::{Event, Gains, Layout, Object, Renderer, Speaker};
+use crate::render::{Event, Gains, Layout, Object, Renderer, Speaker, TrimLayout};
 use truehd::{
     process::{
         decode::{DecodedAccessUnit, Decoder},
@@ -327,7 +327,8 @@ fn for_each_block(
                     elevation: info.b_enable_elevation,
                 });
                 let mut gains = renderer.panner.object(&object);
-                let trim = trim_gain(trim, channel, object.position);
+                let layout = renderer.panner.trim_layout(&object);
+                let trim = trim_gain(trim, channel, layout, object.position);
                 gains.iter_mut().for_each(|g| *g *= trim);
                 gains
             };
@@ -355,27 +356,38 @@ fn for_each_block(
     Ok(())
 }
 
-/// Trim gain of an object at a preprocessed position (TS 103 448 clause 5.3). Both layouts use
-/// trim configuration 8, where the default trim is 0 dB and the centre trim does not apply.
-/// TS 103 448 has no balance control, so balance metadata is ignored.
-fn trim_gain(trim: Option<&TrimElement>, object: usize, [_, y, z]: [f32; 3]) -> f32 {
-    let Some(trim) = trim else { return 1. };
-    if trim.global_trim_mode != 2 || trim.b_disable_trim.get(object) == Some(&true) {
-        return 1.;
-    }
-    match &trim.trims[8] {
-        Some(custom) if !custom.b_default_trim && !custom.b_disable_trim => {
-            let surround = custom.trim_surround.unwrap_or(0.) as f32;
-            let height = custom.trim_height.unwrap_or(0.) as f32;
-            let front_to_back = if y >= 0.5 {
-                surround
-            } else {
-                surround * 2. * y
-            };
-            10f32.powf((front_to_back + height * z.abs()) / 20.)
-        }
-        _ => 1.,
-    }
+/// Trim gain of an object at a preprocessed position (TS 103 448 clause 5.3). The configuration
+/// follows the speakers left after zone constraints: 8 for the full layouts, where the default
+/// trim is 0 dB. Without trim metadata the default trim applies. The centre trim applies only to
+/// stereo, and TS 103 448 has no balance control, so balance metadata is ignored.
+fn trim_gain(
+    trim: Option<&TrimElement>,
+    object: usize,
+    layout: TrimLayout,
+    position: [f32; 3],
+) -> f32 {
+    let default = layout.default_db(position);
+    let decibels = match trim {
+        None => default,
+        Some(trim) if trim.b_disable_trim.get(object) == Some(&true) => 0.,
+        Some(trim) => match (trim.global_trim_mode, &trim.trims[layout.index()]) {
+            (1, _) => 0.,
+            (2, Some(custom)) if custom.b_disable_trim => 0.,
+            (2, Some(custom)) if !custom.b_default_trim => {
+                let [_, y, z] = position;
+                let surround = custom.trim_surround.unwrap_or(0.) as f32;
+                let height = custom.trim_height.unwrap_or(0.) as f32;
+                let front_to_back = if y >= 0.5 {
+                    surround
+                } else {
+                    surround * 2. * y
+                };
+                front_to_back + height * z.abs()
+            }
+            _ => default,
+        },
+    };
+    10f32.powf(decibels / 20.)
 }
 
 pub struct Dts {
@@ -660,12 +672,14 @@ mod metadata_tests {
             set(&mut block(&mut metadata).object_render_info);
             render(&metadata).unwrap()
         };
-        // Screen-only zone: a rear-left object plays from the front left.
+        // Screen-only zone: a rear-left object plays from the front left alone, with the
+        // −3 dB default trim of configuration 6 (no surrounds).
         let zoned = rendered(|i| {
             i.pos3d = [0., 1., 0.];
             i.zone_constraints_idx = 4;
         });
-        assert_eq!(zoned[0], 1.);
+        assert!((zoned[0] - 10f32.powf(-3. / 20.)).abs() < 1e-6);
+        assert_eq!(zoned.iter().filter(|g| **g > 0.).count(), 1);
         // Snap moves a nearby object onto the left speaker, unless it is screen-anchored.
         let snapped = rendered(|i| {
             i.pos3d = [0.1, 0.05, 0.];
@@ -734,6 +748,13 @@ mod metadata_tests {
         trim.b_disable_trim.clear();
         trim.trims[8] = Some(Trim::default());
         assert_eq!(peak(&metadata), 1.);
+        // Without heights the object uses configuration 2, whose default trim is −1.5 dB at the
+        // rear, with or without trim metadata.
+        block(&mut metadata).object_render_info.b_enable_elevation = false;
+        let flat = 10f32.powf(-1.5 / 20.);
+        assert!((peak(&metadata) - flat).abs() < 1e-6);
+        metadata.trim_element = None;
+        assert!((peak(&metadata) - flat).abs() < 1e-6);
     }
 
     #[test]

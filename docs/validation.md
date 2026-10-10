@@ -10,7 +10,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 |---|---|
 | Atmos source panner | Every panner target routes to its own speaker, interior and ceiling positions match values worked by hand from TS 103 448, and point gains have unit power on at most eight speakers and are continuous over a room grid |
 | Atmos panner against the specification | 2,880 point, size and divergence cases over both layouts match a literal transcription of TS 103 448 pseudocode 3 to 15 within 3.2 × 10⁻⁷ |
-| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, custom trims, extended precision and dialogue normalisation pass; remaining unsupported controls produce explicit errors |
+| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, default and custom trims, extended precision and dialogue normalisation pass; remaining unsupported controls produce explicit errors |
 | DTS:X angular panning | Physical speaker angles, overhead symmetry, unit power and absent channels on their own ring pass |
 | DTS:X alternate routing | All seven presentations in both layouts pass synthetic fold cleanup, role separation and physical-angle tests; object ramps and fallback errors pass |
 | IMAX three-component metadata | Upstream payload parsed and C/L/R components routed correctly in both layouts, using synthetic PCM |
@@ -103,7 +103,7 @@ On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted 
 
 ## Coverage
 
-The suite includes 28 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 29 Rust unit tests, 4 Rust fixture tests and 46 Swift tests. Without fixture variables, 34 Swift tests run: configuration, final-fragment trimming, playlists and variant filtering, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, the encoder round trip, renderer settings and failures, and the activator. Three tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE`, one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 

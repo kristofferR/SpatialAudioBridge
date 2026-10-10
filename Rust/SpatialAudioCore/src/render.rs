@@ -149,6 +149,40 @@ fn excluded(zone: u8, elevation: bool) -> u8 {
     if elevation { zone } else { zone | ELEVATED }
 }
 
+/// Mid-layer speakers other than the front three, and top speakers, left after zone
+/// constraints. They select the trim configuration (TS 103 448 table 7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TrimLayout {
+    pub mid: usize,
+    pub top: usize,
+}
+
+impl TrimLayout {
+    /// Trim configuration index, 8 for full 7.1.4 and 9.1.6.
+    pub fn index(self) -> usize {
+        let row = match self.mid {
+            0 => 0,
+            1..=3 => 1,
+            _ => 2,
+        };
+        let column = match self.top {
+            0 => 0,
+            1..=2 => 3,
+            _ => 6,
+        };
+        row + column
+    }
+
+    /// Default trim in decibels at a preprocessed position (pseudocode 16).
+    pub fn default_db(self, [_, y, z]: [f32; 3]) -> f32 {
+        let fraction = |count: usize| (count as f32 / 4.).min(1.);
+        let max_trim = (-4.5 + 3. * fraction(self.mid) + 1.5 * fraction(self.top)).min(0.);
+        let depth = (y / 0.6).clamp(0., 1.);
+        let height = ((z.abs() - 0.2) / 0.8).clamp(0., 1.);
+        max_trim * (depth + height).clamp(0., 1.)
+    }
+}
+
 /// Atmos object metadata in TS 103 448 room coordinates: x from left to right and y from
 /// front to back in [0, 1], z from the bed plane to the ceiling in [-1, 1].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -337,6 +371,22 @@ impl Panner {
             object.divergence = 0.;
         }
         object
+    }
+
+    /// Speaker counts selecting an object's trim configuration, after its zone constraints.
+    pub fn trim_layout(&self, object: &Object) -> TrimLayout {
+        let excluded = excluded(object.zone, object.elevation);
+        let count = |classes: u8| {
+            let included = |class: &u8| class & classes != 0 && class & excluded == 0;
+            self.room
+                .iter()
+                .filter(|(_, _, class)| included(class))
+                .count()
+        };
+        TrimLayout {
+            mid: count(WIDE | SIDE | BACK),
+            top: count(ELEVATED),
+        }
     }
 
     /// Source panner (TS 103 448 clause 5.2) for preprocessed metadata.
@@ -813,6 +863,32 @@ mod tests {
             ..Object::point([0., 0., 1.])
         });
         assert!(close(&p.object(&low), &[(0, 1.)]));
+    }
+
+    #[test]
+    fn trim_configuration_follows_the_speakers_left_after_zone_constraints() {
+        let rear = [0., 1., 0.];
+        for layout in LAYOUTS {
+            let p = Panner::new(layout);
+            let full = p.trim_layout(&Object::point(rear));
+            assert_eq!(full.index(), 8);
+            assert_eq!(full.default_db(rear), 0.);
+            // Without heights, configuration 2 trims the rear by 1.5 dB.
+            let flat = p.trim_layout(&Object {
+                elevation: false,
+                ..Object::point(rear)
+            });
+            assert_eq!(flat.index(), 2);
+            assert!((flat.default_db(rear) + 1.5).abs() < 1e-6);
+            // Screen only leaves no surrounds: configuration 6 trims the rear by 3 dB.
+            let screen = p.trim_layout(&Object {
+                zone: 4,
+                ..Object::point(rear)
+            });
+            assert_eq!(screen.index(), 6);
+            assert!((screen.default_db(rear) + 3.).abs() < 1e-6);
+            assert_eq!(screen.default_db([0.5, 0., 0.]), 0.);
+        }
     }
 
     #[test]
