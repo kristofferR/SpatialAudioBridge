@@ -23,6 +23,7 @@ import Testing
     #EXT-X-STREAM-INF:BANDWIDTH=20000000,AVERAGE-BANDWIDTH=15000000,CODECS="hvc1.2.4.L153.B0,mp4a.40.2",RESOLUTION=3840x2160,AUDIO="aac",SUBTITLES="subs"
     main.m3u8?MediaSourceId=abc&api_key=key
     #EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1000000,CODECS="hvc1.2.4.L153.B0",URI="iframes.m3u8"
+    #EXT-X-IMAGE-STREAM-INF:BANDWIDTH=7480,RESOLUTION=320x132,CODECS="jpeg",URI="Trickplay/320/tiles.m3u8?x=1"
     """
     let base = URL(string: "http://server:8096/videos/42/master.m3u8?x=1")!
     let rendition = HLSPlaylists.rendition(name: "Atmos \"9.1.6\"", language: "en", channels: 16)
@@ -39,6 +40,7 @@ import Testing
     #expect(HLSPlaylists.attribute("SUBTITLES", in: variant) == "subs")
     #expect(lines.contains("http://server:8096/videos/42/main.m3u8?MediaSourceId=abc&api_key=key"))
     #expect(lines.contains(#"#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1000000,CODECS="hvc1.2.4.L153.B0",URI="http://server:8096/videos/42/iframes.m3u8""#))
+    #expect(lines.contains(#"#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=7480,RESOLUTION=320x132,CODECS="jpeg",URI="http://server:8096/videos/42/Trickplay/320/tiles.m3u8?x=1""#))
 }
 
 @Test func loopbackServerAnswersGetsRangesAndUnknownPaths() async throws {
