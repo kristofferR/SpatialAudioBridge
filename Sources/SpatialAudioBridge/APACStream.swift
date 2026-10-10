@@ -104,6 +104,12 @@ public final class APACStream: Sendable {
         self.engine = engine
     }
 
+    /// Audio converted per second of conversion since the latest start or seek, as a multiple of
+    /// real time; nil before the first segment. Below about 1.2, playback will stall.
+    public var conversionSpeed: Double? {
+        get async { await engine.conversionSpeed }
+    }
+
     /// Stops conversion and the server. Create a new stream to play again.
     public func stop() async {
         server.stop()
@@ -211,6 +217,11 @@ actor StreamEngine {
         run = nil
     }
 
+    var conversionSpeed: Double? {
+        guard let run else { return nil }
+        return store.speed(from: run.start, segmentFrames: segmentFrames)
+    }
+
     private func wait(for value: (SegmentStore) -> Data?) async throws -> Data {
         let deadline = ContinuousClock.now + timeout
         while true {
@@ -275,6 +286,7 @@ final class SegmentStore: @unchecked Sendable {
     private var window = 0..<Int.max
     private var current: UUID?
     private var produced = -1
+    private var started = ContinuousClock.now
     private var ends: [UUID: (any Error)?] = [:]
 
     var initialization: Data? { lock.withLock { initData } }
@@ -284,7 +296,7 @@ final class SegmentStore: @unchecked Sendable {
     func segment(_ index: Int) -> Data? { lock.withLock { segments[index] } }
 
     func begin(run: UUID) {
-        lock.withLock { current = run; produced = -1 }
+        lock.withLock { current = run; produced = -1; started = .now }
     }
 
     /// Stores a fragment under the grid index of its start time; repeated fragments replace nothing.
@@ -301,6 +313,16 @@ final class SegmentStore: @unchecked Sendable {
                 if window.contains(index), segments[index] == nil { segments[index] = segment.data }
                 produced = max(produced, index)
             }
+        }
+    }
+
+    /// Seconds of audio produced per second since the run began at segment `start`.
+    func speed(from start: Int, segmentFrames: Int64) -> Double? {
+        lock.withLock {
+            guard produced >= start else { return nil }
+            let audio = Double(Int64(produced - start + 1) * segmentFrames) / 48_000
+            let elapsed = ContinuousClock.now - started
+            return audio / (Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18)
         }
     }
 
