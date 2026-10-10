@@ -5,9 +5,9 @@ import Testing
 
 /// Writes the Matroska elements these tests need, using 8-byte sizes so offsets are easy to compute.
 private enum MKV {
+    static func id(_ id: UInt64) -> Data { withUnsafeBytes(of: id.bigEndian) { Data($0) }.drop { $0 == 0 } }
     static func element(_ id: UInt64, _ body: Data) -> Data {
-        var bytes = withUnsafeBytes(of: id.bigEndian) { Data($0) }
-        bytes = bytes.drop { $0 == 0 }
+        let bytes = Self.id(id)
         var size = withUnsafeBytes(of: UInt64(body.count).bigEndian) { Data($0) }
         size[size.startIndex] = 0x01
         return bytes + size + body
@@ -37,7 +37,8 @@ private struct Fixture {
     /// Header stripping removes the first two bytes of every TrueHD frame.
     static let stripped = Data([0xF0, 0x00])
 
-    static func make() throws -> Fixture {
+    /// With `metadataAfterClusters`, the info and tracks follow the clusters and only the seek head points at them.
+    static func make(metadataAfterClusters late: Bool = false) throws -> Fixture {
         var trueHD: [(Int64, Data)] = []
         func audioBlock(_ ms: Int16, cluster: Int64, sync: Bool, id: UInt8) -> Data {
             var frame = MKV.trueHD(id, sync: sync)
@@ -83,16 +84,21 @@ private struct Fixture {
                 MKV.element(EBML.audio, [MKV.float(EBML.samplingFrequency, 48000), MKV.uint(EBML.channels, 6)]),
             ]),
         ])
-        // The seek head has a fixed size, so the cue position can be computed before writing it.
-        func seekHead(_ cues: UInt64) -> Data {
-            MKV.element(EBML.seekHead, [MKV.element(EBML.seek, [MKV.element(EBML.seekID, Data([0x1C, 0x53, 0xBB, 0x6B])), MKV.uint(EBML.seekPosition, cues)])])
+        // The seek head has a fixed size, so the positions can be computed before writing it.
+        func seekHead(_ entries: [(id: UInt64, position: Int)]) -> Data {
+            MKV.element(EBML.seekHead, entries.map { MKV.element(EBML.seek, [MKV.element(EBML.seekID, MKV.id($0.id)), MKV.uint(EBML.seekPosition, UInt64($0.position))]) })
         }
-        let head = seekHead(0).count + info.count + tracks.count
+        let sought = late ? [EBML.info, EBML.tracks, EBML.cues] : [EBML.cues]
+        let clusters = seekHead(sought.map { ($0, 0) }).count + (late ? 0 : info.count + tracks.count)
         let cues = MKV.element(EBML.cues, [
-            MKV.element(EBML.cuePoint, [MKV.uint(EBML.cueTime, 0), MKV.element(EBML.cueTrackPositions, [MKV.uint(0xF7, 1), MKV.uint(EBML.cueClusterPosition, UInt64(head))])]),
-            MKV.element(EBML.cuePoint, [MKV.uint(EBML.cueTime, 1000), MKV.element(EBML.cueTrackPositions, [MKV.uint(0xF7, 1), MKV.uint(EBML.cueClusterPosition, UInt64(head + cluster1.count))])]),
+            MKV.element(EBML.cuePoint, [MKV.uint(EBML.cueTime, 0), MKV.element(EBML.cueTrackPositions, [MKV.uint(0xF7, 1), MKV.uint(EBML.cueClusterPosition, UInt64(clusters))])]),
+            MKV.element(EBML.cuePoint, [MKV.uint(EBML.cueTime, 1000), MKV.element(EBML.cueTrackPositions, [MKV.uint(0xF7, 1), MKV.uint(EBML.cueClusterPosition, UInt64(clusters + cluster1.count))])]),
         ])
-        let segment = MKV.element(EBML.segment, [seekHead(UInt64(head + cluster1.count + cluster2.count)), info, tracks, cluster1, cluster2, cues])
+        let end = clusters + cluster1.count + cluster2.count
+        let elements = late
+            ? [seekHead([(EBML.info, end), (EBML.tracks, end + info.count), (EBML.cues, end + info.count + tracks.count)]), cluster1, cluster2, info, tracks, cues]
+            : [seekHead([(EBML.cues, end)]), info, tracks, cluster1, cluster2, cues]
+        let segment = MKV.element(EBML.segment, elements)
         let file = MKV.element(EBML.header, [MKV.string(EBML.docType, "matroska")]) + segment
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("matroska-\(UUID().uuidString).mkv")
         try file.write(to: url)
@@ -146,6 +152,19 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     let packets = try await collect(file.packets(of: file.audioTracks[1]))
     #expect(packets.map(\.data) == fixture.dtsFrames)
     #expect(packets.allSatisfy { $0.isSyncPoint })
+    // Seeking into the block keeps every frame laced into it.
+    let atBlock = try await collect(file.packets(of: file.audioTracks[1], from: CMTime(value: 35, timescale: 1000)))
+    #expect(atBlock.map(\.data) == fixture.dtsFrames)
+}
+
+@Test func matroskaFindsMetadataAfterTheClustersThroughTheSeekHead() async throws {
+    let fixture = try Fixture.make(metadataAfterClusters: true)
+    let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
+    #expect(file.audioTracks.map(\.number) == [2, 3])
+    #expect(abs((file.duration?.seconds ?? 0) - 1.04) < 1e-9)
+    #expect(file.cues.map(\.time) == [0, 1000])
+    let packets = try await collect(file.packets(of: file.audioTracks[0]))
+    #expect(packets.map(\.data) == fixture.trueHD.map(\.frame))
 }
 
 @Test func xiphAndFixedLacingSplitFrames() throws {
@@ -153,6 +172,12 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(try PacketReader.frames(xiph, lacing: 1).map(\.count) == [256, 3, 1])
     let fixed = Data([2]) + Data(repeating: 7, count: 9)
     #expect(try PacketReader.frames(fixed, lacing: 2).map(\.count) == [3, 3, 3])
+}
+
+@Test func malformedLacingIsRejected() {
+    // EBML lacing whose second size, 1 + (58 - 63), is negative.
+    let negative = Data([2, 0x80 | 1, 0x80 | 58]) + Data(repeating: 0, count: 8)
+    #expect(throws: SpatialAudioError.self) { try PacketReader.frames(negative, lacing: 3) }
 }
 
 @Test func nonMatroskaInputIsRejected() async throws {
