@@ -44,6 +44,14 @@ SAB_DEVELOPMENT_TEAM="YOUR_TEAM_ID" ./build-and-install.sh "DEVICE_ID" "/path/to
 
 Or run `./prepare-media.sh "/path/to/prepared/media"`, generate with `xcodegen generate`, and open the generated project in Xcode. Builds use one job. Media, extra manifests, generated projects, build products and device logs are ignored by Git.
 
+### Plain PCM playback
+
+To hear what players without this library output, also supply `<id>.PCM.mp4` for every sample: the track's own 7.1 presentation decoded to 24-bit PCM. It plays as 7.1 LPCM without the near-silent Atmos stream, so it has no heights. Lossless FLAC in MP4 keeps the files at about half the size of raw PCM, and Apple's decoder maps FFmpeg's 7.1 side and back channels to their speakers:
+
+```sh
+ffmpeg -i film.thd -c:a flac -f mp4 film.PCM.mp4
+```
+
 ### Blind comparison against a baseline
 
 To compare a library change, also supply `<id>.APAC-baseline.mp4` for every sample, converted with the earlier build. Match its level to the new conversion so only the change under test differs, or loudness alone will tell X and Y apart. If the builds process level differently, compensate the baseline with `APACConfiguration.gainDB`: TrueHD dialogue normalisation, for example, attenuates newer conversions by 31 dB less the signalled dialogue level, so a baseline from an earlier build needs that attenuation too. Then compare the two conversion reports' `peakPCM`. The app then offers a third version, and Auto mode becomes a blind test. For each excerpt it plays the DDP reference, then both APAC versions as X and Y in random order, and asks which was closer to the reference. **Replay excerpt** plays all three again. At the end it reveals each assignment and the tally, and prints a `BLIND RESULT` line per excerpt to the device log. With the near-silent stream running for both APAC versions, nothing but the audio tells X and Y apart.
