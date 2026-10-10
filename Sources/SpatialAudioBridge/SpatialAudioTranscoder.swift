@@ -142,9 +142,16 @@ public actor SpatialAudioTranscoder {
         var samples = block.samples[...]
         if discarding == nil {
             let leading = configuration.leadingFrames(rate: block.sampleRate)
-            // A source starting after startTime is padded so its timestamps stay aligned.
-            if leading < 0 { pendingPCM.append(contentsOf: repeatElement(0, count: -leading * block.channels)) }
             discarding = max(leading, 0)
+            // A source starting after startTime is padded so its timestamps stay aligned, one
+            // block at a time so a long gap does not hold all of its silence in memory.
+            var silence = max(-leading, 0) * block.channels
+            while silence > 0 {
+                let count = min(silence, 1024 * block.channels)
+                pendingPCM.append(contentsOf: repeatElement(0, count: count))
+                silence -= count
+                try await encodeFullBlocks(rate: block.sampleRate)
+            }
         }
         if let remaining = discarding, remaining > 0 {
             let dropped = min(remaining, block.frames)
@@ -152,10 +159,15 @@ public actor SpatialAudioTranscoder {
             discarding = remaining - dropped
         }
         pendingPCM.append(contentsOf: samples)
+        try await encodeFullBlocks(rate: block.sampleRate)
+    }
+
+    /// Encodes every complete 1024-frame block of pending PCM.
+    private func encodeFullBlocks(rate: Int) async throws {
         let size = 1024 * configuration.layout.channelCount
         var offset = 0
         while pendingPCM.count - offset >= size {
-            try await encode(pendingPCM[offset..<offset + size], rate: block.sampleRate)
+            try await encode(pendingPCM[offset..<offset + size], rate: rate)
             offset += size
         }
         pendingPCM.removeFirst(offset)
