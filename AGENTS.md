@@ -26,7 +26,7 @@ None of the surveyed open-source Apple TV players expose compressed audio packet
 - 48 kHz TrueHD Atmos with one bed and point objects; room position, extended precision, gain, activity, elevation enable, timed updates and ramps are implemented with separate bed/height angular panning.
 - 48 kHz DTS:X standard four-height presentation; known height folds are removed from the compatible bed before recombination.
 - APAC 7.1.4 and 9.1.6 output, including files, HLS fragments and sample buffers. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).
-- On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K remux with video and Atmos output, converting at about 2.6× real time; `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`.
+- On an Apple TV 4K (2nd generation) with tvOS 27.2 beta: `APACStream` played a Jellyfin 4K title with video and Atmos output, converting at about 3.2× real time and recovering from every scripted seek (1–14 s); `AVSampleBufferAudioRenderer` with APAC gave Atmos and correct 7.1.4 placement. Atmos output required a near-silent E-AC-3 + JOC stream alongside, via `AtmosOutputActivator`.
 - Atmos ISF, multiple beds, nonzero object sizes and alternate/IMAX DTS:X profiles are rejected.
 - Atmos trim/bed-downmix metadata, bed distribution, enabled divergence and active size/snap/screen/distance/zone controls are rejected. The [rendering model](docs/rendering.md) documents the approximation; it is not a licensed reference renderer.
 
@@ -34,7 +34,7 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 
 ## Next priorities
 
-1. Measure lip sync, seek recovery and memory over a full film on Apple TV, including Wi-Fi playback.
+1. Measure lip sync and memory over a full film on Apple TV, including Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
 2. Validate other Apple TV models, receivers and media servers (Plex, Emby).
 3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
 4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations, starting with Swiftfin's native player.
