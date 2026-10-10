@@ -7,11 +7,14 @@ public struct MatroskaAudioTrack: Sendable, Hashable {
     public let number: UInt64
     /// The Matroska codec identifier, such as `A_TRUEHD`.
     public let codecID: String
+    /// The channel count the container declares for the compatible stream, such as 8 for TrueHD 7.1.
     public let channels: Int
     public let sampleRate: Double
     /// BCP 47 language tag, when the file declares one.
     public let language: String?
+    /// The track title, such as "TrueHD Atmos 7.1".
     public let name: String?
+    /// Whether the file marks the track as the default for its type.
     public let isDefault: Bool
     /// Bytes the muxer removed from the start of every frame (header-stripping compression).
     let strippedHeader: Data
@@ -41,7 +44,9 @@ public struct MatroskaPacket: Sendable {
 /// Only the selected track's frames are returned. Clusters are read in order, so a remote file's
 /// video bytes are transferred as well; on a local network this costs about the file's bitrate.
 public struct MatroskaFile: Sendable {
+    /// Every audio track, in file order; ``MatroskaAudioTrack/codec`` is nil for unsupported ones.
     public let audioTracks: [MatroskaAudioTrack]
+    /// The segment duration, when the file declares one.
     public let duration: CMTime?
     let source: any MediaByteSource
     let length: Int64

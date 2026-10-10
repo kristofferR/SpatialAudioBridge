@@ -1,7 +1,8 @@
 import Foundation
 
+/// One-call file conversion.
 public enum APACTrackConverter {
-    /// Convenience conversion for a demuxed .thd or .dts elementary stream.
+    /// Converts a demuxed `.thd` or `.dts` elementary stream into an APAC MP4 file.
     public static func convert(elementaryStream input: URL, codec: SpatialAudioCodec,
                                output: URL, configuration: APACConfiguration = .init()) async throws -> APACConversionReport {
         let transcoder = try SpatialAudioTranscoder(codec: codec, destination: .file(output), configuration: configuration)

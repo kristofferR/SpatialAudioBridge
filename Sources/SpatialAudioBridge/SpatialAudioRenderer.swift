@@ -13,7 +13,7 @@ import AVFoundation
 /// ```
 ///
 /// The host owns the synchronizer's rate and time. Native Atmos output also needs
-/// ``AtmosOutputActivator`` from SpatialAudioPlayback, attached to the same synchronizer.
+/// `AtmosOutputActivator` from SpatialAudioPlayback, attached to the same synchronizer.
 public actor SpatialAudioRenderer {
     /// Joins the host's synchronizer, which controls its rate and time.
     private let audioRenderer = AVSampleBufferAudioRenderer()

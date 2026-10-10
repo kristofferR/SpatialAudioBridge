@@ -48,6 +48,8 @@ public actor SpatialAudioTranscoder {
     private enum State { case accepting, finished, cancelled, failed }
     private var state = State.accepting
 
+    /// Validates `configuration` and prepares the decoder. The encoder starts with the first
+    /// decoded audio, once the input's sample rate is known.
     public init(codec: SpatialAudioCodec, destination: APACDestination,
                 configuration: APACConfiguration = .init()) throws {
         guard configuration.gainDB.isFinite, (-60...12).contains(configuration.gainDB),
@@ -84,6 +86,7 @@ public actor SpatialAudioTranscoder {
         } catch { fail(); throw error }
     }
 
+    /// Flushes the decoder and encoder and completes the file or final segment.
     public func finish() async throws -> APACConversionReport {
         try beginOperation()
         defer { busy = false }
@@ -113,6 +116,7 @@ public actor SpatialAudioTranscoder {
         } catch { fail(); throw error }
     }
 
+    /// Ends the session without completing its output. Cancelling the calling task does the same.
     public func cancel() {
         guard state == .accepting else { return }
         state = .cancelled

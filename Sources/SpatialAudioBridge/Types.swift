@@ -2,14 +2,21 @@ import Foundation
 import CoreMedia
 import AudioToolbox
 
+/// A compressed input format.
 public enum SpatialAudioCodec: UInt32, Sendable {
+    /// Dolby TrueHD with Atmos object metadata, 48 kHz, one bed and point objects.
     case trueHDAtmos = 1
+    /// DTS-HD Master Audio with the standard four-height DTS:X presentation, 48 kHz.
     case dtsX = 2
 }
 
+/// The speaker layout rendered and encoded as APAC, in Apple's Atmos channel order.
 public enum SpatialAudioLayout: UInt32, Sendable {
+    /// 7.1.4: twelve channels, profile and level `apac.31.03`.
     case sevenOneFour = 12
+    /// 9.1.6: sixteen channels, profile and level `apac.31.04`.
     case nineOneSix = 16
+    /// Channels in the layout, for the HLS rendition's `CHANNELS` attribute.
     public var channelCount: Int { Int(rawValue) }
     /// Audio entry for the HLS variant's CODECS attribute, including profile and level.
     /// Apple's channel-based APAC profile 31 uses level 3 through 12 channels, 4 through 24.
@@ -27,11 +34,16 @@ public enum SpatialAudioLayout: UInt32, Sendable {
     }
 }
 
+/// How a session renders and encodes APAC.
 public struct APACConfiguration: Sendable {
+    /// The rendered speaker layout. Defaults to 9.1.6.
     public var layout: SpatialAudioLayout
     /// Gain before encoding. No automatic normalization or clipping is applied.
     public var gainDB: Float
+    /// Total APAC bit rate in bits per second. Defaults to 256 kbit/s per channel, at most 4.096 Mbit/s.
     public var bitRate: Int
+    /// Presentation time of the first output sample. Fragment timestamps start here, less the
+    /// encoder priming.
     public var startTime: CMTime
     /// Container time of the first decoded sample, when it differs from `startTime`.
     /// Earlier audio is discarded and a later start is padded with silence, so the output begins
@@ -63,8 +75,9 @@ public struct APACConfiguration: Sendable {
         return Int((CMTimeSubtract(startTime, inputStartTime).seconds * Double(rate)).rounded())
     }
 
-    /// Leading frames are retained in fragmented-media timelines.
-    /// Account for this offset when aligning the video rendition.
+    /// The encoder's leading frames, queried from the installed Core Audio encoder: 2048 samples
+    /// (42.7 ms) on tested systems. Fragmented timelines retain them before `startTime`; account
+    /// for this offset when aligning the video rendition.
     public func encoderPrimingDuration() throws -> CMTime {
         let format = try pcmFormat(rate: 48_000, layout: layout)
         var source = CMAudioFormatDescriptionGetStreamBasicDescription(format)!.pointee
@@ -83,32 +96,46 @@ public struct APACConfiguration: Sendable {
     }
 }
 
+/// One fragmented-MP4 segment from a ``APACDestination/segments(syncPeriodsPerSegment:onSegment:)`` destination.
 public struct APACSegment: Sendable {
     public enum Kind: Sendable { case initialization, media }
     public let kind: Kind
+    /// The complete segment file: `init.mp4` content or one `.m4s` fragment.
     public let data: Data
+    /// The fragment's coded start time, including encoder priming; nil for initialization.
     public let startTime: CMTime?
+    /// The fragment's coded duration; nil for initialization.
     public let duration: CMTime?
 }
 
+/// Where a transcoder writes APAC.
 public enum APACDestination: Sendable {
+    /// An MP4 file. Priming is trimmed from its presented duration.
     case file(URL)
     /// Called serially on an AVFoundation queue. Consume or persist data promptly.
     /// The interval is a whole number of APAC sync periods, keeping fragments seekable.
     case segments(syncPeriodsPerSegment: Int = 2, onSegment: @Sendable (APACSegment) throws -> Void)
 }
 
+/// What a finished session converted.
 public struct APACConversionReport: Sendable {
     public let sampleRate: Int
+    /// Rendered source frames, excluding encoder priming.
     public let sampleFrames: Int64
     public let layout: SpatialAudioLayout
+    /// The largest absolute sample before encoding; above 1 exceeds full scale.
     public let peakPCM: Float
     public var duration: TimeInterval { Double(sampleFrames) / Double(sampleRate) }
 }
 
+/// Why a session or source failed. Every error ends the session; fall back to the host's own
+/// audio path or start a new session.
 public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidConfiguration(String)
+    /// The call does not fit the session's state, such as appending after `finish()`.
     case invalidState(String)
+    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos object size
+    /// or an IMAX DTS:X profile.
     case decoding(String)
     case encoding(String)
     /// The media source could not be read or is not a supported container.
