@@ -61,6 +61,7 @@ for try await packet in file.packets(of: track, from: target) {
     }
     try await audio?.append(packet.data)
 }
+let report = try await audio?.finish()
 ```
 
 `packets(of:from:)` starts at the last sync point at or before `from` and reports each frame's container time and whether it is a sync point. The reader handles header-stripping compression and Xiph, EBML and fixed lacing. It rejects encrypted or zlib-compressed tracks. Seeks start from the cue two seconds before the target, because audio is interleaved near, not exactly at, video keyframes. `FileByteSource` reads local files and `HTTPByteSource` sends range requests with optional headers. Implement `MediaByteSource` for other storage.
