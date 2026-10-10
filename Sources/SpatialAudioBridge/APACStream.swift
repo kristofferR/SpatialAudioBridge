@@ -54,6 +54,8 @@ public final class APACStream: Sendable {
     ///
     /// `videoMaster` is a multivariant playlist whose variants supply the video, such as a media
     /// server's HLS remux; it is fetched once with `videoHeaders`, and its own audio is replaced.
+    /// `AVPlayer` then loads the variant playlists and video segments itself, without those
+    /// headers, so their URLs must authenticate on their own, as Jellyfin's `ApiKey` parameter does.
     public static func start(file: MatroskaFile, track: MatroskaAudioTrack? = nil, videoMaster: URL? = nil,
                              videoHeaders: [String: String] = [:], startTime: CMTime = .zero,
                              options: Options = Options()) async throws -> APACStream {
@@ -65,6 +67,9 @@ public final class APACStream: Sendable {
             throw SpatialAudioError.source("The file does not declare its duration")
         }
         var configuration = options.configuration
+        guard (3...600).contains(configuration.syncPacketFrequency) else {
+            throw SpatialAudioError.invalidConfiguration("The APAC sync interval must be 3 to 600 packets")
+        }
         // The offline profile would delay every segment by about 20 s of audio.
         configuration.liveEncoding = true
         let segmentFrames = Int64(configuration.syncPacketFrequency * 1024 * StreamEngine.periods)
@@ -119,6 +124,12 @@ public final class APACStream: Sendable {
         self.renditionName = renditionName
         self.server = server
         self.engine = engine
+    }
+
+    deinit {
+        // A stream released without stop() must not keep serving or converting.
+        server.stop()
+        Task { [engine] in await engine.stop() }
     }
 
     /// Audio converted per second spent converting since the latest start or seek, as a multiple
@@ -191,6 +202,8 @@ actor StreamEngine {
     private let store = SegmentStore()
     private var run: Run?
     private var requested = 0
+    /// A decoding or encoding failure, which ends the stream so the host can fall back.
+    private var failure: (any Error)?
 
     private struct Run {
         let id: UUID
@@ -220,6 +233,7 @@ actor StreamEngine {
     }
 
     func initialization() async throws -> Data {
+        try checkFailure()
         if let data = store.initialization { return data }
         if run == nil { startRun(at: requested) }
         return try await wait(until: { $0.initialization })
@@ -227,6 +241,7 @@ actor StreamEngine {
 
     func segment(_ index: Int) async throws -> Data {
         guard (0..<segmentCount).contains(index) else { throw StreamError.outOfRange }
+        try checkFailure()
         requested = index
         store.keep(around: index, behind: keptBehind, ahead: lookahead)
         if let data = store.segment(index) {
@@ -275,10 +290,24 @@ actor StreamEngine {
         !ended && index >= runStart && index > converted && index <= max(runStart + 1, converted + 2)
     }
 
+    /// Throws a failure that ends the stream, recording one the current run has just reported.
+    /// Malformed or unsupported media fails the same way on every attempt, while network errors
+    /// may not, so only decoding, encoding and configuration failures end the stream.
+    private func checkFailure() throws {
+        if failure == nil, let run, let error = store.failure(run: run.id), let spatial = error as? SpatialAudioError {
+            switch spatial {
+            case .decoding, .encoding, .invalidConfiguration: failure = spatial
+            case .source, .invalidState, .coreMedia: break
+            }
+        }
+        if let failure { throw failure }
+    }
+
     private func wait(until value: (SegmentStore) -> Data?, while wanted: () -> Bool = { true }) async throws -> Data {
         let deadline = ContinuousClock.now + timeout
         while true {
             if let data = value(store) { return data }
+            try checkFailure()
             if let run, let failure = store.failure(run: run.id) { throw failure }
             // A later request restarted conversion elsewhere; the player has moved on.
             guard wanted() else { throw StreamError.superseded }
@@ -311,7 +340,9 @@ actor StreamEngine {
                             configuration: settings)
                     }
                     try await transcoder?.append(packet.data)
-                    await self?.paceRun(id)
+                    // The engine is gone once its stream is released; stop converting.
+                    guard let self else { break }
+                    await self.paceRun(id)
                 }
                 if let transcoder { _ = try await transcoder.finish() }
                 store.end(run: id, failure: nil)
@@ -400,7 +431,8 @@ final class SegmentStore: @unchecked Sendable {
     }
 
     func end(run: UUID, failure: (any Error)?) {
-        lock.withLock { ends[run] = failure }
+        // Subscript assignment of nil would remove the entry; a clean end must be recorded too.
+        lock.withLock { _ = ends.updateValue(failure, forKey: run) }
     }
 
     func ended(run: UUID) -> Bool { lock.withLock { ends[run] != nil } }
