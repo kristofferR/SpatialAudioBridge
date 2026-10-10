@@ -26,14 +26,14 @@ let audio = try SpatialAudioTranscoder(
     configuration: APACConfiguration(layout: .sevenOneFour, startTime: firstAudioPTS)
 )
 for try await packet in demuxedAudioPackets {
-    try await audio.append(packet.data)
+    try await audio.append(packet.data, time: packet.time)
 }
 let report = try await audio.finish()
 ```
 
 - **Input.** Pass only the selected track's payloads, in order and without container framing. Chunk boundaries do not matter: the decoded audio is bit-identical whether bytes arrive in 4096- or 317-byte pieces.
 - **Start.** Begin at a TrueHD major sync or a DTS core sync. TrueHD may start at any later major sync, such as one reached by a seek: audio before the first object metadata, usually 7.5–20 ms, is held and rendered at the first known object positions.
-- **Timing.** Output timestamps start at `startTime` and advance by decoded samples, without drift.
+- **Timing.** Output timestamps start at `startTime` and advance by decoded samples, without drift. Pass each packet's container time as `time`: a gap or reset in those times then fails the session, which samples alone cannot span. Frames laced into one block may share a time.
 - **Seeking.** A seek, timestamp gap or format change needs a new session. A seek normally lands on a sync point before the target; set `inputStartTime` to that packet's time and `startTime` to the target, and the session discards audio before the target:
 
   ```swift
@@ -59,7 +59,7 @@ for try await packet in file.packets(of: track, from: target) {
         configuration.inputStartTime = packet.time
         audio = try SpatialAudioTranscoder(codec: codec, destination: .file(outputURL), configuration: configuration)
     }
-    try await audio?.append(packet.data)
+    try await audio?.append(packet.data, time: packet.time)
 }
 let report = try await audio?.finish()
 ```
@@ -75,7 +75,7 @@ let configuration = APACConfiguration(layout: .nineOneSix, startTime: firstAudio
 let hls = try APACHLSOutput(directory: newDirectoryURL, configuration: configuration)
 let audio = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: hls.destination,
                                        configuration: configuration)
-for try await packet in demuxedAudioPackets { try await audio.append(packet.data) }
+for try await packet in demuxedAudioPackets { try await audio.append(packet.data, time: packet.time) }
 _ = try await audio.finish()
 try hls.finish()
 // Serve hls.playlistURL with init.mp4 and the .m4s fragments beside it.

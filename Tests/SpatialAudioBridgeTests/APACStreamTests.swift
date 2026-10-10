@@ -73,11 +73,20 @@ import Testing
 /// The transcoder times audio by its samples, so a gap or reset in packet times must end a run.
 @Test func timestampGapsAndResetsBreakContinuity() {
     func at(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1000) }
-    #expect(StreamEngine.continues(from: at(10), to: at(10.04), frames: 1, codec: .trueHDAtmos))
-    #expect(!StreamEngine.continues(from: at(10), to: at(11), frames: 1, codec: .trueHDAtmos))
-    #expect(!StreamEngine.continues(from: at(10), to: at(0), frames: 1, codec: .trueHDAtmos))
+    #expect(SpatialAudioTranscoder.continues(from: at(10), to: at(10.04), frames: 1, codec: .trueHDAtmos))
+    #expect(!SpatialAudioTranscoder.continues(from: at(10), to: at(11), frames: 1, codec: .trueHDAtmos))
+    #expect(!SpatialAudioTranscoder.continues(from: at(10), to: at(0), frames: 1, codec: .trueHDAtmos))
     // Laced frames share their block's time, so after 48 laced DTS frames the next block is 0.51 s on.
-    #expect(StreamEngine.continues(from: at(10), to: at(10.512), frames: 48, codec: .dtsX))
+    #expect(SpatialAudioTranscoder.continues(from: at(10), to: at(10.512), frames: 48, codec: .dtsX))
+}
+
+@Test func transcoderFailsAtATimestampJump() async throws {
+    let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos,
+                                                destination: .segments(syncPeriodsPerSegment: 2, onSegment: { _ in }))
+    try await transcoder.append(Data([0]), time: .zero)
+    await #expect(throws: SpatialAudioError.self) { try await transcoder.append(Data([0]), time: CMTime(seconds: 5, preferredTimescale: 1)) }
+    // The failure ends the session.
+    await #expect(throws: SpatialAudioError.self) { try await transcoder.append(Data([0])) }
 }
 
 /// HTTP/1.1 lets a client send its next request before the previous response arrives.
