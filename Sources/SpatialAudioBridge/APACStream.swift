@@ -82,6 +82,7 @@ public final class APACStream: Sendable {
                                   lookahead: max(1, options.lookahead), keptBehind: max(2, options.keptBehind),
                                   timeout: options.segmentTimeout)
         var master: String?
+        let subtitles = SubtitleProxy()
         if let videoMaster {
             var request = URLRequest(url: videoMaster)
             for (field, value) in videoHeaders { request.setValue(value, forHTTPHeaderField: field) }
@@ -95,7 +96,8 @@ public final class APACStream: Sendable {
             // Relative URIs follow the playlist's final location after any redirect.
             let rewritten = HLSPlaylists.master(rewriting: text, baseURL: response.url ?? videoMaster, rendition: rendition,
                                                 codec: configuration.layout.apacCodecString, bitRate: configuration.bitRate,
-                                                includesVariant: options.includesVideoVariant)
+                                                includesVariant: options.includesVideoVariant,
+                                                subtitleURI: subtitles.route)
             guard rewritten.contains("#EXT-X-STREAM-INF:") else {
                 throw SpatialAudioError.source("The video playlist has no variant to play")
             }
@@ -104,7 +106,7 @@ public final class APACStream: Sendable {
         let token = UUID().uuidString.lowercased()
         let media = HLSPlaylists.media(totalFrames: engine.totalFrames, segmentFrames: segmentFrames, rate: 48_000)
         let server = try await LoopbackServer { [master] path in
-            await Self.respond(to: path, token: token, master: master, media: media, engine: engine)
+            await Self.respond(to: path, token: token, master: master, media: media, engine: engine, subtitles: subtitles)
         }
         let base = URL(string: "http://127.0.0.1:\(server.port)/\(token)/")!
         let stream = APACStream(track: track, audioPlaylistURL: base.appendingPathComponent("audio.m3u8"),
@@ -149,7 +151,7 @@ public final class APACStream: Sendable {
     }
 
     private static func respond(to path: String, token: String, master: String?, media: String,
-                                engine: StreamEngine) async -> LoopbackServer.Response {
+                                engine: StreamEngine, subtitles: SubtitleProxy) async -> LoopbackServer.Response {
         let prefix = "/\(token)/"
         guard path.hasPrefix(prefix) else { return .notFound() }
         let name = String(path.dropFirst(prefix.count))
@@ -163,6 +165,8 @@ public final class APACStream: Sendable {
                 return .init(status: 200, contentType: playlist, body: Data(media.utf8))
             case "init.mp4":
                 return .init(status: 200, contentType: "audio/mp4", body: try await engine.initialization())
+            case _ where name.hasPrefix("subtitles/"):
+                return try await subtitles.respond(to: String(name.dropFirst("subtitles/".count)))
             default:
                 guard name.hasPrefix("seg"), name.hasSuffix(".m4s"),
                       let index = Int(name.dropFirst(3).dropLast(4)) else { return .notFound() }

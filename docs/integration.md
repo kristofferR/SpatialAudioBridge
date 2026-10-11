@@ -26,7 +26,7 @@ Every playback path also needs [`AtmosOutputActivator`](atmos-output.md) to swit
 
 - **Selection and fallback.** The host decides which track plays. Convert only TrueHD Atmos and DTS:X tracks, and play everything else through the existing path. When the library throws, fall back to that path as well: it rejects metadata it cannot render rather than playing it wrongly.
 - **Let the library recognise DTS:X.** FFmpeg and Jellyfin report alternate DTS:X presentations as plain `DTS-HD MA`, so choosing by their `DTS-HD MA + DTS:X` profile leaves those tracks on the old path. Offer every TrueHD and DTS-HD MA track instead. A session verifies Atmos or DTS:X as soon as decoding starts and throws for plain TrueHD or DTS-HD MA, so the host falls back before playback; see [troubleshooting](troubleshooting.md#apacstreamstart-or-a-session-throws).
-- **Video, subtitles and UI.** `APACStream` passes the server's video and subtitle renditions through unchanged. `SpatialAudioRenderer` leaves video entirely to the host.
+- **Video, subtitles and UI.** `APACStream` passes the server's video renditions through unchanged, and its subtitle renditions with their WebVTT timing moved onto the video's timeline. `SpatialAudioRenderer` leaves video entirely to the host.
 - **A native audio route.** APAC needs Apple's playback stack: `AVPlayer` or `AVSampleBufferAudioRenderer`. A software PCM output, as in VLC or mpv, cannot carry it.
 - **Lifecycle.** Stop the stream or renderer when playback ends or the item changes, and detach the activator.
 
@@ -54,7 +54,7 @@ For players that switch engines per item, routing TrueHD Atmos and DTS:X items t
 - tvOS 26, iOS 26 or macOS 26 for the API. The package builds back to tvOS and iOS 13 and macOS 10.15, so an app that supports older systems can depend on it unconditionally: wrap its use in `if #available(tvOS 26, iOS 26, macOS 26, *)` and keep the existing audio path otherwise.
 - The core has arm64 slices only, for Macs, Apple TV, iPhone and iPad and their simulators. A package that also builds for visionOS or Mac Catalyst limits the dependency with `condition: .when(platforms: [.tvOS, .iOS, .macOS])`. Universal macOS builds and generic simulator builds, which add x86_64, need `ARCHS=arm64`. iPhone and iPad builds link but are untested.
 - Depend on a release tag: it downloads the Rust core as a checksummed XCFramework. The `main` branch builds the core with `scripts/build-core.sh` instead; see [build from source](../README.md#build-from-source).
-- Ship the [license notices](../THIRD-PARTY-NOTICES.md) of the core's dependencies with the app. The release archive includes them, with the Rust standard library's.
+- Show `SpatialAudioBridgeNotices.text` in the app's acknowledgements. It holds SpatialAudioBridge's license and the notices of the Rust components and Rust standard library in its core, as one plain text with each license text listed once, and it is available on every system the package builds for. [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) explains where it comes from.
 
 ## Timing rules
 
