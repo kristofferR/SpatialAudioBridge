@@ -115,7 +115,7 @@ Symbol documentation is available in Xcode through DocC.
 Add the package from a release, in Xcode or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.2.0")
+.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.3.0")
 ```
 
 Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV, iPhone and iPad, and their arm64 simulators, so the host needs no Rust toolchain. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
