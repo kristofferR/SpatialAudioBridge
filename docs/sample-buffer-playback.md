@@ -53,7 +53,7 @@ let stream = try unpacker.unpack(bursts)
 if !stream.isEmpty { try await renderer.enqueue(stream, time: firstTime + unpacker.skippedDuration) }
 ```
 
-After a seek the bursts may resume between TrueHD major syncs, where decoding cannot start. The unpacker drops those access units and adds their duration (1/1200 s each) to `skippedDuration`, so adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
+After a seek, or when attaching to a running output, the bursts may resume between TrueHD major syncs, where decoding cannot start, or even inside an access unit. The unpacker drops the data up to the first major sync and adds its duration to `skippedDuration`, measured by its share of the 20 ms MAT frames and so accurate to about one access unit (0.8 ms). Adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
 
 ## Status and errors
 

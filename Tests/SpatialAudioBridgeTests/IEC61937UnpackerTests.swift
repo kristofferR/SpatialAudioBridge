@@ -14,8 +14,8 @@ private func burst(type: UInt16, payload: [UInt8], period: Int, littleEndian: Bo
 }
 
 /// MAT frames around a TrueHD stream with zero padding between units, split at the middle and end codes.
-private func matBursts(_ units: [[UInt8]], littleEndian: Bool) -> [UInt8] {
-    var body: [UInt8] = []
+private func matBursts(_ units: [[UInt8]], littleEndian: Bool, lead: [UInt8] = []) -> [UInt8] {
+    var body = lead
     for unit in units { body += unit + [0, 0, 0, 0] }
     let half = 30_708 - 20, start: [UInt8] = [0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00, 0x56, 0xA5, 0x3B, 0xF4, 0x81, 0x83, 0x49, 0x80, 0x77, 0xE0]
     var bursts: [UInt8] = []
@@ -54,10 +54,14 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
 @Test func trueHDUnitsComeOutOfMATFramesFromTheFirstMajorSync() throws {
     let leading = (0..<3).map { unit(words: 120, majorSync: false, seed: $0) }
     let units = (0..<300).map { unit(words: 100 + $0 * 7 % 900, majorSync: $0 % 16 == 0, seed: $0) }
-    for littleEndian in [true, false] {
-        let (output, unpacker) = try unpackInChunks(matBursts(leading + units, littleEndian: littleEndian))
+    // The end of a unit from before the stream started, as when attaching midstream.
+    let continuation = [UInt8](repeating: 0xAB, count: 300)
+    for (littleEndian, lead) in [(true, [UInt8]()), (false, continuation)] {
+        let (output, unpacker) = try unpackInChunks(matBursts(leading + units, littleEndian: littleEndian, lead: lead))
         #expect(output == Data(units.joined()))
-        #expect(unpacker.skippedDuration == CMTime(value: 3, timescale: 1200))
+        // Skipped data counts by its share of the 61376 unit bytes in each 20 ms MAT frame; each leading unit
+        // takes 240 bytes and 4 of padding.
+        #expect(unpacker.skippedDuration == CMTime(value: Int64(lead.count + 3 * 244), timescale: 61_376 * 50))
     }
 }
 
@@ -73,6 +77,13 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
         #expect(output == Data(frames.joined()))
         #expect(unpacker.skippedDuration == .zero)
     }
+    // FFmpeg swaps a little-endian DTS source itself, so the wrapper may arrive in the other byte order.
+    var swapped = [0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE, UInt8(frames[0].count >> 8), UInt8(frames[0].count & 0xFF)] + frames[0]
+    for index in stride(from: 0, to: swapped.count - 1, by: 2) { swapped.swapAt(index, index + 1) }
+    var unpacker = IEC61937Unpacker()
+    #expect(try unpacker.unpack(Data(burst(type: 0x0411, payload: swapped, period: 32_768, littleEndian: false))) == Data(frames[0]))
+    let empty = burst(type: 0x0411, payload: [0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE, 0, 0], period: 32_768, littleEndian: true)
+    #expect(throws: SpatialAudioError.self) { try unpacker.unpack(Data(empty)) }
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)

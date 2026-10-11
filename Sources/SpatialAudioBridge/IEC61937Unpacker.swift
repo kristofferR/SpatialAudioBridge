@@ -18,8 +18,9 @@ import Foundation
 /// with `begin(at:)` and a new unpacker at the next burst.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct IEC61937Unpacker: Sendable {
-    /// The duration of the TrueHD access units dropped before the first major sync, where decoding can
-    /// start. Add it to the time of the first buffer, so audio keeps its place on the timeline.
+    /// The duration of the TrueHD data dropped before the first major sync, where decoding can start,
+    /// measured by its share of the 20 ms MAT frames and so accurate to about one access unit. Add it to
+    /// the time of the first buffer, so audio keeps its place on the timeline.
     public private(set) var skippedDuration = CMTime.zero
 
     private var pending: [UInt8] = []
@@ -98,6 +99,16 @@ public struct IEC61937Unpacker: Sendable {
         }
         trueHD += frame[20..<30_708]
         trueHD += frame[30_720..<61_408]
+        if !synced {
+            // The first bytes may continue a unit from an earlier frame, so length words cannot be trusted
+            // until a major-sync unit, which starts 4 bytes before its signature.
+            guard let signature = Self.firstMajorSync(in: trueHD) else {
+                drop(max(0, trueHD.count - 7))
+                return []
+            }
+            drop(signature - 4)
+            synced = true
+        }
         var output: [UInt8] = []
         var index = 0
         while index + 2 <= trueHD.count {
@@ -105,29 +116,44 @@ public struct IEC61937Unpacker: Sendable {
             // A unit never has zero length, so a zero word is padding.
             guard words > 0 else { index += 2; continue }
             guard index + words * 2 <= trueHD.count else { break }
-            let unit = trueHD[index..<(index + words * 2)]
+            output += trueHD[index..<(index + words * 2)]
             index += words * 2
-            if !synced, unit.count >= 8, unit[(unit.startIndex + 4)..<(unit.startIndex + 8)].elementsEqual([0xF8, 0x72, 0x6F, 0xBA]) {
-                synced = true
-            }
-            if synced {
-                output += unit
-            } else {
-                // Each access unit lasts 1/1200 s at 48 kHz.
-                skippedDuration = CMTimeAdd(skippedDuration, CMTime(value: 1, timescale: 1200))
-            }
         }
         trueHD.removeFirst(index)
         return output
     }
 
+    /// Drops unsynced TrueHD data and counts its duration: each MAT frame carries 61376 bytes of it in 20 ms.
+    private mutating func drop(_ count: Int) {
+        trueHD.removeFirst(count)
+        skippedDuration = CMTimeAdd(skippedDuration, CMTime(value: Int64(count), timescale: 61_376 * 50))
+    }
+
+    /// The offset of the first major-sync signature that can start a unit, at least 4 bytes in.
+    private static func firstMajorSync(in bytes: [UInt8]) -> Int? {
+        var index = 4
+        while index + 3 < bytes.count {
+            if bytes[index] == 0xF8, bytes[index + 1] == 0x72, bytes[index + 2] == 0x6F, bytes[index + 3] == 0xBA {
+                return index
+            }
+            index += 1
+        }
+        return nil
+    }
+
     /// The DTS frame in a type IV burst, after its 10-byte start code and 16-bit size. Every frame starts
     /// with a core sync and decodes on its own.
-    private func dtsFrame(inTypeIV payload: [UInt8]) throws -> [UInt8] {
+    private func dtsFrame(inTypeIV burst: [UInt8]) throws -> [UInt8] {
+        var payload = burst
+        // FFmpeg swaps a little-endian DTS source itself, so the wrapper can arrive in the other byte order.
+        if payload.starts(with: [0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFE]) {
+            for index in stride(from: 0, to: payload.count - 1, by: 2) { payload.swapAt(index, index + 1) }
+        }
         guard payload.count >= 12, payload.starts(with: [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFE]) else {
             throw SpatialAudioError.decoding("Malformed IEC 61937 DTS-HD burst")
         }
         let size = Int(payload[10]) << 8 | Int(payload[11])
+        guard size > 0 else { throw SpatialAudioError.decoding("Empty IEC 61937 DTS-HD burst") }
         guard payload.count >= 12 + size else { throw SpatialAudioError.decoding("Truncated IEC 61937 DTS-HD burst") }
         return Array(payload[12..<(12 + size)])
     }
