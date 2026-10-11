@@ -2,6 +2,7 @@ import CoreMedia
 import Foundation
 
 /// An audio track in a Matroska file.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct MatroskaAudioTrack: Sendable, Hashable {
     /// The Matroska track number.
     public let number: UInt64
@@ -32,6 +33,7 @@ public struct MatroskaAudioTrack: Sendable, Hashable {
 }
 
 /// One compressed audio frame and its container presentation time.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct MatroskaPacket: Sendable {
     public let data: Data
     /// The block's time. Frames laced into one block share it.
@@ -44,6 +46,7 @@ public struct MatroskaPacket: Sendable {
 ///
 /// Only the selected track's frames are returned. Clusters are read in order, so a remote file's
 /// video bytes are transferred as well; on a local network this costs about the file's bitrate.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct MatroskaFile: Sendable {
     /// Every audio track, in file order; ``MatroskaAudioTrack/codec`` is nil for unsupported ones.
     public let audioTracks: [MatroskaAudioTrack]
@@ -178,6 +181,7 @@ public struct MatroskaFile: Sendable {
 }
 
 /// The packets of one track, from a seek target. Iterate once.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct MatroskaPackets: AsyncSequence, Sendable {
     public typealias Element = MatroskaPacket
     let file: MatroskaFile
@@ -197,6 +201,7 @@ public struct MatroskaPackets: AsyncSequence, Sendable {
 
 /// Seeks to a cue before the target, then walks clusters and blocks, returning the track's frames
 /// from the last sync point at or before the target.
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class PacketReader {
     private let file: MatroskaFile
     private let track: MatroskaAudioTrack
@@ -409,6 +414,7 @@ final class PacketReader {
 
 /// A sequential read position over a ``MediaByteSource``, fetching it in chunks and skipping
 /// unread bytes without transferring them when they extend past the buffer.
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class ByteWindow {
     private let source: any MediaByteSource
     private let length: Int64
@@ -483,6 +489,7 @@ final class ByteWindow {
 }
 
 /// A parsed EBML master element's children.
+@available(macOS 26, iOS 26, tvOS 26, *)
 struct EBMLData {
     private let data: Data
 
@@ -533,6 +540,7 @@ struct EBMLData {
     static func uint<D: DataProtocol>(_ bytes: D) -> UInt64 { bytes.reduce(0) { $0 << 8 | UInt64($1) } }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 enum EBML {
     static let header: UInt64 = 0x1A45DFA3, docType: UInt64 = 0x4282
     static let segment: UInt64 = 0x18538067, seekHead: UInt64 = 0x114D9B74, info: UInt64 = 0x1549A966

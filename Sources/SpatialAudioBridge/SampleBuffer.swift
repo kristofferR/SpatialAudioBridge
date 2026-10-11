@@ -3,6 +3,7 @@ import AudioToolbox
 import CoreMedia
 import Foundation
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 func pcmFormat(rate: Int, layout: SpatialAudioLayout) throws -> CMAudioFormatDescription {
     var asbd = AudioStreamBasicDescription(
         mSampleRate: Double(rate), mFormatID: kAudioFormatLinearPCM,
@@ -22,6 +23,7 @@ func pcmFormat(rate: Int, layout: SpatialAudioLayout) throws -> CMAudioFormatDes
 
 /// Writes `samples` scaled by `gain` into a new sample buffer and returns it with the scaled
 /// samples' peak magnitude. Accelerate keeps this fast in unoptimized builds too.
+@available(macOS 26, iOS 26, tvOS 26, *)
 func pcmSampleBuffer(_ samples: ArraySlice<Float>, gain: Float, frames: Int, format: CMAudioFormatDescription,
                      time: CMTime, rate: Int) throws -> (buffer: CMSampleBuffer, peak: Float) {
     let size = samples.count * MemoryLayout<Float>.size
@@ -52,6 +54,7 @@ func pcmSampleBuffer(_ samples: ArraySlice<Float>, gain: Float, frames: Int, for
     return (sample, peak)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 func layoutData(_ layout: SpatialAudioLayout) -> Data {
     var value = AudioChannelLayout()
     value.mChannelLayoutTag = layout.tag

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SpatialAudioBridge",
-    platforms: [.macOS("26.0"), .tvOS("26.0")],
+    platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13)],
     products: [
         .library(name: "SpatialAudioBridge", targets: ["SpatialAudioBridge"]),
         .library(name: "SpatialAudioPlayback", targets: ["SpatialAudioPlayback"]),

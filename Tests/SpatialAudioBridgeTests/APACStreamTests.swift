@@ -4,6 +4,7 @@ import Network
 import Testing
 @testable import SpatialAudioBridge
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func mediaPlaylistListsFixedSegmentsAndAShorterLastOne() {
     let playlist = HLSPlaylists.media(totalFrames: 153_600 * 2 + 4_800, segmentFrames: 153_600, rate: 48_000)
     let lines = playlist.split(separator: "\n")
@@ -15,6 +16,7 @@ import Testing
     #expect(lines.last == "#EXT-X-ENDLIST")
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func masterPlaylistReplacesAudioAndKeepsVideoAbsolute() {
     let upstream = """
     #EXTM3U
@@ -44,6 +46,7 @@ import Testing
     #expect(lines.contains(#"#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=7480,RESOLUTION=320x132,CODECS="jpeg",URI="http://server:8096/videos/42/Trickplay/320/tiles.m3u8?x=1""#))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func masterPlaylistLeavesOutRejectedVariants() {
     let upstream = """
     #EXTM3U
@@ -61,6 +64,7 @@ import Testing
     #expect(!master.contains("avc1"))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func masterPlaylistAddsNoCodecsToAVariantWithout() {
     let upstream = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=42000000\nmain.m3u8\n"
     let master = HLSPlaylists.master(rewriting: upstream, baseURL: URL(string: "http://server/master.m3u8")!,
@@ -71,6 +75,7 @@ import Testing
 }
 
 /// The transcoder times audio by its samples, so a gap or reset in packet times must end a run.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func timestampGapsAndResetsBreakContinuity() {
     func at(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1000) }
     #expect(SpatialAudioTranscoder.continues(from: at(10), to: at(10.04), frames: 1, codec: .trueHDAtmos))
@@ -80,6 +85,7 @@ import Testing
     #expect(SpatialAudioTranscoder.continues(from: at(10), to: at(10.512), frames: 48, codec: .dtsX))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func transcoderFailsAtATimestampJump() async throws {
     let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos,
                                                 destination: .segments(syncPeriodsPerSegment: 2, onSegment: { _ in }))
@@ -91,6 +97,7 @@ import Testing
 
 /// The stream's playlist follows the container, which may outlast the audio track. A run that
 /// starts past the track's end decodes nothing and must still fill the remaining segments.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func finishPadsWithSilenceToTheEndOnTheGrid() async throws {
     let priming = try APACConfiguration().encoderPrimingDuration().value
     final class Fragments: @unchecked Sendable {
@@ -115,6 +122,7 @@ import Testing
 }
 
 /// HTTP/1.1 lets a client send its next request before the previous response arrives.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test(.timeLimit(.minutes(1))) func loopbackServerAnswersPipelinedRequests() async throws {
     let server = try await LoopbackServer { path in .init(status: 200, body: Data(path.utf8)) }
     defer { server.stop() }
@@ -139,6 +147,7 @@ import Testing
 
 /// After a seek, AVPlayer allows about 3 s for the first segment and requests every scrub
 /// position; only segments the current run will reach within about two conversions are worth waiting for.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func requestsWaitOnlyForSegmentsTheRunReachesSoon() {
     // A fresh run at 10 has converted nothing yet.
     #expect(StreamEngine.waits(for: 10, runStart: 10, converted: -1, ended: false))
@@ -152,6 +161,7 @@ import Testing
     #expect(!StreamEngine.waits(for: 16, runStart: 10, converted: 15, ended: true))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreRecordsCleanEndsAndFailures() {
     let store = SegmentStore()
     let clean = UUID(), failed = UUID(), running = UUID()
@@ -162,11 +172,13 @@ import Testing
     #expect(!store.ended(run: running))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func mediaSegment(_ index: Int) -> APACSegment {
     APACSegment(kind: .media, data: Data([UInt8(index)]), startTime: CMTime(value: Int64(index) * 153_600, timescale: 48_000),
                 duration: CMTime(value: 153_600, timescale: 48_000))
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreKeepsRecentSegmentsBehindTheRequest() {
     let store = SegmentStore()
     let run = UUID()
@@ -180,6 +192,7 @@ private func mediaSegment(_ index: Int) -> APACSegment {
 }
 
 /// A helper run's first fragment carries encoder priming, and a retired run may still emit one.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreTakesEachRunFromItsFirstSegmentUntilRetired() {
     let store = SegmentStore()
     let run = UUID(), helper = UUID()
@@ -195,6 +208,7 @@ private func mediaSegment(_ index: Int) -> APACSegment {
     #expect(store.segment(13) == nil && store.highest(run: run) == -1)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func loopbackServerAnswersGetsRangesAndUnknownPaths() async throws {
     let body = Data((0..<100).map { UInt8($0) })
     let server = try await LoopbackServer { path in
@@ -217,6 +231,7 @@ private func mediaSegment(_ index: Int) -> APACSegment {
 
 /// A failing server may recover, so its errors fail like the network and a stream retries them;
 /// a rejection repeats on every request and ends the stream.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func httpSourceTellsServerErrorsFromRejections() async throws {
     let server = try await LoopbackServer { path in path == "/busy" ? .init(status: 503) : .notFound() }
     defer { server.stop() }
@@ -226,6 +241,7 @@ private func mediaSegment(_ index: Int) -> APACSegment {
 }
 
 /// The base media decode time and sample count of a single-fragment segment.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames: Int) {
     var decodeTime: UInt64?, packets = 0
     func walk(_ range: Range<Int>) {
@@ -248,6 +264,7 @@ private func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames:
     return (try #require(decodeTime), packets * 1024)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func decodedMono(_ segments: [Data]) async throws -> [Float] {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("stream-\(UUID().uuidString).mp4")
     try segments.reduce(Data(), +).write(to: url)
@@ -271,16 +288,19 @@ private func decodedMono(_ segments: [Data]) async throws -> [Float] {
 
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil))
 struct APACStreamFixtureTests {
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private func open() async throws -> MatroskaFile {
         try await MatroskaFile.open(FileByteSource(url: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"]!)))
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private func get(_ url: URL) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(from: url)
         #expect((response as? HTTPURLResponse)?.statusCode == 200, "\(url.lastPathComponent)")
         return data
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func segmentsLieOnTheGridAndARestartReproducesThem() async throws {
         let stream = try await APACStream.start(file: try await open())
         let base = stream.audioPlaylistURL.deletingLastPathComponent()
@@ -311,6 +331,7 @@ struct APACStreamFixtureTests {
 
     /// The helper run converts segment 5 onward from the start. Its segment must play on from
     /// segment 4 without the 42.7 ms of priming a restarted run's first segment carries.
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func helperSegmentsMatchContinuousConversionFromTheirFirstSample() async throws {
         let file = try await open()
         let stream = try await APACStream.start(file: file)
@@ -368,6 +389,7 @@ struct APACStreamFixtureTests {
     }
 
     /// A paused player stops requesting; conversion must wait instead of running past what it keeps.
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func conversionHoldsAtTheLookaheadUntilPlaybackCatchesUp() async throws {
         var options = APACStream.Options()
         options.lookahead = 2
@@ -383,6 +405,7 @@ struct APACStreamFixtureTests {
     }
 
     /// A request served from the cache must not hold conversion back from a request waiting further ahead.
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func cachedRequestsKeepConvertingForAWaitingRequest() async throws {
         var options = APACStream.Options()
         options.lookahead = 2
@@ -400,6 +423,7 @@ struct APACStreamFixtureTests {
         await #expect(throws: StreamError.self) { try await stream.engine.segment(5) }
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func avPlayerPlaysAndSeeksTheStream() async throws {
         let stream = try await APACStream.start(file: try await open())
         let player = AVPlayer(url: stream.audioPlaylistURL)
@@ -420,6 +444,7 @@ struct APACStreamFixtureTests {
 
 /// The live profile emits each segment about one sync period (1.6 s) after its end; the offline
 /// profile trails by about 20 s, which would stall every seek.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil))
 func liveEncodingEmitsSegmentsSoonAfterTheirInput() async throws {
     let file = try await MatroskaFile.open(FileByteSource(url: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"]!)))

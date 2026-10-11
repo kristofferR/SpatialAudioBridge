@@ -11,6 +11,10 @@ import AVFoundation
     """
 
     static func main() async {
+        guard #available(macOS 26, iOS 26, tvOS 26, *) else {
+            FileHandle.standardError.write(Data("apac-convert: APAC encoding requires macOS 26 or newer\n".utf8))
+            exit(1)
+        }
         do { try await convert() }
         catch {
             FileHandle.standardError.write(Data("apac-convert: \(error)\n".utf8))
@@ -18,6 +22,7 @@ import AVFoundation
         }
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private static func convert() async throws {
         let args = Array(CommandLine.arguments.dropFirst())
         guard args.count >= 3 else { print(usage); return }
@@ -43,6 +48,7 @@ import AVFoundation
     }
 
     /// The `--layout` option, or the library's default layout without it.
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private static func layout(_ options: [String]) throws -> SpatialAudioLayout {
         guard let index = options.firstIndex(of: "--layout") else { return APACConfiguration().layout }
         switch options.indices.contains(index + 1) ? options[index + 1] : "" {
@@ -53,6 +59,7 @@ import AVFoundation
     }
 
     /// Converts one Matroska audio track, optionally from a start time, reporting seek cost.
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private static func convertMatroska(input: String, output: URL, options: [String]) async throws -> APACConversionReport {
         // A given option needs a number; a missing or malformed one must not fall back to the default.
         func option(_ name: String) throws -> Double? {
@@ -112,6 +119,7 @@ import AVFoundation
 }
 
 /// Counts the bytes a source transfers.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class CountingSource: MediaByteSource, @unchecked Sendable {
     let base: any MediaByteSource
     private let lock = NSLock()

@@ -5,6 +5,7 @@ import AVFoundation
 /// On the tested Apple TV and receiver route, APAC alone did not switch the output to Atmos.
 /// A second, unmuted player looping a silent E-AC-3 stream signalled as Dolby Atmos did.
 /// Validate each target route and OS: receiver Atmos indication does not prove speaker placement.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @MainActor
 public final class AtmosOutputActivator {
     private let stream: URL
@@ -142,6 +143,7 @@ public final class AtmosOutputActivator {
 }
 
 #if os(tvOS) || os(iOS)
+@available(macOS 26, iOS 26, tvOS 26, *)
 extension AtmosOutputActivator {
     /// Configures and activates the shared session as in the tested setup: playback, movie playback mode
     /// and multichannel content. Call before playback when the host does not manage its own session.

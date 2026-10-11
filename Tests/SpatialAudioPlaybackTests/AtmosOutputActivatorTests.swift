@@ -3,6 +3,7 @@ import Testing
 @testable import SpatialAudioPlayback
 
 @MainActor @Suite(.serialized) struct AtmosOutputActivatorTests {
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private func silence(_ name: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString).caf")
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 8_000, channels: 1))
@@ -12,6 +13,7 @@ import Testing
         return url
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
         for _ in 0..<60 where !condition() {
             try? await Task.sleep(for: .milliseconds(50))
@@ -19,6 +21,7 @@ import Testing
         return condition()
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func followsHostPlaybackAndPause() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let host = AVPlayer(url: try silence("apac"))
@@ -37,6 +40,7 @@ import Testing
         host.pause()
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func bundledStreamIsSignalledAsAtmosAndPlays() async throws {
         let asset = AVURLAsset(url: AtmosOutputActivator.bundledStream)
         let track = try #require(try await asset.loadTracks(withMediaType: .audio).first)
@@ -59,6 +63,7 @@ import Testing
         host.pause()
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func followsARenderSynchronizer() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let synchronizer = AVSampleBufferRenderSynchronizer()
@@ -72,6 +77,7 @@ import Testing
         #expect(activator.player.items().isEmpty)
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func unplayableStreamReportsAnErrorInsteadOfActivity() async throws {
         let invalid = FileManager.default.temporaryDirectory.appendingPathComponent("invalid-\(UUID().uuidString).mp4")
         try Data("not media".utf8).write(to: invalid)
@@ -86,6 +92,7 @@ import Testing
         host.pause()
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func playsOnlyForItemsSelectedByThePredicate() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let apac = AVPlayerItem(url: try silence("apac"))

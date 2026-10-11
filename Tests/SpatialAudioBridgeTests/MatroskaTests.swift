@@ -4,6 +4,7 @@ import Testing
 @testable import SpatialAudioBridge
 
 /// Writes the Matroska elements these tests need, using 8-byte sizes so offsets are easy to compute.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private enum MKV {
     static func id(_ id: UInt64) -> Data { withUnsafeBytes(of: id.bigEndian) { Data($0) }.drop { $0 == 0 } }
     static func element(_ id: UInt64, _ body: Data) -> Data {
@@ -28,6 +29,7 @@ private enum MKV {
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private struct Fixture {
     let url: URL
     /// TrueHD frames as stored, before header stripping, with their times in milliseconds.
@@ -106,12 +108,14 @@ private struct Fixture {
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket] {
     var result: [MatroskaPacket] = []
     for try await packet in packets { result.append(packet) }
     return result
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func matroskaListsAudioTracksWithLanguageAndDefaults() async throws {
     let fixture = try Fixture.make()
     let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
@@ -124,6 +128,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(abs((file.duration?.seconds ?? 0) - 1.04) < 1e-9)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func matroskaReturnsOneTrackWithItsStrippedHeaderRestored() async throws {
     let fixture = try Fixture.make()
     let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
@@ -133,6 +138,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(packets.map(\.isSyncPoint) == [true, false, true, false, true, false, true, false])
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func matroskaSeeksToTheLastSyncPointAtOrBeforeTheTarget() async throws {
     let fixture = try Fixture.make()
     let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
@@ -147,6 +153,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     await #expect(throws: SpatialAudioError.self) { try await collect(file.packets(of: track, from: .invalid)) }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func matroskaSplitsLacedFrames() async throws {
     let fixture = try Fixture.make()
     let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
@@ -158,6 +165,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(atBlock.map(\.data) == fixture.dtsFrames)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func matroskaFindsMetadataAfterTheClustersThroughTheSeekHead() async throws {
     let fixture = try Fixture.make(metadataAfterClusters: true)
     let file = try await MatroskaFile.open(FileByteSource(url: fixture.url))
@@ -169,6 +177,7 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
 }
 
 /// Counts the bytes read, to show what a remote file would transfer.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class CountingSource: MediaByteSource, @unchecked Sendable {
     private let file: FileByteSource
     private let lock = NSLock()
@@ -185,6 +194,7 @@ private final class CountingSource: MediaByteSource, @unchecked Sendable {
 
 /// A minute of one-second clusters of 128 KiB video, each cued, with a TrueHD frame at each of
 /// the `audio` seconds.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func videoOutlasting(audio: Set<Int>) throws -> URL {
     let video = MKV.element(EBML.simpleBlock, MKV.blockBody(track: 1, milliseconds: 0, flags: 0x80, payload: Data(repeating: 0xAA, count: 128 * 1024)))
     let clusters = (0..<60).map { second in
@@ -213,6 +223,7 @@ private func videoOutlasting(audio: Set<Int>) throws -> URL {
     return url
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func streamReadingEndsATrackThatStopsBeforeTheVideo() async throws {
     let gap = CMTime(value: 5, timescale: 1)
     func seconds(audio: Set<Int>, from start: Int = 0) async throws -> (frames: [Double], read: Double) {
@@ -231,6 +242,7 @@ private func videoOutlasting(audio: Set<Int>) throws -> URL {
     #expect(try await seconds(audio: [0, 1, 40, 59]).frames == [0, 1, 40, 59])
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func xiphAndFixedLacingSplitFrames() throws {
     let xiph = Data([2, 255, 1, 3]) + Data(repeating: 1, count: 256) + Data(repeating: 2, count: 3) + Data([9])
     #expect(try PacketReader.frames(xiph, lacing: 1).map(\.count) == [256, 3, 1])
@@ -238,12 +250,14 @@ private func videoOutlasting(audio: Set<Int>) throws -> URL {
     #expect(try PacketReader.frames(fixed, lacing: 2).map(\.count) == [3, 3, 3])
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func malformedLacingIsRejected() {
     // EBML lacing whose second size, 1 + (58 - 63), is negative.
     let negative = Data([2, 0x80 | 1, 0x80 | 58]) + Data(repeating: 0, count: 8)
     #expect(throws: SpatialAudioError.self) { try PacketReader.frames(negative, lacing: 3) }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func nonMatroskaInputIsRejected() async throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("not-mkv-\(UUID().uuidString).bin")
     try Data(repeating: 0x42, count: 64).write(to: url)
@@ -251,6 +265,7 @@ private func videoOutlasting(audio: Set<Int>) throws -> URL {
 }
 
 /// Reads a real file's TrueHD track and compares it with an FFmpeg extraction of the same track.
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil
                && ProcessInfo.processInfo.environment["SAB_TRUEHD_FIXTURE"] != nil))
 func realMatroskaTrackMatchesTheElementaryStream() async throws {

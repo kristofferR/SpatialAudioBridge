@@ -50,7 +50,8 @@ For players that switch engines per item, routing TrueHD Atmos and DTS:X items t
 
 ## Requirements
 
-- tvOS 26 or macOS 26 for encoding. Apps supporting older systems need availability checks and their existing audio path on those systems.
+- tvOS 26, iOS 26 or macOS 26 for the API. The package builds back to tvOS and iOS 13 and macOS 10.15, so an app that supports older systems can depend on it unconditionally: wrap its use in `if #available(tvOS 26, iOS 26, macOS 26, *)` and keep the existing audio path otherwise.
+- The core has arm64 slices only, for Macs, Apple TV, iPhone and iPad and their simulators. A package that also builds for visionOS or Mac Catalyst limits the dependency with `condition: .when(platforms: [.tvOS, .iOS, .macOS])`. Universal macOS builds and generic simulator builds, which add x86_64, need `ARCHS=arm64`. iPhone and iPad builds link but are untested.
 - Depend on a release tag: it downloads the Rust core as a checksummed XCFramework. The `main` branch builds the core with `scripts/build-core.sh` instead; see [build from source](../README.md#build-from-source).
 - Ship the [license notices](../THIRD-PARTY-NOTICES.md) of the core's dependencies with the app. The release archive includes them, with the Rust standard library's.
 

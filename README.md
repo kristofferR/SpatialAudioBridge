@@ -118,7 +118,9 @@ Add the package from a release, in Xcode or in `Package.swift`:
 .package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.0.0")
 ```
 
-Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV and the Apple TV simulator, so the host needs no Rust toolchain. The archive includes the license notices of the core's dependencies. Encoding requires **tvOS 26+** or **macOS 26+**. The package offers three products:
+Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV, iPhone and iPad, and their arm64 simulators, so the host needs no Rust toolchain. The archive includes the license notices of the core's dependencies.
+
+The API requires **tvOS 26+**, **iOS 26+** or **macOS 26+**. The package itself builds back to tvOS and iOS 13 and macOS 10.15, so apps that support older systems can depend on it and check `#available` before using it. iPhone and iPad builds link but are untested. The package offers three products:
 
 | Product | Contents |
 |---|---|
@@ -131,7 +133,7 @@ Release tags download the Rust core as a checksummed XCFramework for Apple Silic
 The `main` branch and local checkouts build the Rust core themselves. Requires Apple Silicon, Xcode with SDK 26 or newer, and stable Rust.
 
 ```sh
-./scripts/build-core.sh   # Rust core as an XCFramework: Mac, Apple TV and Apple TV simulator
+./scripts/build-core.sh   # Rust core as an XCFramework: Mac, Apple TV, iPhone and iPad, and simulators
 swift build -j 1
 swift test -j 1
 ```

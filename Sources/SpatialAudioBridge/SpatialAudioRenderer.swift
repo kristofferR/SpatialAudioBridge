@@ -16,6 +16,7 @@ import AVFoundation
 /// The host owns the synchronizer's rate and time. Releasing the renderer removes it from the
 /// synchronizer. Native Atmos output also needs `AtmosOutputActivator` from SpatialAudioPlayback,
 /// attached to the same synchronizer.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public actor SpatialAudioRenderer {
     /// Joins the host's synchronizer, which controls its rate and time.
     private let audioRenderer = AVSampleBufferAudioRenderer()

@@ -5,12 +5,14 @@ import AudioToolbox
 
 /// AVAssetWriter permits cancellation while its asynchronous finish is pending.
 /// Only that operation is shared with the task's cancellation handler.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class WriterCancellation: @unchecked Sendable {
     private let writer: AVAssetWriter
     init(_ writer: AVAssetWriter) { self.writer = writer }
     func cancel() { writer.cancelWriting() }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
     let handler: @Sendable (APACSegment) throws -> Void
     private let lock = NSLock()
@@ -59,6 +61,7 @@ private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked
 }
 
 /// Streaming, bounded conversion of one continuous demuxed track. Create a new session after a seek.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public actor SpatialAudioTranscoder {
     private let decoder: Decoder
     private let configuration: APACConfiguration
@@ -344,6 +347,7 @@ public actor SpatialAudioTranscoder {
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 extension APACConfiguration {
     /// The content source and dynamic-range profile for the chosen encoding mode.
     var contentSource: AVAudioContentSource { liveEncoding ? .appleAV_Spatial_Live : .appleAV_Spatial_Offline }

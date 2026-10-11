@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import SpatialAudioBridge
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class SegmentCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var segments: [APACSegment] = []
@@ -12,21 +13,25 @@ private final class SegmentCollector: @unchecked Sendable {
 
 @Suite(.serialized)
 struct FixtureTests {
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_TRUEHD_FIXTURE"] != nil))
     func realAtmosProducesAPACAndSampleAccurateDuration() async throws {
         try await validateFile(variable: "SAB_TRUEHD_FIXTURE", codec: .trueHDAtmos)
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_DTSX_FIXTURE"] != nil))
     func realDTSXProducesAPACAndSampleAccurateDuration() async throws {
         try await validateFile(variable: "SAB_DTSX_FIXTURE", codec: .dtsX)
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_DTSX_ALTERNATE_FIXTURE"] != nil))
     func realAlternateDTSXProducesAPACAndSampleAccurateDuration() async throws {
         try await validateFile(variable: "SAB_DTSX_ALTERNATE_FIXTURE", codec: .dtsX)
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     private func validateFile(variable: String, codec: SpatialAudioCodec) async throws {
         let input = URL(fileURLWithPath: ProcessInfo.processInfo.environment[variable]!)
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("sab-\(UUID().uuidString).mp4")
@@ -78,6 +83,7 @@ struct FixtureTests {
         #expect(heightEnergy > 0)
     }
 
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_TRUEHD_FIXTURE"] != nil))
     func fragmentsHaveInitializationAndContinuousTimedAudio() async throws {
         for startTime in [CMTime.zero, CMTime(value: 2, timescale: 1)] {

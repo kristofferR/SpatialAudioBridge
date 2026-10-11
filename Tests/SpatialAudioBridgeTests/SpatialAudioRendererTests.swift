@@ -4,6 +4,7 @@ import Testing
 @testable import SpatialAudioBridge
 
 /// Decodes APAC packets with Core Audio into interleaved Float32.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func decode(_ packets: [Data], format: CMAudioFormatDescription, channels: Int) throws -> [Float] {
     var source = CMAudioFormatDescriptionGetStreamBasicDescription(format)!.pointee
     var destination = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
@@ -55,6 +56,7 @@ private func decode(_ packets: [Data], format: CMAudioFormatDescription, channel
     return output
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func encoderKeepsEveryChannelInPlaceAndReportsItsPriming() throws {
     let encoder = try APACEncoder(configuration: APACConfiguration(layout: .nineOneSix))
     let channels = 16, frames = 48_000
@@ -86,6 +88,7 @@ private func decode(_ packets: [Data], format: CMAudioFormatDescription, channel
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil))
 func rendererPlaysMatroskaAudioFromASeek() async throws {
     let file = try await MatroskaFile.open(FileByteSource(url: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"]!)))
@@ -108,6 +111,7 @@ func rendererPlaysMatroskaAudioFromASeek() async throws {
     synchronizer.rate = 0
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func rendererRejectsInvalidSettings() {
     #expect(throws: SpatialAudioError.self) {
         try SpatialAudioRenderer(codec: .trueHDAtmos, configuration: APACConfiguration(bitRate: -1),
@@ -115,6 +119,7 @@ func rendererPlaysMatroskaAudioFromASeek() async throws {
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func rendererRefusesInputAfterAFailureUntilANewTimeline() async throws {
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
     try await renderer.begin(at: .zero)
