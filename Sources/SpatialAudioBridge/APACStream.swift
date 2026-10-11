@@ -380,39 +380,57 @@ actor StreamEngine {
     /// before it, so a helper starts one segment `early` and discards that fragment.
     private func launch(from index: Int, early: Bool) -> Run {
         let start = CMTime(value: Int64(index - (early ? 1 : 0)) * segmentFrames + priming, timescale: 48_000)
+        // The playlist follows the container, which may outlast the track, so a run that reaches the
+        // track's end pads with silence to the playlist's. A run in a last segment shorter than the
+        // priming still needs one frame to write its fragment.
+        let end = CMTime(value: max(totalFrames, start.value + 1), timescale: 48_000)
         let (file, track, codec, configuration, store, segmentFrames) =
             (self.file, self.track, self.codec, self.configuration, self.store, self.segmentFrames)
         let id = UUID()
         store.begin(run: id, first: index)
         let task = Task.detached { [weak self] in
             do {
-                var transcoder: SpatialAudioTranscoder?
-                var handedOver = false
+                func transcoder(from inputStart: CMTime?) throws -> SpatialAudioTranscoder {
+                    var settings = configuration
+                    settings.startTime = start
+                    settings.inputStartTime = inputStart
+                    return try SpatialAudioTranscoder(codec: codec, destination: .segments(
+                        syncPeriodsPerSegment: Self.periods,
+                        onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
+                        configuration: settings)
+                }
+                var session: SpatialAudioTranscoder?
+                var reachesEnd = true
                 for try await packet in file.packets(of: track, from: start) {
                     try Task.checkCancellation()
-                    if transcoder == nil {
-                        var settings = configuration
-                        settings.startTime = start
-                        settings.inputStartTime = packet.time
-                        transcoder = try SpatialAudioTranscoder(codec: codec, destination: .segments(
-                            syncPeriodsPerSegment: Self.periods,
-                            onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
-                            configuration: settings)
-                    }
+                    if session == nil { session = try transcoder(from: packet.time) }
                     // A gap or reset in the timestamps fails the run; every run reaching it would fail
                     // again, so the stream ends and the host falls back.
-                    try await transcoder?.append(packet.data, time: packet.time)
+                    try await session?.append(packet.data, time: packet.time)
                     // The engine is gone once its stream is released; stop converting.
-                    guard let self else { break }
+                    guard let self else { reachesEnd = false; break }
                     if await self.handOver(from: id) {
-                        handedOver = true
+                        reachesEnd = false
                         break
                     }
                     await self.paceRun(id)
                 }
                 // Finishing a run that handed over would flush a partial fragment where the
                 // helper's full one belongs.
-                if handedOver { await transcoder?.cancel() } else if let transcoder { _ = try await transcoder.finish() }
+                if reachesEnd {
+                    // A run started past the track's end has no packets and only pads. An empty
+                    // track has none anywhere, so it fails instead of playing silence.
+                    if session == nil {
+                        var hasAudio = false
+                        for try await _ in file.packets(of: track) { hasAudio = true; break }
+                        guard hasAudio else { throw SpatialAudioError.source("The track has no audio") }
+                    }
+                    _ = try await (session ?? transcoder(from: nil)).finish(paddingTo: end, pacing: { [weak self] in
+                        await self?.paceRun(id)
+                    })
+                } else {
+                    await session?.cancel()
+                }
                 store.end(run: id, failure: nil)
             } catch is CancellationError {
                 store.end(run: id, failure: nil)

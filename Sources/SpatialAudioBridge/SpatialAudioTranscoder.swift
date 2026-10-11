@@ -81,6 +81,8 @@ public actor SpatialAudioTranscoder {
     /// The latest packet time passed to `append`, and how many packets have shared it.
     private var packetTime: CMTime?
     private var laced = 0
+    /// Whether any input was appended, so the decoder has a stream to flush.
+    private var hasInput = false
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
@@ -107,6 +109,7 @@ public actor SpatialAudioTranscoder {
     public func append(_ data: Data, time: CMTime? = nil) async throws {
         try beginOperation()
         defer { busy = false }
+        hasInput = true
         do {
             if let time { try follow(time) }
             var offset = 0
@@ -122,14 +125,33 @@ public actor SpatialAudioTranscoder {
         } catch { fail(); throw error }
     }
 
-    /// Flushes the decoder and encoder and completes the file or final segment.
-    public func finish() async throws -> APACConversionReport {
+    /// Flushes the decoder and encoder and completes the file or final segment. Output that would
+    /// end before the presentation time `end` is padded with silence up to it, for example to fill
+    /// a playlist that follows a container whose video outlasts the audio.
+    public func finish(paddingTo end: CMTime? = nil) async throws -> APACConversionReport {
+        try await finish(paddingTo: end, pacing: nil)
+    }
+
+    /// `pacing` runs after each block of padding, so a stream can hold a long silent tail at its lookahead.
+    func finish(paddingTo end: CMTime?, pacing: (@Sendable () async -> Void)?) async throws -> APACConversionReport {
         try beginOperation()
         defer { busy = false }
         do {
             try checkActive()
-            let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
-            for block in blocks { try await accumulate(block) }
+            // A session without input, such as one started past the end of its track, only pads.
+            if hasInput {
+                let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
+                for block in blocks { try await accumulate(block) }
+            }
+            if let end {
+                let span = CMTimeSubtract(end, configuration.startTime).seconds
+                guard span.isFinite, span < 1e9 else { throw SpatialAudioError.invalidConfiguration("Invalid end time") }
+                // A session that decoded nothing pads at the only supported rate.
+                if pendingRate == 0 { pendingRate = 48_000 }
+                let total = Int((span * Double(pendingRate)).rounded())
+                try await appendSilence(frames: total - Int(frames) - pendingPCM.count / configuration.layout.channelCount,
+                                        rate: pendingRate, pacing: pacing)
+            }
             if !pendingPCM.isEmpty {
                 try await encode(pendingPCM[...], rate: pendingRate)
                 pendingPCM.removeAll()
@@ -209,15 +231,8 @@ public actor SpatialAudioTranscoder {
         if discarding == nil {
             let leading = configuration.leadingFrames(rate: block.sampleRate)
             discarding = max(leading, 0)
-            // A source starting after startTime is padded so its timestamps stay aligned, one
-            // block at a time so a long gap does not hold all of its silence in memory.
-            var silence = max(-leading, 0) * block.channels
-            while silence > 0 {
-                let count = min(silence, 1024 * block.channels)
-                pendingPCM.append(contentsOf: repeatElement(0, count: count))
-                silence -= count
-                try await encodeFullBlocks(rate: block.sampleRate)
-            }
+            // A source starting after startTime is padded so its timestamps stay aligned.
+            try await appendSilence(frames: -leading, rate: block.sampleRate)
         }
         if let remaining = discarding, remaining > 0 {
             let dropped = min(remaining, block.frames)
@@ -226,6 +241,20 @@ public actor SpatialAudioTranscoder {
         }
         pendingPCM.append(contentsOf: samples)
         try await encodeFullBlocks(rate: block.sampleRate)
+    }
+
+    /// Appends `count` frames of silence, if positive, one block at a time so a long gap does not
+    /// hold all of it in memory.
+    private func appendSilence(frames count: Int, rate: Int, pacing: (@Sendable () async -> Void)? = nil) async throws {
+        let channels = configuration.layout.channelCount
+        var silence = max(count, 0) * channels
+        while silence > 0 {
+            let samples = min(silence, 1024 * channels)
+            pendingPCM.append(contentsOf: repeatElement(0, count: samples))
+            silence -= samples
+            try await encodeFullBlocks(rate: rate)
+            await pacing?()
+        }
     }
 
     /// Encodes every complete 1024-frame block of pending PCM.

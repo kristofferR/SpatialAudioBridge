@@ -89,6 +89,25 @@ import Testing
     await #expect(throws: SpatialAudioError.self) { try await transcoder.append(Data([0])) }
 }
 
+/// The stream's playlist follows the container, which may outlast the audio track. A run that
+/// starts past the track's end decodes nothing and must still fill the remaining segments.
+@Test func finishPadsWithSilenceToTheEndOnTheGrid() async throws {
+    let priming = try APACConfiguration().encoderPrimingDuration().value
+    final class Fragments: @unchecked Sendable {
+        let lock = NSLock()
+        var timings: [[Int64]] = []
+    }
+    let fragments = Fragments()
+    let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .segments(onSegment: { segment in
+        guard let start = segment.startTime, let duration = segment.duration else { return }
+        let frames = [start, duration].map { CMTimeConvertScale($0, timescale: 48_000, method: .default).value }
+        fragments.lock.withLock { fragments.timings.append(frames) }
+    }), configuration: APACConfiguration(startTime: CMTime(value: 153_600 + priming, timescale: 48_000), liveEncoding: true))
+    let report = try await transcoder.finish(paddingTo: CMTime(value: 153_600 * 2 + 4_800, timescale: 48_000))
+    #expect(report.sampleFrames == 153_600 + 4_800 - priming)
+    #expect(fragments.lock.withLock { fragments.timings } == [[153_600, 153_600], [307_200, 4_800]])
+}
+
 /// HTTP/1.1 lets a client send its next request before the previous response arrives.
 @Test(.timeLimit(.minutes(1))) func loopbackServerAnswersPipelinedRequests() async throws {
     let server = try await LoopbackServer { path in .init(status: 200, body: Data(path.utf8)) }

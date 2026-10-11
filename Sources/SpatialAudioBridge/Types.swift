@@ -132,7 +132,7 @@ public enum APACDestination: Sendable {
 /// What a finished session converted.
 public struct APACConversionReport: Sendable {
     public let sampleRate: Int
-    /// Rendered source frames, excluding encoder priming.
+    /// Encoded frames, including any silence padding and excluding encoder priming.
     public let sampleFrames: Int64
     public let layout: SpatialAudioLayout
     /// The largest absolute sample before encoding; above 1 exceeds full scale.
