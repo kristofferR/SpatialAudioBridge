@@ -43,7 +43,7 @@ Each packet's timestamp is shifted back by the encoder priming, so decoded audio
 
 ## Passthrough output
 
-Players such as mpv and VLC never hand the app TrueHD or DTS packets, but their passthrough audio outputs deliver the compressed stream as IEC 61937 bursts, the same data an S/PDIF or HDMI bitstream carries. `IEC61937Unpacker` recovers the stream from them: TrueHD from MAT frames and DTS-HD from type IV bursts, in either 16-bit byte order, with bursts split anywhere and filler such as the zeros a paused player writes skipped. The player's FFmpeg needs its `spdif` muxer, which mpv's passthrough creates on the first packet: without it, mpv drops the audio track rather than falling back to PCM. Builds configured with `--disable-muxers` need `--enable-muxer=spdif`.
+Players such as mpv and VLC never hand the app TrueHD or DTS packets, but their passthrough audio outputs deliver the compressed stream as IEC 61937 bursts, the same data an S/PDIF or HDMI bitstream carries. `IEC61937Unpacker` recovers the stream from them: TrueHD from MAT frames and DTS-HD from type IV bursts, in either 16-bit byte order, with bursts split anywhere and filler such as the zeros a paused player writes skipped.
 
 ```swift
 var unpacker = IEC61937Unpacker()          // a new one for every timeline
@@ -54,6 +54,13 @@ if !stream.isEmpty { try await renderer.enqueue(stream, time: firstTime + unpack
 ```
 
 After a seek, or when attaching to a running output, the bursts may resume between TrueHD major syncs, where decoding cannot start, or even inside an access unit. The unpacker drops the data up to the first major sync and adds its duration to `skippedDuration`, measured by its share of the 20 ms MAT frames and so accurate to about one access unit (0.8 ms). Adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
+
+### mpv
+
+An mpv host adds an audio output of its own that feeds the renderer, listed before its usual output (`ao=<own output>,audiounit`), and passes only these codecs through (`audio-spdif=truehd,dts-hd`). The output starts a new timeline with a new unpacker whenever mpv (re)starts it, and refuses other formats, such as DTS core alone, so mpv uses its usual output for them.
+
+- mpv's passthrough creates FFmpeg's `spdif` muxer on the first packet. Without it, mpv drops the audio track instead of falling back to PCM, so FFmpeg builds configured with `--disable-muxers` need `--enable-muxer=spdif`.
+- When the library refuses a track, such as DTS-HD MA without DTS:X, do not report a failed output to mpv: its reopen after a failed passthrough output never reached PCM on tvOS 27.2. Instead, on the player's mpv thread rather than the audio output's, remove that codec from `audio-spdif`, then set `aid` to `no` and back to the same track. mpv rebuilds the decoder and output as for a track switch and decodes to PCM. Restore the full `audio-spdif` before the next `loadfile`.
 
 ## Status and errors
 
