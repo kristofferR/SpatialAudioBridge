@@ -56,26 +56,32 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
     let units = (0..<300).map { unit(words: 100 + $0 * 7 % 900, majorSync: $0 % 16 == 0, seed: $0) }
     // The end of a unit from before the stream started, as when attaching midstream.
     let continuation = [UInt8](repeating: 0xAB, count: 300)
-    for (littleEndian, lead) in [(true, [UInt8]()), (false, continuation)] {
-        let (output, unpacker) = try unpackInChunks(matBursts(leading + units, littleEndian: littleEndian, lead: lead))
+    // The tail of a burst from before the unpacker, timed at the 3,072,000-byte/s carrier.
+    let partialBurst = [UInt8](repeating: 0x55, count: 1_000)
+    for (littleEndian, lead, before) in [(true, [UInt8](), [UInt8]()), (false, continuation, partialBurst)] {
+        let (output, unpacker) = try unpackInChunks(before + matBursts(leading + units, littleEndian: littleEndian, lead: lead))
         #expect(output == Data(units.joined()))
         // Skipped data counts by its share of the 61376 unit bytes in each 20 ms MAT frame; each leading unit
         // takes 240 bytes and 4 of padding.
-        #expect(unpacker.skippedDuration == CMTime(value: Int64(lead.count + 3 * 244), timescale: 61_376 * 50))
+        let skipped = CMTimeAdd(CMTime(value: Int64(before.count), timescale: 3_072_000),
+                                CMTime(value: Int64(lead.count + 3 * 244), timescale: 61_376 * 50))
+        #expect(unpacker.skippedDuration == skipped)
     }
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
 @Test func dtsFramesComeOutOfTypeIVBursts() throws {
-    let frames = (0..<5).map { index in [0x7F, 0xFE, 0x80, 0x01] + [UInt8](repeating: UInt8(index), count: 2_376) }
+    // Core headers of 512-sample frames, as at 48 kHz.
+    let frames = (0..<5).map { index in [0x7F, 0xFE, 0x80, 0x01, 0xFC, 0x3C] + [UInt8](repeating: UInt8(index), count: 2_374) }
     for littleEndian in [true, false] {
-        let bursts = frames.flatMap { frame in
+        let bursts = [UInt8](repeating: 0, count: 4_096) + frames.flatMap { frame in
             burst(type: 0x0411, payload: [0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE, UInt8(frame.count >> 8), UInt8(frame.count & 0xFF)] + frame,
                   period: 32_768, littleEndian: littleEndian)
         }
         let (output, unpacker) = try unpackInChunks(bursts)
         #expect(output == Data(frames.joined()))
-        #expect(unpacker.skippedDuration == .zero)
+        // Subtype 4: a 32768-byte period per 512-sample frame, 3,072,000 bytes/s.
+        #expect(unpacker.skippedDuration == CMTime(value: 4_096, timescale: 3_072_000))
     }
     // FFmpeg swaps a little-endian DTS source itself, so the wrapper may arrive in the other byte order.
     var swapped = [0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE, UInt8(frames[0].count >> 8), UInt8(frames[0].count & 0xFF)] + frames[0]
@@ -103,6 +109,13 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
         _ = try truncated.unpack(Data((bursts + [0x72, 0xF8, 0x1F, 0x4E]).prefix(prefix)))
         #expect(throws: SpatialAudioError.self) { try truncated.finish() }
     }
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func matFramesWithoutAMajorSyncAreRejected() {
+    let units = (0..<160).map { unit(words: 2_000, majorSync: false, seed: $0) }
+    var unpacker = IEC61937Unpacker()
+    #expect(throws: SpatialAudioError.self) { try unpacker.unpack(Data(matBursts(units, littleEndian: true))) }
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)

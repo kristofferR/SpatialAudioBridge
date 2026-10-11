@@ -18,14 +18,18 @@ import Foundation
 /// with `begin(at:)` and a new unpacker at the next burst.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct IEC61937Unpacker: Sendable {
-    /// The duration of the TrueHD data dropped before the first major sync, where decoding can start,
-    /// measured by its share of the 20 ms MAT frames and so accurate to about one access unit. Add it to
-    /// the time of the first buffer, so audio keeps its place on the timeline.
+    /// The duration of the input dropped before the first point where decoding can start: bytes before
+    /// the first burst, timed at the carrier's rate, and TrueHD data before the first major sync, timed by
+    /// its share of the 20 ms MAT frames, both accurate to about one access unit. Add it to the time of
+    /// the first buffer, so audio keeps its place on the timeline.
     public private(set) var skippedDuration = CMTime.zero
 
     private var pending: [UInt8] = []
     private var trueHD: [UInt8] = []
     private var synced = false
+    /// Carrier bytes before the first burst, which are timed once its rate is known.
+    private var leading: Int? = 0
+    private var unsyncedFrames = 0
 
     public init() {}
 
@@ -51,11 +55,24 @@ public struct IEC61937Unpacker: Sendable {
             if littleEndian {
                 for index in stride(from: 0, to: payload.count - 1, by: 2) { payload.swapAt(index, index + 1) }
             }
+            if let bytes = leading.map({ $0 + start }) {
+                if type == Self.null {
+                    leading = bytes + 8 + length
+                    continue
+                }
+                let rate = type == Self.mat ? Self.highBitRate : Self.dtsCarrierRate(info: info, burst: payload)
+                skippedDuration = CMTimeAdd(skippedDuration, CMTime(value: Int64(bytes), timescale: Int32(rate)))
+                leading = nil
+            }
             if type == Self.mat { output += try trueHDUnits(inMAT: payload) }
             if type == Self.dtsTypeIV { output += try dtsFrame(inTypeIV: payload) }
         }
-        // Keep a possible partial preamble; everything before it is filler.
-        if Self.preamble(in: pending) == nil, pending.count > 3 { pending.removeFirst(pending.count - 3) }
+        // Keep a possible partial preamble; everything before it is filler, or the rest of a burst that
+        // started before this unpacker.
+        if Self.preamble(in: pending) == nil, pending.count > 3 {
+            leading = leading.map { $0 + pending.count - 3 }
+            pending.removeFirst(pending.count - 3)
+        }
         return Data(output)
     }
 
@@ -72,6 +89,18 @@ public struct IEC61937Unpacker: Sendable {
     }
 
     private static let null = 0x00, pause = 0x03, mat = 0x16, dtsTypeIV = 0x11
+    /// MAT, and DTS-HD master audio as mpv sends it, use the 8-channel 192 kHz carrier: 3,072,000 bytes/s.
+    private static let highBitRate = 192_000 * 8 * 2
+
+    /// Bytes per second of a type IV carrier: its burst period, (512 << subtype) frames of 4 bytes, spans
+    /// one DTS frame, whose length the core header gives in 32-sample blocks.
+    private static func dtsCarrierRate(info: Int, burst: [UInt8]) -> Int {
+        let period = (512 << ((info >> 8) & 0x07)) * 4
+        let frame = burst.count >= 18 && burst[12..<16].elementsEqual([0x7F, 0xFE, 0x80, 0x01]) ? Array(burst[16..<18]) : nil
+        guard let frame else { return highBitRate }
+        let samples = ((Int(frame[0] & 0x01) << 6 | Int(frame[1] >> 2)) + 1) * 32
+        return period * 48_000 / samples
+    }
 
     private static func word(_ bytes: [UInt8], at index: Int, _ littleEndian: Bool) -> Int {
         let first = Int(bytes[index]), second = Int(bytes[index + 1])
@@ -103,6 +132,11 @@ public struct IEC61937Unpacker: Sendable {
             // The first bytes may continue a unit from an earlier frame, so length words cannot be trusted
             // until a major-sync unit, which starts 4 bytes before its signature.
             guard let signature = Self.firstMajorSync(in: trueHD) else {
+                // TrueHD repeats major syncs at least every 128 units (107 ms); 200 ms without one is not TrueHD.
+                unsyncedFrames += 1
+                guard unsyncedFrames < 10 else {
+                    throw SpatialAudioError.decoding("No TrueHD major sync in 200 ms of IEC 61937 MAT frames")
+                }
                 drop(max(0, trueHD.count - 7))
                 return []
             }
