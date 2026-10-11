@@ -73,8 +73,9 @@ The stream listens on `127.0.0.1` at a random port, under a random path, and ser
 | `master.m3u8` | The video master with the APAC rendition as every variant's audio. Only when `videoMaster` was given. |
 | `audio.m3u8` | A VOD playlist of 3.2-second segments covering the whole file. Use it for audio-only playback. |
 | `init.mp4`, `seg<N>.m4s` | One shared initialization segment and the media segments, converted on request. |
+| `subtitles/<N>.m3u8`, `subtitles/<N>/<M>.vtt` | The master's subtitle renditions, fetched from the server on request with `videoHeaders`. |
 
-The master rewrite removes the server's audio renditions, replaces audio codecs in each variant's `CODECS` with `apac.31.03` (or `apac.31.04` for 9.1.6), adds the APAC bit rate to `BANDWIDTH`, and makes every URI absolute, so video segments still load directly from the server. Subtitle renditions are kept. The server's video variants may still carry muxed audio; `AVPlayer` plays the APAC rendition instead.
+The master rewrite removes the server's audio renditions, replaces audio codecs in each variant's `CODECS` with `apac.31.03` (or `apac.31.04` for 9.1.6), adds the APAC bit rate to `BANDWIDTH`, and makes every URI absolute, so video segments still load directly from the server. Subtitle renditions are kept but served through the stream, which sets the MPEG-TS time in each WebVTT segment's `X-TIMESTAMP-MAP` to 0. Their cues then count from the start of the zero-based timeline that APAC and stream-copy fMP4 video share; Jellyfin maps them for its MPEG-TS output instead, which showed every cue 10 s late. The server's video variants may still carry muxed audio; `AVPlayer` plays the APAC rendition instead.
 
 ## Seeking and synchronization
 

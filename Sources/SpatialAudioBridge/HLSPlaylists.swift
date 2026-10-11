@@ -31,9 +31,11 @@ enum HLSPlaylists {
     /// Rewrites a video multivariant playlist so every variant plays the APAC rendition: other audio
     /// renditions are removed, audio codecs in CODECS are replaced, bandwidth includes the APAC
     /// bitrate and URIs become absolute, because the result is served from the loopback address.
-    /// Variants whose URI `includesVariant` rejects are left out.
+    /// Variants whose URI `includesVariant` rejects are left out, and `subtitleURI` chooses each
+    /// subtitle rendition's URI from its absolute upstream URL.
     static func master(rewriting upstream: String, baseURL: URL, rendition: String, codec: String, bitRate: Int,
-                       includesVariant: (URL) -> Bool = { _ in true }) -> String {
+                       includesVariant: (URL) -> Bool = { _ in true },
+                       subtitleURI: (URL) -> String = { $0.absoluteString }) -> String {
         var output: [String] = []
         var variant: String?
         for raw in upstream.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
@@ -46,8 +48,12 @@ enum HLSPlaylists {
                 continue
             }
             if line.hasPrefix("#EXT-X-MEDIA:") {
-                guard attribute("TYPE", in: line) != "AUDIO" else { continue }
-                output.append(replacingURI(in: line, baseURL))
+                switch attribute("TYPE", in: line) {
+                case "AUDIO": continue
+                case "SUBTITLES":
+                    output.append(replacingURI(in: line) { URL(string: $0, relativeTo: baseURL).map(subtitleURI) ?? $0 })
+                default: output.append(replacingURI(in: line, baseURL))
+                }
             } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 var attributes = String(line.dropFirst("#EXT-X-STREAM-INF:".count))
                 // CODECS must list every format once present, so a variant without it keeps none.
@@ -72,6 +78,33 @@ enum HLSPlaylists {
             if line == "#EXTM3U" { output.append(rendition) }
         }
         return output.joined(separator: "\n") + "\n"
+    }
+
+    /// Rewrites a subtitle media playlist so its segments load as `<rendition>/<index>.vtt` beside it,
+    /// returning their absolute upstream URLs in order.
+    static func subtitles(rewriting upstream: String, baseURL: URL, rendition: Int) -> (text: String, segments: [URL]) {
+        var output: [String] = []
+        var segments: [URL] = []
+        for raw in upstream.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let line = String(raw).trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if !line.hasPrefix("#"), let url = URL(string: line, relativeTo: baseURL)?.absoluteURL {
+                output.append("\(rendition)/\(segments.count).vtt")
+                segments.append(url)
+            } else {
+                output.append(replacingURI(in: line, baseURL))
+            }
+        }
+        return (output.joined(separator: "\n") + "\n", segments)
+    }
+
+    /// Sets the MPEG-TS time in a WebVTT segment's `X-TIMESTAMP-MAP` to 0, so cues count from the start
+    /// of the timeline that APAC and stream-copy fMP4 video share. Jellyfin writes `MPEGTS:900000` for
+    /// its MPEG-TS output, which would show every cue 10 s late against fMP4 video.
+    static func zeroingTimestampMap(in segment: String) -> String {
+        segment.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            line.hasPrefix("X-TIMESTAMP-MAP=") ? String(line.replacing(/MPEGTS:\d+/, with: "MPEGTS:0")) : String(line)
+        }.joined(separator: "\n")
     }
 
     static func isAudioCodec(_ codec: String) -> Bool {
@@ -111,9 +144,13 @@ enum HLSPlaylists {
     }
 
     private static func replacingURI(in line: String, _ baseURL: URL) -> String {
+        replacingURI(in: line) { absolute($0, baseURL) }
+    }
+
+    private static func replacingURI(in line: String, with transform: (String) -> String) -> String {
         guard let uri = attribute("URI", in: line), let range = attributeRange("URI", in: line) else { return line }
         var result = line
-        result.replaceSubrange(range, with: "\"\(absolute(uri, baseURL))\"")
+        result.replaceSubrange(range, with: "\"\(transform(uri))\"")
         return result
     }
 
