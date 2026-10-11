@@ -76,6 +76,20 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
+@Test func nullAndPauseBurstsAreSkippedAndTruncatedInputIsReported() throws {
+    let units = (0..<40).map { unit(words: 300, majorSync: $0 == 0, seed: $0) }
+    let bursts = matBursts(units, littleEndian: true)
+    // A pause burst (type 3, 32 bits of gap length) and a null burst before the TrueHD.
+    let gaps = burst(type: 0x03, payload: [0, 0, 0, 1], period: 4_096, littleEndian: true) + burst(type: 0x00, payload: [], period: 64, littleEndian: true)
+    var unpacker = IEC61937Unpacker()
+    #expect(try unpacker.unpack(Data(gaps + bursts)) == Data(units.joined()))
+    try unpacker.finish()
+    var truncated = IEC61937Unpacker()
+    _ = try truncated.unpack(Data(bursts.prefix(30_000)))
+    #expect(throws: SpatialAudioError.self) { try truncated.finish() }
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func otherBurstTypesAreRejected() {
     var unpacker = IEC61937Unpacker()
     // An AC-3 burst.

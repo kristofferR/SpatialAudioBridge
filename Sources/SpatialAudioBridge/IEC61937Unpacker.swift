@@ -13,7 +13,8 @@ import Foundation
 /// ```
 ///
 /// TrueHD arrives in MAT frames and DTS-HD as type IV bursts, in either 16-bit byte order. Bursts may be
-/// split anywhere, and bytes between bursts, such as the zeros a player writes while paused, are skipped.
+/// split anywhere. Bytes between bursts, such as the zeros a player writes while paused, and IEC 61937 null and
+/// pause bursts are skipped; a gap in the audio itself is a discontinuity that needs `begin(at:)`.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct IEC61937Unpacker: Sendable {
     /// The duration of the TrueHD access units dropped before the first major sync, where decoding can
@@ -35,7 +36,7 @@ public struct IEC61937Unpacker: Sendable {
             guard pending.count >= start + 8 else { break }
             let type = Self.word(pending, at: start + 4, littleEndian) & 0x1F
             let length = Self.word(pending, at: start + 6, littleEndian)
-            guard type == Self.mat || type == Self.dtsTypeIV else {
+            guard type == Self.mat || type == Self.dtsTypeIV || type == Self.null || type == Self.pause else {
                 throw SpatialAudioError.decoding("Unsupported IEC 61937 burst type \(type); only TrueHD (MAT) and DTS-HD (type IV) can be unpacked")
             }
             guard pending.count >= start + 8 + length else { break }
@@ -44,14 +45,26 @@ public struct IEC61937Unpacker: Sendable {
             if littleEndian {
                 for index in stride(from: 0, to: payload.count - 1, by: 2) { payload.swapAt(index, index + 1) }
             }
-            output += type == Self.mat ? try trueHDUnits(inMAT: payload) : try dtsFrame(inTypeIV: payload)
+            if type == Self.mat { output += try trueHDUnits(inMAT: payload) }
+            if type == Self.dtsTypeIV { output += try dtsFrame(inTypeIV: payload) }
         }
         // Keep a possible partial preamble; everything before it is filler.
         if Self.preamble(in: pending) == nil, pending.count > 3 { pending.removeFirst(pending.count - 3) }
         return Data(output)
     }
 
-    private static let mat = 0x16, dtsTypeIV = 0x11
+    /// Checks that the input ended on a whole burst and TrueHD access unit. Call it at the end of the source,
+    /// before the renderer's `endOfStream()`, not after a seek or stop.
+    public func finish() throws {
+        if Self.preamble(in: pending) != nil {
+            throw SpatialAudioError.decoding("The IEC 61937 input ends inside a burst")
+        }
+        if trueHD.contains(where: { $0 != 0 }) {
+            throw SpatialAudioError.decoding("The IEC 61937 input ends inside a TrueHD access unit")
+        }
+    }
+
+    private static let null = 0x00, pause = 0x03, mat = 0x16, dtsTypeIV = 0x11
 
     private static func word(_ bytes: [UInt8], at index: Int, _ littleEndian: Bool) -> Int {
         let first = Int(bytes[index]), second = Int(bytes[index + 1])
