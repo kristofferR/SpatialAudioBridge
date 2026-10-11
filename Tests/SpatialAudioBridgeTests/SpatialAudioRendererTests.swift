@@ -120,6 +120,18 @@ func rendererPlaysMatroskaAudioFromASeek() async throws {
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererMuteAndVolumeHoldAcrossTimelines() async throws {
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
+    await renderer.setMuted(true)
+    await renderer.setVolume(1.5)
+    try await renderer.begin(at: .zero)
+    #expect(await renderer.isMuted)
+    #expect(await renderer.volume == 1)
+    await renderer.setVolume(-1)
+    #expect(await renderer.volume == 0)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func rendererRefusesInputAfterAFailureUntilANewTimeline() async throws {
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
     try await renderer.begin(at: .zero)

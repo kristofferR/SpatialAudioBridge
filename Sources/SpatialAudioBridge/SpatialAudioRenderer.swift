@@ -42,6 +42,22 @@ public actor SpatialAudioRenderer {
     /// Whether the renderer is playing APAC, or failed to decode it.
     public var renderingStatus: AVQueuedSampleBufferRenderingStatus { audioRenderer.status }
 
+    /// Whether the output is muted. A passthrough host's own mute and volume never reach APAC.
+    public var isMuted: Bool { audioRenderer.isMuted }
+
+    /// The output volume, from 0 (silent) to 1 (full).
+    public var volume: Float { audioRenderer.volume }
+
+    /// Mutes or unmutes the output. It holds across timelines.
+    public func setMuted(_ muted: Bool) {
+        audioRenderer.isMuted = muted
+    }
+
+    /// Sets the output volume, clamped to 0...1. It holds across timelines.
+    public func setVolume(_ volume: Float) {
+        audioRenderer.volume = min(max(volume, 0), 1)
+    }
+
     /// Adds the APAC renderer to `synchronizer`. Layout, gain, bitrate and sync interval come from
     /// `configuration`; encoding is always live.
     public init(codec: SpatialAudioCodec, configuration: APACConfiguration = .init(),
