@@ -76,17 +76,22 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-@Test func nullAndPauseBurstsAreSkippedAndTruncatedInputIsReported() throws {
+@Test func nullBurstsAreSkippedAndPausesErrorsAndTruncationAreReported() throws {
     let units = (0..<40).map { unit(words: 300, majorSync: $0 == 0, seed: $0) }
     let bursts = matBursts(units, littleEndian: true)
-    // A pause burst (type 3, 32 bits of gap length) and a null burst before the TrueHD.
-    let gaps = burst(type: 0x03, payload: [0, 0, 0, 1], period: 4_096, littleEndian: true) + burst(type: 0x00, payload: [], period: 64, littleEndian: true)
     var unpacker = IEC61937Unpacker()
-    #expect(try unpacker.unpack(Data(gaps + bursts)) == Data(units.joined()))
+    #expect(try unpacker.unpack(Data(burst(type: 0x00, payload: [], period: 64, littleEndian: true) + bursts)) == Data(units.joined()))
     try unpacker.finish()
-    var truncated = IEC61937Unpacker()
-    _ = try truncated.unpack(Data(bursts.prefix(30_000)))
-    #expect(throws: SpatialAudioError.self) { try truncated.finish() }
+    // A pause burst marks a gap, and Pc bit 7 marks a damaged payload.
+    for type: UInt16 in [0x03, 0x96] {
+        var rejecting = IEC61937Unpacker()
+        #expect(throws: SpatialAudioError.self) { try rejecting.unpack(Data(burst(type: type, payload: [0, 0, 0, 1], period: 64, littleEndian: true))) }
+    }
+    for prefix in [30_000, bursts.count + 2] {
+        var truncated = IEC61937Unpacker()
+        _ = try truncated.unpack(Data((bursts + [0x72, 0xF8, 0x1F, 0x4E]).prefix(prefix)))
+        #expect(throws: SpatialAudioError.self) { try truncated.finish() }
+    }
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)

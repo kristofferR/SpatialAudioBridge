@@ -13,8 +13,9 @@ import Foundation
 /// ```
 ///
 /// TrueHD arrives in MAT frames and DTS-HD as type IV bursts, in either 16-bit byte order. Bursts may be
-/// split anywhere. Bytes between bursts, such as the zeros a player writes while paused, and IEC 61937 null and
-/// pause bursts are skipped; a gap in the audio itself is a discontinuity that needs `begin(at:)`.
+/// split anywhere. Bytes between bursts, such as the zeros a player writes while paused, and IEC 61937 null
+/// bursts are skipped. A pause burst marks a gap in the audio itself, so it throws: start a new timeline
+/// with `begin(at:)` and a new unpacker at the next burst.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct IEC61937Unpacker: Sendable {
     /// The duration of the TrueHD access units dropped before the first major sync, where decoding can
@@ -34,9 +35,13 @@ public struct IEC61937Unpacker: Sendable {
         var output: [UInt8] = []
         while let (start, littleEndian) = Self.preamble(in: pending) {
             guard pending.count >= start + 8 else { break }
-            let type = Self.word(pending, at: start + 4, littleEndian) & 0x1F
+            let info = Self.word(pending, at: start + 4, littleEndian), type = info & 0x7F
             let length = Self.word(pending, at: start + 6, littleEndian)
-            guard type == Self.mat || type == Self.dtsTypeIV || type == Self.null || type == Self.pause else {
+            guard info & 0x80 == 0 else { throw SpatialAudioError.decoding("An IEC 61937 burst is marked as containing errors") }
+            guard type != Self.pause else {
+                throw SpatialAudioError.decoding("An IEC 61937 pause burst marks a gap in the audio; start a new timeline")
+            }
+            guard type == Self.mat || type == Self.dtsTypeIV || type == Self.null else {
                 throw SpatialAudioError.decoding("Unsupported IEC 61937 burst type \(type); only TrueHD (MAT) and DTS-HD (type IV) can be unpacked")
             }
             guard pending.count >= start + 8 + length else { break }
@@ -56,7 +61,8 @@ public struct IEC61937Unpacker: Sendable {
     /// Checks that the input ended on a whole burst and TrueHD access unit. Call it at the end of the source,
     /// before the renderer's `endOfStream()`, not after a seek or stop.
     public func finish() throws {
-        if Self.preamble(in: pending) != nil {
+        // Filler is zeros, so anything else left over is the start of a burst.
+        if pending.contains(where: { $0 != 0 }) {
             throw SpatialAudioError.decoding("The IEC 61937 input ends inside a burst")
         }
         if trueHD.contains(where: { $0 != 0 }) {
