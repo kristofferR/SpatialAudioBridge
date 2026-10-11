@@ -82,6 +82,14 @@ public struct HTTPByteSource: MediaByteSource {
     }
 }
 
+/// URLSession's errors carry the request URL, which may hold a media server's key, and errors end
+/// up in logs. Keeps the code and description, so transient failures stay recognisable.
+@available(macOS 26, iOS 26, tvOS 26, *)
+func redactingURL(_ error: any Error) -> any Error {
+    guard let error = error as? URLError else { return error }
+    return URLError(error.code, userInfo: [NSLocalizedDescriptionKey: error.localizedDescription])
+}
+
 /// Collects one ranged response. A server that ignores the range answers 200 with the whole
 /// file, so the transfer is cancelled as soon as the status arrives instead of downloading it.
 @available(macOS 26, iOS 26, tvOS 26, *)
@@ -129,7 +137,7 @@ private final class RangedDownload: NSObject, URLSessionDataDelegate, @unchecked
             lock.withLock {
                 defer { self.continuation = nil }
                 if let failure { return (self.continuation, .failure(failure)) }
-                if let error { return (self.continuation, .failure(error)) }
+                if let error { return (self.continuation, .failure(redactingURL(error))) }
                 guard let response else { return (self.continuation, .failure(SpatialAudioError.source("No response from \(host)"))) }
                 return (self.continuation, .success((data, response)))
             }

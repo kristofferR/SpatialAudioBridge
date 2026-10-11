@@ -86,7 +86,8 @@ public final class APACStream: Sendable {
         if let videoMaster {
             var request = URLRequest(url: videoMaster)
             for (field, value) in videoHeaders { request.setValue(value, forHTTPHeaderField: field) }
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response): (Data, URLResponse)
+            do { (data, response) = try await URLSession.shared.data(for: request) } catch { throw redactingURL(error) }
             guard (response as? HTTPURLResponse)?.statusCode == 200, let text = String(data: data, encoding: .utf8),
                   text.hasPrefix("#EXTM3U") else {
                 throw SpatialAudioError.source("Could not load the video playlist")

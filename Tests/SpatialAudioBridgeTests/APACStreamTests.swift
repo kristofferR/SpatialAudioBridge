@@ -240,6 +240,18 @@ private func mediaSegment(_ index: Int) -> APACSegment {
     await #expect(throws: SpatialAudioError.self) { try await HTTPByteSource(url: URL(string: "\(base)/missing")!).read(0..<10) }
 }
 
+/// URLSession names the request URL in its errors, which may carry a media server's key, and the
+/// stream logs read failures publicly.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func httpSourceErrorsLeaveTheURLOut() async throws {
+    let server = try await LoopbackServer { _ in .notFound() }
+    let port = server.port
+    server.stop()
+    let url = URL(string: "http://127.0.0.1:\(port)/stream?ApiKey=secret-token")!
+    let error = await #expect(throws: URLError.self) { try await HTTPByteSource(url: url).read(0..<10) }
+    #expect(error.map { !String(describing: $0).contains("secret-token") } == true)
+}
+
 /// The base media decode time and sample count of a single-fragment segment.
 @available(macOS 26, iOS 26, tvOS 26, *)
 private func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames: Int) {
