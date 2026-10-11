@@ -37,6 +37,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Encoder input batching | Passing PCM to `AudioConverter` once a packet's worth is pending, instead of once per 40-frame TrueHD access unit, cut encoding CPU by about 20% with identical packets |
 | Conversion profile | In a macOS profile, Apple's APAC encoder was about 85% of conversion work. After moving PCM scaling to Accelerate, Debug and Release builds convert at the same speed |
 | Conversion speed by layout | On an Apple Silicon Mac, one conversion at a time, 21 minutes of TrueHD Atmos in eight files converted at 12.0× real time to 7.1.4 and 7.8× to 9.1.6 |
+| Release archive | Built from a worktree and from a fresh clone at a path with spaces on one Mac, the archives were byte-identical and their libraries recorded no local paths. A package using the archive as its binary target linked and called the core; SwiftPM kept the license notices beside the XCFramework |
 
 ### Sources and streaming
 
@@ -145,6 +146,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
+- A release archive rebuilt on another Mac, and hosts resolving a published release from GitHub.
 - Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta. The private current hardware format, which the AtmosAB output probe reads, did distinguish them.
