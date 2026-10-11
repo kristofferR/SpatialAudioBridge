@@ -82,7 +82,7 @@ public final class APACStream: Sendable {
                                   lookahead: max(1, options.lookahead), keptBehind: max(2, options.keptBehind),
                                   timeout: options.segmentTimeout)
         var master: String?
-        let subtitles = SubtitleProxy(headers: videoHeaders)
+        let subtitles = SubtitleProxy()
         if let videoMaster {
             var request = URLRequest(url: videoMaster)
             for (field, value) in videoHeaders { request.setValue(value, forHTTPHeaderField: field) }

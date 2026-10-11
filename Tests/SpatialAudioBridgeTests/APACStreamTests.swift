@@ -491,25 +491,23 @@ func liveEncodingEmitsSegmentsSoonAfterTheirInput() async throws {
     let upstream = try await LoopbackServer { path in
         switch path {
         case "/subs/subtitles.m3u8":
-            .init(status: 200, body: Data("#EXTM3U\n#EXT-X-TARGETDURATION:30\n#EXTINF:30.0,\nstream.vtt?StartPositionTicks=0\n#EXTINF:30.0,\nimsc.m4s\n#EXT-X-ENDLIST\n".utf8))
+            .init(status: 200, body: Data("#EXTM3U\n#EXT-X-TARGETDURATION:30\n#EXTINF:30.0,\nstream.vtt?StartPositionTicks=0\n#EXTINF:30.0,\nimsc.m4s\n#EXT-X-BYTERANGE:400@0\n#EXTINF:30.0,\nranged.vtt\n#EXT-X-ENDLIST\n".utf8))
         case "/subs/stream.vtt":
             .init(status: 200, body: Data("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:01:59.161 --> 00:02:01.000\nHello\n".utf8))
-        case "/subs/imsc.m4s": .init(status: 200, contentType: "video/mp4", body: Data([0, 0, 0, 8, 0xFF, 0xFE, 0x80, 0x01]))
         default: .notFound()
         }
     }
     defer { upstream.stop() }
-    let proxy = SubtitleProxy(headers: [:])
+    let proxy = SubtitleProxy()
     #expect(proxy.route(URL(string: "http://127.0.0.1:\(upstream.port)/subs/subtitles.m3u8")!) == "subtitles/0.m3u8")
     let playlist = String(decoding: try await proxy.respond(to: "0.m3u8").body, as: UTF8.self)
-    #expect(playlist.split(separator: "\n").filter { !$0.hasPrefix("#") } == ["0/0.vtt", "0/1.m4s"])
+    // Only whole WebVTT segments go through the proxy; IMSC1 and byte ranges load directly.
+    let server = "http://127.0.0.1:\(upstream.port)/subs"
+    #expect(playlist.split(separator: "\n").filter { !$0.hasPrefix("#") } == ["0/0.vtt", "\(server)/imsc.m4s", "\(server)/ranged.vtt"])
     let segment = String(decoding: try await proxy.respond(to: "0/0.vtt").body, as: UTF8.self)
     #expect(segment.contains("X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n"))
     #expect(segment.contains("00:01:59.161 --> 00:02:01.000\nHello"))
-    // An IMSC1 segment in fMP4 passes through byte for byte.
-    let imsc = try await proxy.respond(to: "0/1.m4s")
-    #expect(imsc.body == Data([0, 0, 0, 8, 0xFF, 0xFE, 0x80, 0x01]) && imsc.contentType == "video/mp4")
-    #expect(try await proxy.respond(to: "0/2.vtt").status == 404)
+    #expect(try await proxy.respond(to: "0/1.vtt").status == 404)
     #expect(try await proxy.respond(to: "1.m3u8").status == 404)
 }
 

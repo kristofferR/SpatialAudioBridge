@@ -80,20 +80,27 @@ enum HLSPlaylists {
         return output.joined(separator: "\n") + "\n"
     }
 
-    /// Rewrites a subtitle media playlist so its segments load as `<rendition>/<index>.<extension>` beside it,
-    /// returning their absolute upstream URLs in order.
+    /// Rewrites a subtitle media playlist so its whole `.vtt` segments load as `<rendition>/<index>.vtt`
+    /// beside it, returning their absolute upstream URLs in order. Every other URI, including byte-range
+    /// segments, initialization sections and other formats such as IMSC1, becomes absolute and loads directly.
     static func subtitles(rewriting upstream: String, baseURL: URL, rendition: Int) -> (text: String, segments: [URL]) {
         var output: [String] = []
         var segments: [URL] = []
+        var byteRange = false
         for raw in upstream.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
             let line = String(raw).trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
-            if !line.hasPrefix("#"), let url = URL(string: line, relativeTo: baseURL)?.absoluteURL {
-                output.append("\(rendition)/\(segments.count).\(url.pathExtension.isEmpty ? "vtt" : url.pathExtension)")
+            if line.hasPrefix("#") {
+                if line.hasPrefix("#EXT-X-BYTERANGE:") { byteRange = true }
+                output.append(replacingURI(in: line, baseURL))
+            } else if !byteRange, let url = URL(string: line, relativeTo: baseURL)?.absoluteURL,
+                      url.pathExtension.lowercased() == "vtt" {
+                output.append("\(rendition)/\(segments.count).vtt")
                 segments.append(url)
             } else {
-                output.append(replacingURI(in: line, baseURL))
+                output.append(absolute(line, baseURL))
             }
+            if !line.hasPrefix("#") { byteRange = false }
         }
         return (output.joined(separator: "\n") + "\n", segments)
     }

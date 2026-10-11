@@ -51,7 +51,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | `APACStream` pacing | Conversion holds at the lookahead while no requests arrive, then serves later segments without restarting; a request served from the cache does not hold back one waiting further ahead |
 | `APACStream` helper run | Played on from the first run's segment, the helper's first segment matches continuous conversion across the join, correlating above 0.99 over the 2048 frames a restart's priming would replace. Replaying `AVPlayer`'s 11 sequential requests after a jump on a busy Apple Silicon Mac: typically 1.4–1.7 s with the helper, 2.1–2.9 s without. On Apple TV, see the seek results below |
 | `APACStream` with `AVPlayer` | macOS `AVPlayer` plays the audio playlist and continues after an exact seek to 0:40 |
-| Playlist rewriting and loopback server | Video masters keep absolute URIs and I-frame and image playlists; subtitle renditions are served through the stream, with Jellyfin's WebVTT `X-TIMESTAMP-MAP` moved to MPEG-TS 0 and other maps and IMSC1 segments unchanged; the server answers GET, HEAD, byte ranges and unknown paths |
+| Playlist rewriting and loopback server | Video masters keep absolute URIs and I-frame and image playlists; subtitle renditions are served through the stream, with Jellyfin's WebVTT `X-TIMESTAMP-MAP` moved to MPEG-TS 0, other maps kept and IMSC1 and byte-range segments left on the server; the server answers GET, HEAD, byte ranges and unknown paths |
 | `SpatialAudioRenderer` | From a 20-second seek into the MKV fixture, macOS renders APAC and the synchronizer advances |
 
 ### Playback on Apple TV
