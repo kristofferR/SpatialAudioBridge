@@ -43,7 +43,7 @@ Each packet's timestamp is shifted back by the encoder priming, so decoded audio
 
 ## Passthrough output
 
-Players such as mpv and VLC never hand the app TrueHD or DTS packets, but their passthrough audio outputs deliver the compressed stream as IEC 61937 bursts, the same data an S/PDIF or HDMI bitstream carries. `IEC61937Unpacker` recovers the stream from them: TrueHD from MAT frames and DTS-HD from type IV bursts, in either 16-bit byte order, with bursts split anywhere and filler such as the zeros a paused player writes skipped.
+Players such as mpv and VLC never hand the app TrueHD or DTS packets, but their passthrough audio outputs deliver the compressed stream as IEC 61937 bursts, the same data an S/PDIF or HDMI bitstream carries. `IEC61937Unpacker` recovers the stream from them: TrueHD from MAT frames and DTS-HD from type IV bursts, in either 16-bit byte order, with bursts split anywhere and filler such as the zeros a paused player writes skipped. The player's FFmpeg needs its `spdif` muxer, which mpv's passthrough creates on the first packet: without it, mpv drops the audio track rather than falling back to PCM. Builds configured with `--disable-muxers` need `--enable-muxer=spdif`.
 
 ```swift
 var unpacker = IEC61937Unpacker()          // a new one for every timeline

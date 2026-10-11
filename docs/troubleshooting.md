@@ -6,7 +6,7 @@
 - With your own stream in `init(silentAtmosStream:)`, check that it signals Atmos: `ffprobe` should report `profile=Dolby Digital Plus + Dolby Atmos`. See [Atmos output](atmos-output.md#the-bundled-stream).
 - Check that the receiver shows Atmos for Atmos content in other Apple TV apps. The Apple TV sends the same Dolby MAT output for both.
 - In Apple TV settings, keep the audio format on Auto with Change Format off, and Dolby Atmos enabled.
-- Do not rely on `AVAudioSession` channel counts or spatial audio flags to detect Atmos; they did not distinguish it on tvOS 27.2.
+- Do not rely on `AVAudioSession` channel counts, spatial audio flags or the private hardware format to detect Atmos; on tvOS 27.2 none of them tracked the receiver's indicator.
 
 ## `APACStream.start` or a session throws
 
@@ -76,6 +76,10 @@ The Matroska reader seeks to the cue two seconds before the target, then reads f
 ## The loopback playlist does not load
 
 Allow local networking in App Transport Security (`NSAllowsLocalNetworking`), and media loads over plain HTTP if the server uses it (`NSAllowsArbitraryLoadsForMedia`).
+
+## The build fails after upgrading
+
+`… has been modified since the module file … was built`, followed by missing `sab_…` functions, means Xcode or SwiftPM reused the previous release's precompiled `SpatialAudioCore` module. Delete the `SpatialAudioCore-*.pcm` files in the build's module caches (in DerivedData, `SwiftExplicitPrecompiledModules` and `ModuleCache.noindex`; for SwiftPM, under `.build`), or clean the build.
 
 ## Media tests are skipped
 
