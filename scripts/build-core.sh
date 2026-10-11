@@ -3,6 +3,8 @@ set -euo pipefail
 TASK_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$TASK_ROOT/Rust/SpatialAudioCore/Cargo.toml"
 ARTIFACTS="$TASK_ROOT/BinaryArtifacts"
+# The headers sit in a folder named after the module: hosts copy every static XCFramework's headers
+# into one include folder, where a top-level module.modulemap collides with other libraries' maps.
 HEADERS="$TASK_ROOT/Rust/SpatialAudioCore/include"
 TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim)
 if [[ "${1:-}" == "--mac-only" ]]; then TARGETS=(aarch64-apple-darwin); fi
