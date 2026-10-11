@@ -106,6 +106,12 @@ import Testing
     let report = try await transcoder.finish(paddingTo: CMTime(value: 153_600 * 2 + 4_800, timescale: 48_000))
     #expect(report.sampleFrames == 153_600 + 4_800 - priming)
     #expect(fragments.lock.withLock { fragments.timings } == [[153_600, 153_600], [307_200, 4_800]])
+    // An end too far to count in frames fails instead of trapping.
+    let unbounded = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .segments(onSegment: { _ in }),
+                                               configuration: APACConfiguration(liveEncoding: true))
+    await #expect(throws: SpatialAudioError.self) {
+        try await unbounded.finish(paddingTo: CMTime(seconds: -1e12, preferredTimescale: 1))
+    }
 }
 
 /// HTTP/1.1 lets a client send its next request before the previous response arrives.

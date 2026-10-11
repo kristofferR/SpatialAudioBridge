@@ -81,7 +81,7 @@ public actor SpatialAudioTranscoder {
     /// The latest packet time passed to `append`, and how many packets have shared it.
     private var packetTime: CMTime?
     private var laced = 0
-    /// Whether any input was appended, so the decoder has a stream to flush.
+    /// Whether the decoder holds input to flush.
     private var hasInput = false
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
@@ -129,29 +129,12 @@ public actor SpatialAudioTranscoder {
     /// end before the presentation time `end` is padded with silence up to it, for example to fill
     /// a playlist that follows a container whose video outlasts the audio.
     public func finish(paddingTo end: CMTime? = nil) async throws -> APACConversionReport {
-        try await finish(paddingTo: end, pacing: nil)
-    }
-
-    /// `pacing` runs after each block of padding, so a stream can hold a long silent tail at its lookahead.
-    func finish(paddingTo end: CMTime?, pacing: (@Sendable () async -> Void)?) async throws -> APACConversionReport {
         try beginOperation()
         defer { busy = false }
         do {
             try checkActive()
-            // A session without input, such as one started past the end of its track, only pads.
-            if hasInput {
-                let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
-                for block in blocks { try await accumulate(block) }
-            }
-            if let end {
-                let span = CMTimeSubtract(end, configuration.startTime).seconds
-                guard span.isFinite, span < 1e9 else { throw SpatialAudioError.invalidConfiguration("Invalid end time") }
-                // A session that decoded nothing pads at the only supported rate.
-                if pendingRate == 0 { pendingRate = 48_000 }
-                let total = Int((span * Double(pendingRate)).rounded())
-                try await appendSilence(frames: total - Int(frames) - pendingPCM.count / configuration.layout.channelCount,
-                                        rate: pendingRate, pacing: pacing)
-            }
+            try await flush()
+            if let end { try await appendSilence(until: end) }
             if !pendingPCM.isEmpty {
                 try await encode(pendingPCM[...], rate: pendingRate)
                 pendingPCM.removeAll()
@@ -175,6 +158,18 @@ public actor SpatialAudioTranscoder {
             state = .finished
             return APACConversionReport(sampleRate: sampleRate, sampleFrames: frames,
                                         layout: configuration.layout, peakPCM: peak)
+        } catch { fail(); throw error }
+    }
+
+    /// Ends the input and pads the output with silence up to the presentation time `end`, so a
+    /// stream can pad a long silent tail a segment at a time before `finish`. Append nothing after.
+    func pad(to end: CMTime) async throws {
+        try beginOperation()
+        defer { busy = false }
+        do {
+            try checkActive()
+            try await flush()
+            try await appendSilence(until: end)
         } catch { fail(); throw error }
     }
 
@@ -243,9 +238,29 @@ public actor SpatialAudioTranscoder {
         try await encodeFullBlocks(rate: block.sampleRate)
     }
 
+    /// Decodes what the decoder still holds. A session without input, such as one started past
+    /// the end of its track, has nothing to flush and only pads.
+    private func flush() async throws {
+        guard hasInput else { return }
+        hasInput = false
+        let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
+        for block in blocks { try await accumulate(block) }
+    }
+
+    /// Appends silence until the output reaches the presentation time `end`.
+    private func appendSilence(until end: CMTime) async throws {
+        let span = CMTimeSubtract(end, configuration.startTime).seconds
+        guard span.isFinite, abs(span) < 1e9 else { throw SpatialAudioError.invalidConfiguration("Invalid end time") }
+        // A session that decoded nothing pads at the only supported rate.
+        if pendingRate == 0 { pendingRate = 48_000 }
+        let total = Int((span * Double(pendingRate)).rounded())
+        try await appendSilence(frames: total - Int(frames) - pendingPCM.count / configuration.layout.channelCount,
+                                rate: pendingRate)
+    }
+
     /// Appends `count` frames of silence, if positive, one block at a time so a long gap does not
     /// hold all of it in memory.
-    private func appendSilence(frames count: Int, rate: Int, pacing: (@Sendable () async -> Void)? = nil) async throws {
+    private func appendSilence(frames count: Int, rate: Int) async throws {
         let channels = configuration.layout.channelCount
         var silence = max(count, 0) * channels
         while silence > 0 {
@@ -253,7 +268,6 @@ public actor SpatialAudioTranscoder {
             pendingPCM.append(contentsOf: repeatElement(0, count: samples))
             silence -= samples
             try await encodeFullBlocks(rate: rate)
-            await pacing?()
         }
     }
 

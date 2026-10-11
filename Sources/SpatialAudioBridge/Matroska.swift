@@ -130,8 +130,18 @@ public struct MatroskaFile: Sendable {
     /// Frames of `track` starting at the last sync point at or before `time`, so decoding can begin
     /// there. Discard decoded audio before `time` to start exactly at it.
     public func packets(of track: MatroskaAudioTrack, from time: CMTime = .zero) -> MatroskaPackets {
-        MatroskaPackets(file: self, track: track, target: time)
+        MatroskaPackets(file: self, track: track, target: time, endGap: nil)
     }
+
+    /// Like `packets(of:from:)`, but the track ends where the clusters run `gap` past its latest
+    /// frame, or past `time` before the first, if it has no frames near the last cue and does not
+    /// start later. A track that stops before the video then ends without the rest of the file being read.
+    func packets(of track: MatroskaAudioTrack, from time: CMTime, endingAfter gap: CMTime) -> MatroskaPackets {
+        MatroskaPackets(file: self, track: track, target: time, endGap: gap)
+    }
+
+    /// `time` in timestamp-scale ticks.
+    func ticks(_ time: CMTime) -> Int64 { Int64((time.seconds * 1e9 / Double(timestampScale)).rounded()) }
 
     private static func audioTrack(_ entry: EBMLData) -> MatroskaAudioTrack? {
         guard entry.child(EBML.trackType)?.uint == 2, let number = entry.child(EBML.trackNumber)?.uint else { return nil }
@@ -173,9 +183,10 @@ public struct MatroskaPackets: AsyncSequence, Sendable {
     let file: MatroskaFile
     let track: MatroskaAudioTrack
     let target: CMTime
+    let endGap: CMTime?
 
     public func makeAsyncIterator() -> Iterator {
-        Iterator(state: PacketReader(file: file, track: track, target: target))
+        Iterator(state: PacketReader(file: file, track: track, target: target, endGap: endGap))
     }
 
     public struct Iterator: AsyncIteratorProtocol {
@@ -198,14 +209,22 @@ final class PacketReader {
     private var ready: [MatroskaPacket] = []
     private var clusterTime: Int64 = 0
     private var clusterEnd: Int64?
+    /// Ticks without a frame after which the track may have ended; nil reads to the end of the file.
+    private var endGap: Int64?
+    /// The latest frame's ticks, or the target before the first.
+    private var latest: Int64
+    private var sawFrame = false
+    private var ended = false
 
-    init(file: MatroskaFile, track: MatroskaAudioTrack, target: CMTime) {
+    init(file: MatroskaFile, track: MatroskaAudioTrack, target: CMTime, endGap: CMTime?) {
         self.file = file
         self.track = track
         // A non-finite time fails on the first read; a time past about 30 years is clamped to fit.
         targetIsNumeric = target.isNumeric
         let seconds = targetIsNumeric ? min(max(target.seconds, 0), 1e9) : 0
         self.target = Int64((seconds * 1e9 / Double(file.timestampScale)).rounded(.down))
+        latest = self.target
+        self.endGap = endGap.map(file.ticks)
         window = ByteWindow(source: file.source, length: file.length, chunk: 2 * 1024 * 1024)
     }
 
@@ -238,7 +257,7 @@ final class PacketReader {
     private func accept(_ block: [MatroskaPacket]) {
         guard seeking else { ready += block; return }
         guard let time = block.first?.time else { return }
-        let ticks = Int64((time.seconds * 1e9 / Double(file.timestampScale)).rounded())
+        let ticks = file.ticks(time)
         let sync = block.firstIndex(where: \.isSyncPoint)
         if ticks <= target {
             if let sync { held = Array(block[sync...]) } else if !held.isEmpty { held += block }
@@ -255,7 +274,7 @@ final class PacketReader {
     private func nextBlock() async throws -> [MatroskaPacket]? {
         while true {
             if let end = clusterEnd, window.position >= end { clusterEnd = nil }
-            guard window.position < file.length, let id = try await window.elementID() else { return nil }
+            guard !ended, window.position < file.length, let id = try await window.elementID() else { return nil }
             let size = try await window.elementSize()
             switch id {
             case EBML.cluster:
@@ -266,6 +285,10 @@ final class PacketReader {
                     throw SpatialAudioError.source("Malformed Matroska cluster timestamp")
                 }
                 clusterTime = time
+                if let endGap, clusterTime - endGap > latest, try await trackEnded() {
+                    ended = true
+                    return nil
+                }
             case EBML.blockGroup:
                 // Descend into the group; its Block is handled below and other children skipped.
                 continue
@@ -300,10 +323,33 @@ final class PacketReader {
         let nanoseconds = ticks.partialValue.multipliedReportingOverflow(by: file.timestampScale)
         guard !ticks.overflow, !nanoseconds.overflow else { throw SpatialAudioError.source("Matroska block time out of range") }
         let time = CMTime(value: nanoseconds.partialValue, timescale: 1_000_000_000)
+        latest = max(latest, ticks.partialValue)
+        sawFrame = true
         return frames.map { frame in
             let data = track.strippedHeader + frame
             return MatroskaPacket(data: data, time: time, isSyncPoint: Self.isSyncPoint(data, codec: track.codec))
         }
+    }
+
+    /// Whether the track has ended, having no frame within the gap. Frames near the last cue make
+    /// this a gap instead, and before any frame here, the track may start later.
+    private func trackEnded() async throws -> Bool {
+        let lastCue = Double(file.cues.last?.time ?? 0) * Double(file.timestampScale) / 1e9
+        if try await firstFrame(from: CMTime(seconds: lastCue, preferredTimescale: 1_000_000_000)) != nil {
+            endGap = nil
+            return false
+        }
+        if !sawFrame, let first = try await firstFrame(from: .zero).map(file.ticks), first > clusterTime {
+            latest = first
+            return false
+        }
+        return true
+    }
+
+    /// The time of the track's first frame read from `time`, which may precede it.
+    private func firstFrame(from time: CMTime) async throws -> CMTime? {
+        var frames = file.packets(of: track, from: time).makeAsyncIterator()
+        return try await frames.next()?.time
     }
 
     static func isSyncPoint(_ data: Data, codec: SpatialAudioCodec?) -> Bool {
