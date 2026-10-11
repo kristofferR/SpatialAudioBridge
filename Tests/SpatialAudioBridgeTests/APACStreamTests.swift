@@ -491,9 +491,10 @@ func liveEncodingEmitsSegmentsSoonAfterTheirInput() async throws {
     let upstream = try await LoopbackServer { path in
         switch path {
         case "/subs/subtitles.m3u8":
-            .init(status: 200, body: Data("#EXTM3U\n#EXT-X-TARGETDURATION:30\n#EXTINF:30.0,\nstream.vtt?StartPositionTicks=0\n#EXT-X-ENDLIST\n".utf8))
+            .init(status: 200, body: Data("#EXTM3U\n#EXT-X-TARGETDURATION:30\n#EXTINF:30.0,\nstream.vtt?StartPositionTicks=0\n#EXTINF:30.0,\nimsc.m4s\n#EXT-X-ENDLIST\n".utf8))
         case "/subs/stream.vtt":
             .init(status: 200, body: Data("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:01:59.161 --> 00:02:01.000\nHello\n".utf8))
+        case "/subs/imsc.m4s": .init(status: 200, contentType: "video/mp4", body: Data([0, 0, 0, 8, 0xFF, 0xFE, 0x80, 0x01]))
         default: .notFound()
         }
     }
@@ -501,10 +502,22 @@ func liveEncodingEmitsSegmentsSoonAfterTheirInput() async throws {
     let proxy = SubtitleProxy(headers: [:])
     #expect(proxy.route(URL(string: "http://127.0.0.1:\(upstream.port)/subs/subtitles.m3u8")!) == "subtitles/0.m3u8")
     let playlist = String(decoding: try await proxy.respond(to: "0.m3u8").body, as: UTF8.self)
-    #expect(playlist.split(separator: "\n").filter { !$0.hasPrefix("#") } == ["0/0.vtt"])
+    #expect(playlist.split(separator: "\n").filter { !$0.hasPrefix("#") } == ["0/0.vtt", "0/1.m4s"])
     let segment = String(decoding: try await proxy.respond(to: "0/0.vtt").body, as: UTF8.self)
     #expect(segment.contains("X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n"))
     #expect(segment.contains("00:01:59.161 --> 00:02:01.000\nHello"))
-    #expect(try await proxy.respond(to: "0/1.vtt").status == 404)
+    // An IMSC1 segment in fMP4 passes through byte for byte.
+    let imsc = try await proxy.respond(to: "0/1.m4s")
+    #expect(imsc.body == Data([0, 0, 0, 8, 0xFF, 0xFE, 0x80, 0x01]) && imsc.contentType == "video/mp4")
+    #expect(try await proxy.respond(to: "0/2.vtt").status == 404)
     #expect(try await proxy.respond(to: "1.m3u8").status == 404)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func onlyJellyfinsWebVTTTimestampMapIsMoved() {
+    #expect(HLSPlaylists.removingJellyfinTimestampOffset(in: "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n")
+            == "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n")
+    // A map whose local time already matches its MPEG-TS time has no offset to remove.
+    let aligned = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:10.000,MPEGTS:900000\n"
+    #expect(HLSPlaylists.removingJellyfinTimestampOffset(in: aligned) == aligned)
 }
