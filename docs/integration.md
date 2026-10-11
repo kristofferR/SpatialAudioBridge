@@ -47,7 +47,7 @@ Some open-source Apple TV players read the file on the device and hand `AVPlayer
 
 The engines that remux on the device fit best: they work with any server that serves the original file, and only their audio conversion step changes. Segments from a [`.segments`](conversion.md#write-hls) destination start with an APAC sync packet; after a seek, start a new session on the same segment grid, as [`APACStream` does](architecture.md#the-segment-grid). For MKV, `APACStream` given the engine's loopback video playlist is a shortcut, at the cost of reading the file twice.
 
-For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
+For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. Route by the server's Atmos or DTS:X label there: sending every lossless track would move plain TrueHD and DTS-HD MA from the other engine's lossless decode to the server's lossy fallback whenever the library refuses them. The cost is that alternate DTS:X presentations labelled plain `DTS-HD MA` stay on the other engine; none appeared among the DTS:X titles in the library census. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
 
 ## Requirements
 
