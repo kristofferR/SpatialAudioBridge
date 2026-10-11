@@ -13,8 +13,9 @@ cd "$TASK_ROOT"
 if [[ -n "$VERSION" ]]; then
     [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Use a MAJOR.MINOR.PATCH version."
     [[ -z "$(git status --porcelain)" ]] || fail "Commit or remove local changes first."
+    # Release tags are off main, so fetching main alone does not bring them.
+    git fetch -q --tags origin main
     ! git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null || fail "Tag $VERSION already exists."
-    git fetch -q origin main
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || fail "Check out the latest origin/main first."
 fi
 
