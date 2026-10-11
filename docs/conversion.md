@@ -85,6 +85,8 @@ To handle fragments in memory, use `.segments(syncPeriodsPerSegment:onSegment:)`
 
 In the multivariant playlist, list `layout.apacCodecString` (`apac.31.04` for 9.1.6, `apac.31.03` for 7.1.4) in the variant's `CODECS` and `layout.channelCount` as the rendition's `CHANNELS`. Do not label this channel-based output as JOC. `APACStream` shows a complete arrangement, including restarts that keep segments on one timeline; see [Architecture](architecture.md#the-segment-grid).
 
+To recognise the APAC rendition in AVFoundation, match its `NAME`, which is the media selection option's `commonMetadata` title, or the playing `AVPlayerItemTrack`'s format description subtype `'apac'`. On macOS 27, `AVMediaSelectionOption.mediaSubTypes` was empty for an HLS APAC rendition.
+
 ## Configuration
 
 | Property | Default | Notes |
