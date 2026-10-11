@@ -58,7 +58,7 @@ ffprobe -v error -show_entries stream=codec_name,profile -of compact Sources/Spa
 
 ## How to tell it works
 
-Use the receiver's format indicator and a channel check. On the tested tvOS 27.2 beta, `AVAudioSession.outputNumberOfChannels` reported eight channels for both APAC and Dolby Digital Plus, and the session's rendering mode and spatial audio flags did not distinguish Atmos output either. For diagnosis, the [AtmosAB output probe](../Examples/AtmosAB/README.md#output-probe) reads the session's private current hardware format: `'mat+'` with Atmos output, `'lpcm'` without.
+Use the receiver's format indicator and a channel check. On the tested tvOS 27.2 beta, `AVAudioSession.outputNumberOfChannels` reported eight channels for both APAC and Dolby Digital Plus, and the session's rendering mode and spatial audio flags did not distinguish Atmos output either. For diagnosis, the [AtmosAB output probe](../Examples/AtmosAB/README.md#output-probe) reads the session's private current hardware format: `'mat+'` with MAT output, `'lpcm'` without. MAT output is not the receiver's Atmos indication: APAC played without the activator read `'mat+'` throughout while the soundbar showed no Atmos, so only the receiver's indicator confirms Atmos.
 
 ## Output format
 
