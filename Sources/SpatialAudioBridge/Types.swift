@@ -65,10 +65,14 @@ public struct APACConfiguration: Sendable {
     /// ahead for loudness and dynamic range, so it suits files rather than playback.
     /// `APACStream` and `SpatialAudioRenderer` always use the live profile.
     public var liveEncoding: Bool
+    /// Attenuates TrueHD by its signalled dialogue level, as an AV receiver does: 4 dB at −27 dB.
+    /// Off by default, as in Apple TV's own Atmos playback, so converted tracks play at the level of
+    /// native Atmos content. DTS:X exposes no dialogue level.
+    public var normalizesDialogue: Bool
 
     public init(layout: SpatialAudioLayout = .sevenOneFour, gainDB: Float = 0,
                 bitRate: Int? = nil, startTime: CMTime = .zero, syncPacketFrequency: Int = 75,
-                liveEncoding: Bool = false) {
+                liveEncoding: Bool = false, normalizesDialogue: Bool = false) {
         self.layout = layout
         self.gainDB = gainDB
         explicitBitRate = bitRate
@@ -76,6 +80,7 @@ public struct APACConfiguration: Sendable {
         inputStartTime = nil
         self.syncPacketFrequency = syncPacketFrequency
         self.liveEncoding = liveEncoding
+        self.normalizesDialogue = normalizesDialogue
     }
 
     /// Whether the gain, bit rate and sync interval are within the encoder's range.

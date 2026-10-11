@@ -41,7 +41,7 @@ Some open-source Apple TV players read the file on the device and hand `AVPlayer
 | [Lumen](https://github.com/joaoalvess/lumen-player) | KSPlayer, with an MKV remux into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | The same, in its remux engine |
 | [Swiftfin](https://github.com/jellyfin/Swiftfin), and its fork [Reefy](https://github.com/jmhunter83/reefy) | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
 | [Stingray](https://github.com/benjaminRoberts01375/Stingray) | `AVPlayer` with Jellyfin's HLS | `APACStream` with Jellyfin URLs |
-| [Streamyfin](https://github.com/streamyfin/streamyfin), Yattee | mpv | A native `AVPlayer` route for these tracks, or an mpv hook that hands packets to `SpatialAudioRenderer` |
+| [Streamyfin](https://github.com/streamyfin/streamyfin), Yattee | mpv | An mpv audio output that passes its passthrough bursts through `IEC61937Unpacker` to `SpatialAudioRenderer`, keeping mpv's video, subtitles and UI; or a native `AVPlayer` route for these tracks |
 | VLC for tvOS | libVLC | Requires patching libVLC for packet access |
 | KSPlayer | FFmpeg, closed core | Needs vendor support for packet access |
 

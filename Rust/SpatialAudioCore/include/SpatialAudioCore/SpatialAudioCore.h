@@ -8,6 +8,8 @@ extern "C" {
 typedef struct SABHandle SABHandle;
 typedef int32_t (*SABPCMCallback)(void *context, const float *pcm, uint32_t frames, uint32_t sample_rate, uint32_t channels);
 SABHandle *sab_create(uint32_t codec, uint32_t channels);
+/* Applies TrueHD dialogue normalisation as an AV receiver does when enabled is nonzero; off by default. */
+void sab_set_dialogue_normalisation(SABHandle *handle, int32_t enabled);
 /* All calls on a session must be serialized. PCM is borrowed until callback returns.
    Return zero from callback to continue, nonzero to cancel. Input chunks <=65536 bytes.
    end=1 flushes and checks truncation; any error makes the session terminal. */

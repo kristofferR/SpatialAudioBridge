@@ -55,7 +55,7 @@ public actor SpatialAudioRenderer {
         self.codec = codec
         self.configuration = configuration
         gain = powf(10, configuration.gainDB / 20)
-        decoder = try Decoder(codec: codec, layout: configuration.layout)
+        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
         encoder = try APACEncoder(configuration: configuration)
         self.synchronizer = synchronizer
         synchronizer.addRenderer(audioRenderer)
@@ -74,7 +74,7 @@ public actor SpatialAudioRenderer {
         generation += 1
         audioRenderer.flush()
         state = .failed
-        decoder = try Decoder(codec: codec, layout: configuration.layout)
+        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
         encoder = try APACEncoder(configuration: configuration)
         timeline = time
         inputStart = nil

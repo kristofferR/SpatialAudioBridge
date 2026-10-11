@@ -49,7 +49,7 @@ Bed channels are speaker-anchored (clause 5.2.5) and route directly to their spe
 
 ### Dialogue normalisation
 
-TrueHD signals a dialogue level for the object presentation. Native decoders attenuate by the difference from −31 dB, for example 4 dB at −27, and the renderer does the same, from each major sync. When the level changes, the gain ramps over one access unit. DTS:X output is not normalised: the pinned decoder does not expose a DTS dialogue level.
+TrueHD signals a dialogue level for the object presentation. An AV receiver decoding TrueHD attenuates by its difference from −31 dB, for example 4 dB at −27. Apple TV's own Atmos playback does not: its render of a Dolby Digital Plus Atmos track plays at the undialnormed level. By default the renderer follows Apple, so converted tracks play at the level of native Atmos content, and TrueHD and DTS:X, whose decoder exposes no dialogue level, are treated alike. Set `APACConfiguration.normalizesDialogue` to attenuate as a receiver does, from each major sync, with a level change ramped over one access unit. `gainDB` scales the output either way.
 
 ### Metadata boundary
 
@@ -94,6 +94,6 @@ Before recombination, `dca::FoldPlan` removes every known spatial contribution f
 
 ## Levels
 
-Apart from TrueHD dialogue normalisation, rendering is linear, with no limiting or headroom gain. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
+Rendering is linear, with no limiting or headroom gain, and without dialogue normalisation unless `normalizesDialogue` is set. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
 
 With the earlier panner, 38 minutes of a TrueHD Atmos film peaked at −0.2 dBFS before encoding, the DTS:X fixture at −0.3 dBFS and the Helicopter fixture at −9.8 dBFS, while one 20-second film excerpt reached +4 dBFS in a 9.1.6 height channel. With this panner, the [library census](validation.md#library-census) found 28 of 895 one-minute windows above full scale in 7.1.4, from 22 of 179 Atmos titles, the highest at +6.2 dBFS; front heights and the centre exceeded it most often. No DTS:X film exceeded it. APAC keeps such peaks: tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder. Whether tvOS or the HDMI output then clips them is unverified. A limiter would also change the measured peaks just below full scale, so the renderer leaves the level to the mix and the host's `gainDB`.
