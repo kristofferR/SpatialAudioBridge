@@ -10,6 +10,7 @@ let package = Package(
         .executable(name: "apac-convert", targets: ["APACConvert"]),
     ],
     targets: [
+        // Built by scripts/build-core.sh. Release tags download it instead; see scripts/release-core.sh.
         .binaryTarget(name: "SpatialAudioCore", path: "BinaryArtifacts/SpatialAudioCore.xcframework"),
         .target(name: "SpatialAudioBridge", dependencies: ["SpatialAudioCore"]),
         .target(name: "SpatialAudioPlayback", resources: [.copy("Resources/silent-atmos.mp4")]),

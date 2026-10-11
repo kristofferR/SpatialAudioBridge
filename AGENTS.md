@@ -12,7 +12,8 @@ The first deliverable is the library: a simple Swift API for file conversion and
 - `Sources/SpatialAudioBridge`: Swift session management, Apple's APAC encoder, file output and timed fragment callbacks; Matroska reading from files or HTTP ranges; `APACStream` (VOD playlist on a fixed segment grid, on-demand conversion, loopback server, master rewrite); `SpatialAudioRenderer` (APAC into `AVSampleBufferAudioRenderer`).
 - `Sources/SpatialAudioPlayback`: playback-route helpers without the Rust core, including Atmos output activation for `AVPlayer` and render synchronizers.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
-- `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV device and Apple TV simulator.
+- `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV device and Apple TV simulator, without local paths, and gathers the license notices.
+- `scripts/release-core.sh`: packages that build as a reproducible, checksummed archive and tags a release commit whose `Package.swift` downloads it.
 - `scripts/make-silent-atmos.swift`: writes the silent Dolby Digital Plus Atmos stream that `SpatialAudioPlayback` bundles, from the ETSI specifications alone.
 - `Tests` and the Rust tests: focused checks for spatial rendering, stream handling, timing and native APAC round trips.
 - `Examples`: Apple TV apps for listening comparisons (AtmosAB) and end-to-end media-server playback (StreamPlayer).
@@ -38,7 +39,7 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 1. Measure lip sync and memory over a full film on Apple TV, including Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
 2. Validate other Apple TV models and receivers. Emby and Plex are out of scope; see [media servers](docs/media-servers.md#emby-and-plex).
 3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
-4. Package a reproducible XCFramework and straightforward Swift dependency, then build the player integrations in the [integration guide](docs/integration.md#fit-with-existing-players).
+4. Build the player integrations in the [integration guide](docs/integration.md#fit-with-existing-players).
 
 ## Implementation guidance
 
@@ -67,3 +68,5 @@ swift test -j 1 -Xswiftc -warnings-as-errors
 Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE`, `SAB_DTSX_ALTERNATE_FIXTURE` and `SAB_MKV_FIXTURE`; otherwise they are skipped. Follow [docs/validation.md](docs/validation.md) for full fixture checks. Test actual spatial output, chunk independence, truncation handling, duration and priming when relevant. Height-channel energy alone does not prove correct spatial placement.
 
 Keep [README.md](README.md), the guides in [docs](docs/) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
+
+To release, run `./scripts/release-core.sh VERSION` on a clean checkout of the latest `origin/main`, then push the tag and create the GitHub release with the printed commands. The release commit stays off `main`: hosts get a downloaded core from release tags, while `main` keeps the local binary target so tests always link the Rust sources. Never move or replace a published tag or archive; its checksum is pinned by dependents.

@@ -2,6 +2,8 @@
 
 SpatialAudioBridge uses these Rust components, pinned by `Cargo.lock`. Their original license texts are retained under `licenses/`. Preserve those texts with binary distributions.
 
+The core's static libraries also contain the Rust standard library, under MIT OR Apache-2.0 with the notices of its own dependencies. `scripts/build-core.sh` copies those notices from the toolchain that built the libraries to `licenses/rust-std-<version>/COPYRIGHT-library.html`. Release archives contain `LICENSE`, this file and the whole `licenses/` directory, including those notices.
+
 | Component | Version | Declared license |
 |---|---|---|
 | truehd | 0.7.2 | Apache-2.0 |

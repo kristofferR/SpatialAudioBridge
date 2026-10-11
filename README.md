@@ -97,17 +97,15 @@ Symbol documentation is available in Xcode through DocC.
 - [StreamPlayer](Examples/StreamPlayer/README.md): a tvOS player for a media server's MKV, through `APACStream` or `SpatialAudioRenderer`.
 - [Atmos A/B](Examples/AtmosAB/README.md): compares converted APAC with Dolby Digital Plus Atmos on Apple TV.
 
-## Build
+## Install
 
-Requires Apple Silicon, Xcode with SDK 26 or newer, and stable Rust. Encoding requires **tvOS 26+** or **macOS 26+**.
+Add the package from a release, in Xcode or in `Package.swift`:
 
-```sh
-./scripts/build-core.sh   # Rust core as an XCFramework: Mac, Apple TV and Apple TV simulator
-swift build -j 1
-swift test -j 1
+```swift
+.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "0.1.0")
 ```
 
-Build the XCFramework before adding this checkout as a local Swift package. The package offers three products:
+Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV and the Apple TV simulator, so the host needs no Rust toolchain. The archive includes the license notices of the core's dependencies. Encoding requires **tvOS 26+** or **macOS 26+**. The package offers three products:
 
 | Product | Contents |
 |---|---|
@@ -115,7 +113,17 @@ Build the XCFramework before adding this checkout as a local Swift package. The 
 | `SpatialAudioPlayback` | `AtmosOutputActivator`, without the Rust core |
 | `apac-convert` | Command-line converter |
 
-A future release can replace the local binary target with a downloadable, checksummed XCFramework.
+## Build from source
+
+The `main` branch and local checkouts build the Rust core themselves. Requires Apple Silicon, Xcode with SDK 26 or newer, and stable Rust.
+
+```sh
+./scripts/build-core.sh   # Rust core as an XCFramework: Mac, Apple TV and Apple TV simulator
+swift build -j 1
+swift test -j 1
+```
+
+`./scripts/release-core.sh` builds the release archive and prints its checksum. Each release's notes name the commit and toolchain to rebuild it with and compare.
 
 ## Decoder dependencies
 

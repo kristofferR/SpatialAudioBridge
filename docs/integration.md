@@ -51,8 +51,8 @@ For players that switch engines per item, routing TrueHD Atmos and DTS:X items t
 ## Requirements
 
 - tvOS 26 or macOS 26 for encoding. Apps supporting older systems need availability checks and their existing audio path on those systems.
-- The Rust core is built locally as an XCFramework with `scripts/build-core.sh`; add this checkout as a local Swift package. A checksummed binary release is planned.
-- Ship the [license notices](../THIRD-PARTY-NOTICES.md) of the decoder dependencies with binary distributions.
+- Depend on a release tag: it downloads the Rust core as a checksummed XCFramework. The `main` branch builds the core with `scripts/build-core.sh` instead; see [build from source](../README.md#build-from-source).
+- Ship the [license notices](../THIRD-PARTY-NOTICES.md) of the core's dependencies with the app. The release archive includes them, with the Rust standard library's.
 
 ## Timing rules
 
