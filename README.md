@@ -9,7 +9,17 @@ TrueHD Atmos / DTS:X ─▶ decode ─▶ render objects to 7.1.4 / 9.1.6 ─▶
 ```
 
 > [!NOTE]
-> Experimental. Tested end to end on an Apple TV 4K (2nd generation) with tvOS 27.2 beta, an Atmos receiver and Jellyfin. Atmos objects follow Dolby's published consumer renderer specification (ETSI TS 103 448), but this is not a licensed Dolby or DTS renderer. See [validation](docs/validation.md) for what is and is not established.
+> Tested end to end on an Apple TV 4K (2nd generation) with tvOS 27.2 beta, an Atmos receiver and Jellyfin. Atmos objects follow Dolby's published consumer renderer specification (ETSI TS 103 448). See [accuracy](#accuracy) and [validation](docs/validation.md) for what is and is not established.
+
+## Choose an integration
+
+| The player… | Use | Guide |
+|---|---|---|
+| plays video with `AVPlayer` | `APACStream` | [Play through AVPlayer](docs/avplayer.md) |
+| renders with `AVSampleBufferRenderSynchronizer` | `SpatialAudioRenderer` | [Play through sample buffers](docs/sample-buffer-playback.md) |
+| converts files or builds its own HLS | `SpatialAudioTranscoder`, `APACHLSOutput`, `APACTrackConverter` | [Convert and package](docs/conversion.md) |
+
+Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos output](docs/atmos-output.md). The [integration guide](docs/integration.md) covers choosing between paths and how existing players such as Swiftfin and Streamyfin fit.
 
 ## Quick start
 
@@ -34,16 +44,6 @@ player.play()
 
 The stream reads the MKV's TrueHD or DTS track over HTTP range requests, converts it on demand, and serves it from the loopback interface as an HLS audio rendition beside the server's video. Seeking works anywhere: segments from every conversion run share one timeline with the video. If the track cannot be converted, `start` throws and the player falls back to its usual path.
 
-## Choose an integration
-
-| The player… | Use | Guide |
-|---|---|---|
-| plays video with `AVPlayer` | `APACStream` | [Play through AVPlayer](docs/avplayer.md) |
-| renders with `AVSampleBufferRenderSynchronizer` | `SpatialAudioRenderer` | [Play through sample buffers](docs/sample-buffer-playback.md) |
-| converts files or builds its own HLS | `SpatialAudioTranscoder`, `APACHLSOutput`, `APACTrackConverter` | [Convert and package](docs/conversion.md) |
-
-Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos output](docs/atmos-output.md). The [integration guide](docs/integration.md) covers choosing between paths and how existing players such as Swiftfin and Streamyfin fit.
-
 ## Current support
 
 | Input / output | Status |
@@ -53,7 +53,7 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 | TrueHD dialogue normalisation | Applied as a native decoder does |
 | Atmos warp mode, a 5.1 downmix setting | Accepted; 7.1.4 and 9.1.6 positions unchanged |
 | DTS:X standard four-height presentation, 48 kHz | Supported |
-| DTS:X known alternate and IMAX object presentations, 48 kHz lossless | Experimental: D0, D1, D3 and D4, three-component D0 and object-only routing |
+| DTS:X known alternate and IMAX object presentations, 48 kHz lossless | D0, D1, D3 and D4, three-component D0 and object-only routing; only D4 checked on full media |
 | Matroska (MKV, MKA), local or over HTTP range requests | Supported, with cue-based seeking |
 | APAC 7.1.4 and 9.1.6: MP4 files, HLS fragments, sample buffers | Supported; decoded by Apple's decoder in tests |
 | `AVPlayer` playback with on-demand conversion and seeking | Verified on Apple TV with Jellyfin |
@@ -64,6 +64,19 @@ Every playback path needs `AtmosOutputActivator` for Atmos output; see [Atmos ou
 | M2TS and MP4 containers | Use the host's demuxer with `SpatialAudioTranscoder` |
 
 Rejected tracks fail with a clear error so the player can fall back. The [rendering model](docs/rendering.md) documents how objects are placed.
+
+## Accuracy
+
+The output is rendered speaker audio encoded as APAC; the original bitstream and its objects are not passed through.
+
+| Area | Accuracy |
+|---|---|
+| Atmos placement against Apple's Atmos render | Seven demo and film clips at 7.1.4, rendered by SpatialAudioBridge from TrueHD and by Apple's decoder from a Dolby Digital Plus Atmos version of the same audio: median direction error 0.1–2.1°, ceiling share within 0.6 percentage points, median per-channel level error at most 0.4 dB |
+| Atmos panner against the specification | 2,880 point, size and divergence cases match a literal transcription of the TS 103 448 pseudocode within 3.2 × 10⁻⁷ |
+| Standard DTS:X | No panning: the bed and four height channels play on their own speakers once the heights folded into the bed are removed with the stream's own coefficients. All eight DTS:X films in the [library census](docs/validation.md#library-census) use this presentation |
+| APAC encoding | 48.4 dB signal-to-error on a 9.1.6 film excerpt with all 16 channels active; distinct tones in all 16 channels stay in their own channel |
+
+Apple's render passed through a lossy Dolby Digital Plus encode, so part of the remaining error on busier clips is probably codec error. Objects in the alternate DTS:X presentations use a [documented approximation](docs/rendering.md#presentations-and-polar-objects) that no DTS reference render has checked.
 
 ## Measured on Apple TV
 

@@ -132,6 +132,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 | Check | Result |
 |---|---|
 | Dolby rendering on macOS | Apple's E-AC-3 decoder, through `ExtAudioFile` and `AVAssetReader`, returned only the 5.1 core of a DD+ Atmos fixture into a 7.1.4 layout, with silent heights, so it gives no reference object rendering |
+| Apple's live Atmos render | `AVPlayer` renders DD+ Atmos objects to 7.1.4 when its output device has that layout: BlackHole 16ch set to Apple's Atmos 7.1.4 layout, with an `MTAudioProcessingTap` recording the 12 channels. Against our 7.1.4 render of the TrueHD originals of three Dolby demos and four film excerpts, level-matched and compared in 200 ms windows: median direction error 0.1–2.1° (90th percentile at most 7.7°), ceiling energy share within 0.6 percentage points and mean elevation within ±0.4° on every clip, median per-channel share error at most 0.4 dB. The panner before the TS 103 448 one was 0.1–6.6° off and put up to 4.1 points too much in the ceiling. The reference passes through a lossy JOC encode; that error has not been separated out |
 
 ## Coverage
 
@@ -147,7 +148,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
 - Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
 - A release archive rebuilt on another Mac, and hosts resolving a published release from GitHub.
-- Placement against a Dolby renderer: the panner follows TS 103 448, but no licensed Dolby rendering of the same content has been compared.
+- Placement against Dolby's own renderer: the panner matches [Apple's Atmos render](#reference-rendering) closely, but no Dolby reference renderer output of the same content has been compared.
 
 `AVAudioSession.outputNumberOfChannels` reported eight for both working formats, and the session's rendering mode and spatial audio flags were also unsuitable Atmos detectors on the tested beta. The private current hardware format, which the AtmosAB output probe reads, did distinguish them.
 
