@@ -124,7 +124,7 @@ The API requires **tvOS 26+**, **iOS 26+** or **macOS 26+**. The package itself 
 
 | Product | Contents |
 |---|---|
-| `SpatialAudioBridge` | Decoding, rendering, encoding, Matroska reading, `APACStream`, `SpatialAudioRenderer` |
+| `SpatialAudioBridge` | Decoding, rendering, encoding, Matroska reading, `APACStream`, `SpatialAudioRenderer`, `IEC61937Unpacker` |
 | `SpatialAudioPlayback` | `AtmosOutputActivator`, without the Rust core |
 | `apac-convert` | Command-line converter |
 

@@ -41,6 +41,20 @@ try await audio.endOfStream()
 
 Each packet's timestamp is shifted back by the encoder priming, so decoded audio lands at its presentation time.
 
+## Passthrough output
+
+Players such as mpv and VLC never hand the app TrueHD or DTS packets, but their passthrough audio outputs deliver the compressed stream as IEC 61937 bursts, the same data an S/PDIF or HDMI bitstream carries. `IEC61937Unpacker` recovers the stream from them: TrueHD from MAT frames and DTS-HD from type IV bursts, in either 16-bit byte order, with bursts split anywhere and filler such as the zeros a paused player writes skipped.
+
+```swift
+var unpacker = IEC61937Unpacker()          // a new one for every timeline
+try await renderer.begin(at: seekTime)
+// For each buffer the player's audio output receives; firstTime is that of the first buffer since begin(at:).
+let stream = try unpacker.unpack(bursts)
+if !stream.isEmpty { try await renderer.enqueue(stream, time: firstTime + unpacker.skippedDuration) }
+```
+
+After a seek the bursts may resume between TrueHD major syncs, where decoding cannot start. The unpacker drops those access units and adds their duration (1/1200 s each) to `skippedDuration`, so adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
+
 ## Status and errors
 
 `renderingStatus` is `.rendering` once APAC plays and `.failed` if the renderer rejects it. `enqueue` throws for malformed or unsupported input and for a failed renderer; treat that as the end of the session and fall back to the host's audio path. Any failure, including cancellation, ends the timeline: further input is refused until `begin(at:)`, as after `endOfStream()`. Releasing the `SpatialAudioRenderer` removes it from the synchronizer.

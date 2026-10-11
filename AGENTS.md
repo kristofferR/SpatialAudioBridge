@@ -9,7 +9,7 @@ The first deliverable is the library: a simple Swift API for file conversion and
 ## Architecture and boundaries
 
 - `Rust/SpatialAudioCore`: compressed decoding, metadata interpretation and rendering into 7.1.4 or 9.1.6 speaker feeds. Exposes a small C ABI.
-- `Sources/SpatialAudioBridge`: Swift session management, Apple's APAC encoder, file output and timed fragment callbacks; Matroska reading from files or HTTP ranges; `APACStream` (VOD playlist on a fixed segment grid, on-demand conversion, loopback server, master rewrite); `SpatialAudioRenderer` (APAC into `AVSampleBufferAudioRenderer`).
+- `Sources/SpatialAudioBridge`: Swift session management, Apple's APAC encoder, file output and timed fragment callbacks; Matroska reading from files or HTTP ranges; `APACStream` (VOD playlist on a fixed segment grid, on-demand conversion, loopback server, master rewrite); `SpatialAudioRenderer` (APAC into `AVSampleBufferAudioRenderer`); `IEC61937Unpacker` (TrueHD and DTS-HD from passthrough bursts, for mpv- and VLC-style hosts).
 - `Sources/SpatialAudioPlayback`: playback-route helpers without the Rust core, including Atmos output activation for `AVPlayer` and render synchronizers.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
 - `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV, iPhone and iPad devices and their simulators, without local paths, and gathers the license notices, including the bundled `ThirdPartyNotices.txt` that `SpatialAudioBridgeNotices` serves.
