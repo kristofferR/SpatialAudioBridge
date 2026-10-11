@@ -12,7 +12,7 @@ The first deliverable is the library: a simple Swift API for file conversion and
 - `Sources/SpatialAudioBridge`: Swift session management, Apple's APAC encoder, file output and timed fragment callbacks; Matroska reading from files or HTTP ranges; `APACStream` (VOD playlist on a fixed segment grid, on-demand conversion, loopback server, master rewrite); `SpatialAudioRenderer` (APAC into `AVSampleBufferAudioRenderer`).
 - `Sources/SpatialAudioPlayback`: playback-route helpers without the Rust core, including Atmos output activation for `AVPlayer` and render synchronizers.
 - `Sources/APACConvert`: a command-line consumer of the public library API.
-- `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV, iPhone and iPad devices and their simulators, without local paths, and gathers the license notices.
+- `scripts/build-core.sh`: builds the Rust XCFramework for Apple Silicon Mac, Apple TV, iPhone and iPad devices and their simulators, without local paths, and gathers the license notices, including the bundled `ThirdPartyNotices.txt` that `SpatialAudioBridgeNotices` serves.
 - `scripts/release-core.sh`: packages that build as a reproducible, checksummed archive and tags a release commit whose `Package.swift` downloads it.
 - `scripts/make-silent-atmos.swift`: writes the silent Dolby Digital Plus Atmos stream that `SpatialAudioPlayback` bundles, from the ETSI specifications alone.
 - `Tests` and the Rust tests: focused checks for spatial rendering, stream handling, timing and native APAC round trips.
@@ -24,7 +24,7 @@ Most open-source Apple TV players do not expose compressed audio packets, so the
 
 ## Current baseline
 
-- Experimental. The API requires tvOS 26+, iOS 26+ or macOS 26+; the package builds back to tvOS and iOS 13 and macOS 10.15 so hosts that support older systems can depend on it. Annotate new top-level declarations with `@available(macOS 26, iOS 26, tvOS 26, *)` (test functions rather than `@Suite` types). iOS links but is untested.
+- Experimental. The API requires tvOS 26+, iOS 26+ or macOS 26+; the package builds back to tvOS and iOS 13 and macOS 10.15 so hosts that support older systems can depend on it. Annotate new top-level declarations with `@available(macOS 26, iOS 26, tvOS 26, *)` (test functions rather than `@Suite` types), except `SpatialAudioBridgeNotices`, which apps need wherever the core ships. iOS links but is untested.
 - 48 kHz TrueHD Atmos with one bed; objects follow the ETSI TS 103 448 source panner, including size, divergence, snap, zones, trim, gain, activity, timed updates and ramps, and TrueHD dialogue normalisation is applied. Warp mode 1, a 5.1 downmix setting, leaves 7.1.4 and 9.1.6 positions unchanged.
 - 48 kHz lossless DTS:X standard four-height and known alternate object presentations; resolved spatial folds are removed from the compatible bed before recombination. Alternate profiles are experimental, with physical-angle panning and frame-length object ramps.
 - APAC 7.1.4 (default) and 9.1.6 output, including files, HLS fragments and sample buffers. Apple TV's Atmos output carries 12 channels, so it folds 9.1.6 to 7.1.4; a blind comparison found no consistent difference. Streaming paths use Apple's live encoder profile (about 1.6 s latency instead of about 20 s).

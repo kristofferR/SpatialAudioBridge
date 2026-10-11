@@ -12,7 +12,8 @@ let package = Package(
     targets: [
         // Built by scripts/build-core.sh. Release tags download it instead; see scripts/release-core.sh.
         .binaryTarget(name: "SpatialAudioCore", path: "BinaryArtifacts/SpatialAudioCore.xcframework"),
-        .target(name: "SpatialAudioBridge", dependencies: ["SpatialAudioCore"]),
+        .target(name: "SpatialAudioBridge", dependencies: ["SpatialAudioCore"],
+                resources: [.copy("Resources/ThirdPartyNotices.txt")]),
         .target(name: "SpatialAudioPlayback", resources: [.copy("Resources/silent-atmos.mp4")]),
         .executableTarget(name: "APACConvert", dependencies: ["SpatialAudioBridge"]),
         .testTarget(name: "SpatialAudioBridgeTests", dependencies: ["SpatialAudioBridge"]),

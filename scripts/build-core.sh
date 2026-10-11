@@ -46,3 +46,9 @@ cp -R "$TASK_ROOT/licenses" "$ARTIFACTS/"
 RUST_STD="$ARTIFACTS/licenses/rust-std-$(rustc -vV | sed -n 's/^release: //p')"
 mkdir -p "$RUST_STD"
 cp "$SYSROOT/share/doc/rust/COPYRIGHT-library.html" "$RUST_STD/"
+# Apps show this text in their acknowledgements; the SpatialAudioBridge target bundles it. Commit it
+# when it changes, which happens with Cargo.lock, licenses/ or the toolchain.
+cargo tree --locked --manifest-path "$MANIFEST" --edges normal,no-proc-macro --prefix none --format '{p}|{l}' \
+    --target "${TARGETS[0]}" | python3 -I "$TASK_ROOT/scripts/make-notices.py" \
+    "$TASK_ROOT/Sources/SpatialAudioBridge/Resources/ThirdPartyNotices.txt" "$TASK_ROOT/LICENSE" "$TASK_ROOT/licenses" \
+    "$SYSROOT/share/doc/rust/COPYRIGHT-library.html" "$(rustc -vV | sed -n 's/^release: //p')"

@@ -20,6 +20,7 @@ if [[ -n "$VERSION" ]]; then
 fi
 
 "$TASK_ROOT/scripts/build-core.sh"
+[[ -z "$VERSION" || -z "$(git status --porcelain)" ]] || fail "The build changed tracked files, such as the notices; commit them first."
 
 # Fixed timestamps, permissions and entry order make the archive reproducible.
 STAGE="$(mktemp -d)"
