@@ -50,7 +50,7 @@ swift package dump-package | grep -qF "\"$CHECKSUM\"" || fail "The release manif
 git commit -q -m "chore(release): $VERSION" Package.swift
 git tag -a "$VERSION" -m "SpatialAudioBridge $VERSION"
 cat > "$ARTIFACTS/release-notes.md" <<EOF
-Prebuilt Rust core for Apple Silicon Macs, Apple TV and the Apple TV simulator, with the license notices of its dependencies. \`Package.swift\` at this tag downloads it.
+Prebuilt Rust core for Apple Silicon Macs, Apple TV, iPhone and iPad, and their simulators, with the license notices of its dependencies. \`Package.swift\` at this tag downloads it.
 
 - Checksum: \`$CHECKSUM\`
 - Built from $SOURCE with $(rustc -V) and $(xcodebuild -version | paste -sd ' ' -)

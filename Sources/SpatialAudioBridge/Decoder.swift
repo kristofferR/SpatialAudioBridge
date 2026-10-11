@@ -1,6 +1,7 @@
 import Foundation
 import SpatialAudioCore
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 struct PCMBlock: Sendable {
     let samples: [Float]
     let frames: Int
@@ -8,11 +9,13 @@ struct PCMBlock: Sendable {
     let channels: Int
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class PCMCollector {
     var blocks: [PCMBlock] = []
 }
 
 /// Owned and serialized by SpatialAudioTranscoder. The C callback never escapes decode().
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class Decoder: @unchecked Sendable {
     private let handle: OpaquePointer
     init(codec: SpatialAudioCodec, layout: SpatialAudioLayout) throws {

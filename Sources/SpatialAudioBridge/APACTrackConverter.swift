@@ -1,6 +1,7 @@
 import Foundation
 
 /// One-call file conversion.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public enum APACTrackConverter {
     /// Converts a demuxed `.thd` or `.dts` elementary stream into an APAC MP4 file.
     public static func convert(elementaryStream input: URL, codec: SpatialAudioCodec,

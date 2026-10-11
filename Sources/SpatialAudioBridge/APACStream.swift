@@ -2,9 +2,6 @@ import CoreMedia
 import Foundation
 import os
 
-/// Segment requests, restarts and wait times; visible in Console under this subsystem.
-private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream")
-
 /// Plays a Matroska file's TrueHD Atmos or DTS:X track through AVPlayer as an APAC HLS rendition.
 ///
 /// The stream serves a VOD playlist from the loopback interface and converts segments on demand,
@@ -19,6 +16,7 @@ private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream"
 /// ```
 ///
 /// Native Atmos output also needs `AtmosOutputActivator` from SpatialAudioPlayback.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public final class APACStream: Sendable {
     public struct Options: Sendable {
         /// Layout, bitrate and sync interval. The stream manages the start times and always encodes live.
@@ -184,6 +182,7 @@ public final class APACStream: Sendable {
     }
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 enum StreamError: Error {
     case outOfRange
     /// Conversion restarted elsewhere for a later request, so this segment will not arrive soon.
@@ -193,7 +192,10 @@ enum StreamError: Error {
 }
 
 /// Converts and caches segments, restarting conversion where playback needs it.
+@available(macOS 26, iOS 26, tvOS 26, *)
 actor StreamEngine {
+    /// Segment requests, restarts and wait times; visible in Console under this subsystem.
+    private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream")
     /// Sync periods per segment: 3.2 seconds at the default interval of 75 packets.
     static let periods = 2
 
@@ -514,6 +516,7 @@ actor StreamEngine {
 }
 
 /// Segments shared between conversion callbacks and requests.
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class SegmentStore: @unchecked Sendable {
     private let lock = NSLock()
     private var initData: Data?

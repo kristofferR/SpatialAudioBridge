@@ -6,6 +6,7 @@ import Foundation
 ///
 /// Returns nil for a layout AVAssetWriter does not write, such as one with `sidx`, absolute data
 /// offsets or per-sample durations; the caller then keeps the segment unchanged.
+@available(macOS 26, iOS 26, tvOS 26, *)
 func trimmingLastSample(of segment: Data, by frames: UInt32) -> Data? {
     var bytes = [UInt8](segment)
     let top = MP4Box.children(of: bytes, in: 0..<bytes.count)
@@ -47,6 +48,7 @@ func trimmingLastSample(of segment: Data, by frames: UInt32) -> Data? {
 }
 
 /// A minimal reader for the plain 32-bit-sized boxes AVAssetWriter writes in fragments.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private struct MP4Box {
     let type: String
     let range: Range<Int>

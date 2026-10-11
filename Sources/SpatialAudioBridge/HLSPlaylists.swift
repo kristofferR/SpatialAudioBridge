@@ -1,6 +1,7 @@
 import Foundation
 
 /// Playlist text for ``APACStream``.
+@available(macOS 26, iOS 26, tvOS 26, *)
 enum HLSPlaylists {
     /// A VOD media playlist of `segments` fixed-length segments, the last one possibly shorter.
     static func media(totalFrames: Int64, segmentFrames: Int64, rate: Int) -> String {

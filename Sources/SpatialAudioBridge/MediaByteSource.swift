@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Use ``FileByteSource`` for local files and ``HTTPByteSource`` for servers that support
 /// HTTP range requests, such as a media server's direct-play URL.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public protocol MediaByteSource: Sendable {
     /// The file's total size in bytes.
     func length() async throws -> Int64
@@ -12,6 +13,7 @@ public protocol MediaByteSource: Sendable {
 }
 
 /// Reads a local file.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct FileByteSource: MediaByteSource {
     public let url: URL
 
@@ -34,6 +36,7 @@ public struct FileByteSource: MediaByteSource {
 }
 
 /// Reads a file over HTTP with range requests.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct HTTPByteSource: MediaByteSource {
     public let url: URL
     public let headers: [String: String]
@@ -81,6 +84,7 @@ public struct HTTPByteSource: MediaByteSource {
 
 /// Collects one ranged response. A server that ignores the range answers 200 with the whole
 /// file, so the transfer is cancelled as soon as the status arrives instead of downloading it.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class RangedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let host: String
     private let lock = NSLock()

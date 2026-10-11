@@ -2,11 +2,15 @@ import Foundation
 import Testing
 @testable import SpatialAudioBridge
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func box(_ type: String, _ body: [UInt8]) -> [UInt8] { be32(UInt32(body.count + 8)) + Array(type.utf8) + body }
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func be32(_ value: UInt32) -> [UInt8] { [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: value >> $0) } }
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func read32(_ bytes: [UInt8], _ index: Int) -> UInt32 { bytes[index..<index + 4].reduce(0) { $0 << 8 | UInt32($1) } }
 
 /// A fragment shaped like AVAssetWriter's: default durations in tfhd, sizes in two runs.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
     let payload = sizes.joined().enumerated().flatMap { index, size in [UInt8](repeating: UInt8(index), count: Int(size)) }
     let tfhd = box("tfhd", be32(0x02_0038) + be32(1) + be32(1024) + be32(5) + be32(0x0001_0000))
@@ -23,6 +27,7 @@ private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
     return (Data(moof(offsets: offsets) + box("mdat", payload)), payload)
 }
 
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func trimmingShortensOnlyTheLastSampleAndKeepsDataOffsets() throws {
     let (data, payload) = fragment(sizes: [[10, 11, 12], [13, 14]])
     let trimmed = [UInt8](try #require(trimmingLastSample(of: data, by: 640)))

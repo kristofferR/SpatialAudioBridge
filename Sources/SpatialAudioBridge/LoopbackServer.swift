@@ -3,6 +3,7 @@ import Network
 
 /// A minimal HTTP/1.1 server on the loopback interface for AVPlayer: GET and HEAD, persistent
 /// connections and single byte ranges.
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class LoopbackServer: @unchecked Sendable {
     struct Response: Sendable {
         var status: Int
@@ -138,6 +139,7 @@ final class LoopbackServer: @unchecked Sendable {
 }
 
 /// Resumes a continuation at most once, for callbacks that can fire repeatedly.
+@available(macOS 26, iOS 26, tvOS 26, *)
 private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, any Error>?

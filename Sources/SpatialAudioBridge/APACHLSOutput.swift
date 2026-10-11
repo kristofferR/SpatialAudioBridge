@@ -3,6 +3,7 @@ import CoreMedia
 
 /// Persists AVFoundation fragments and an EVENT playlist. Serve this directory over HTTP.
 /// Call finish() only after the transcoder finishes; the player owns serving and cleanup.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public final class APACHLSOutput: @unchecked Sendable {
     /// `audio.m3u8` in the output directory, beside `init.mp4` and numbered `.m4s` fragments.
     public let playlistURL: URL

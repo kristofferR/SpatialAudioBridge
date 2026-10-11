@@ -3,6 +3,7 @@ import CoreMedia
 
 /// Encodes interleaved Float32 PCM to APAC packets with Core Audio, using the same settings as the
 /// asset-writer path, for renderers that accept compressed sample buffers.
+@available(macOS 26, iOS 26, tvOS 26, *)
 final class APACEncoder {
     /// The APAC format, including the encoder's magic cookie and channel layout.
     let format: CMAudioFormatDescription

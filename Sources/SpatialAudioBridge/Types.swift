@@ -3,6 +3,7 @@ import CoreMedia
 import AudioToolbox
 
 /// A compressed input format.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public enum SpatialAudioCodec: UInt32, Sendable {
     /// Dolby TrueHD with Atmos object metadata, 48 kHz, one bed and point objects.
     case trueHDAtmos = 1
@@ -11,6 +12,7 @@ public enum SpatialAudioCodec: UInt32, Sendable {
 }
 
 /// The speaker layout rendered and encoded as APAC, in Apple's Atmos channel order.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public enum SpatialAudioLayout: UInt32, Sendable {
     /// 7.1.4: twelve channels, profile and level `apac.31.03`.
     case sevenOneFour = 12
@@ -35,6 +37,7 @@ public enum SpatialAudioLayout: UInt32, Sendable {
 }
 
 /// How a session renders and encodes APAC.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACConfiguration: Sendable {
     /// The rendered speaker layout. Defaults to 7.1.4: on the tested Apple TV, Dolby Atmos
     /// output carries 12 channels and folds 9.1.6's wides and top middles into their neighbours.
@@ -109,6 +112,7 @@ public struct APACConfiguration: Sendable {
 }
 
 /// One fragmented-MP4 segment from a ``APACDestination/segments(syncPeriodsPerSegment:onSegment:)`` destination.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACSegment: Sendable {
     public enum Kind: Sendable { case initialization, media }
     public let kind: Kind
@@ -121,6 +125,7 @@ public struct APACSegment: Sendable {
 }
 
 /// Where a transcoder writes APAC.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public enum APACDestination: Sendable {
     /// An MP4 file. Priming is trimmed from its presented duration.
     case file(URL)
@@ -130,6 +135,7 @@ public enum APACDestination: Sendable {
 }
 
 /// What a finished session converted.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACConversionReport: Sendable {
     public let sampleRate: Int
     /// Encoded frames, including any silence padding and excluding encoder priming.
@@ -142,6 +148,7 @@ public struct APACConversionReport: Sendable {
 
 /// Why a session or source failed. Every error ends the session; fall back to the host's own
 /// audio path or start a new session.
+@available(macOS 26, iOS 26, tvOS 26, *)
 public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidConfiguration(String)
     /// The call does not fit the session's state, such as appending after `finish()`.
