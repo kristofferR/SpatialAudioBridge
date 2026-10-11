@@ -25,6 +25,7 @@ Every playback path also needs [`AtmosOutputActivator`](atmos-output.md) to swit
 ## What the host keeps
 
 - **Selection and fallback.** The host decides which track plays. Convert only TrueHD Atmos and DTS:X tracks, and play everything else through the existing path. When the library throws, fall back to that path as well: it rejects metadata it cannot render rather than playing it wrongly.
+- **Let the library recognise DTS:X.** FFmpeg and Jellyfin report alternate DTS:X presentations as plain `DTS-HD MA`, so choosing by their `DTS-HD MA + DTS:X` profile leaves those tracks on the old path. Offer every TrueHD and DTS-HD MA track instead. A session verifies Atmos or DTS:X as soon as decoding starts and throws for plain TrueHD or DTS-HD MA, so the host falls back before playback; see [troubleshooting](troubleshooting.md#apacstreamstart-or-a-session-throws).
 - **Video, subtitles and UI.** `APACStream` passes the server's video and subtitle renditions through unchanged. `SpatialAudioRenderer` leaves video entirely to the host.
 - **A native audio route.** APAC needs Apple's playback stack: `AVPlayer` or `AVSampleBufferAudioRenderer`. A software PCM output, as in VLC or mpv, cannot carry it.
 - **Lifecycle.** Stop the stream or renderer when playback ends or the item changes, and detach the activator.
