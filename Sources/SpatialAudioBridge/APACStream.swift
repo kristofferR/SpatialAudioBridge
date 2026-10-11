@@ -380,39 +380,67 @@ actor StreamEngine {
     /// before it, so a helper starts one segment `early` and discards that fragment.
     private func launch(from index: Int, early: Bool) -> Run {
         let start = CMTime(value: Int64(index - (early ? 1 : 0)) * segmentFrames + priming, timescale: 48_000)
+        // The playlist follows the container, which may outlast the track, so a run that reaches the
+        // track's end pads with silence to the playlist's. A run in a last segment shorter than the
+        // priming still needs one frame to write its fragment.
+        let end = max(totalFrames, start.value + 1)
         let (file, track, codec, configuration, store, segmentFrames) =
             (self.file, self.track, self.codec, self.configuration, self.store, self.segmentFrames)
         let id = UUID()
         store.begin(run: id, first: index)
         let task = Task.detached { [weak self] in
             do {
-                var transcoder: SpatialAudioTranscoder?
-                var handedOver = false
-                for try await packet in file.packets(of: track, from: start) {
+                func transcoder(from inputStart: CMTime?) throws -> SpatialAudioTranscoder {
+                    var settings = configuration
+                    settings.startTime = start
+                    settings.inputStartTime = inputStart
+                    return try SpatialAudioTranscoder(codec: codec, destination: .segments(
+                        syncPeriodsPerSegment: Self.periods,
+                        onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
+                        configuration: settings)
+                }
+                // Whether the run carries on, holding it at the lookahead. It stops once its stream
+                // is released, which ends the engine, or a helper takes over.
+                func proceeds() async -> Bool {
+                    guard let self, await !self.handOver(from: id) else { return false }
+                    await self.paceRun(id)
+                    return true
+                }
+                var session: SpatialAudioTranscoder?
+                var reached = start.value
+                var reachesEnd = true
+                for try await packet in file.packets(of: track, from: start, endingAfter: Self.trackEndGap) {
                     try Task.checkCancellation()
-                    if transcoder == nil {
-                        var settings = configuration
-                        settings.startTime = start
-                        settings.inputStartTime = packet.time
-                        transcoder = try SpatialAudioTranscoder(codec: codec, destination: .segments(
-                            syncPeriodsPerSegment: Self.periods,
-                            onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
-                            configuration: settings)
-                    }
+                    if session == nil { session = try transcoder(from: packet.time) }
                     // A gap or reset in the timestamps fails the run; every run reaching it would fail
                     // again, so the stream ends and the host falls back.
-                    try await transcoder?.append(packet.data, time: packet.time)
-                    // The engine is gone once its stream is released; stop converting.
-                    guard let self else { break }
-                    if await self.handOver(from: id) {
-                        handedOver = true
-                        break
-                    }
-                    await self.paceRun(id)
+                    try await session?.append(packet.data, time: packet.time)
+                    reached = max(reached, CMTimeConvertScale(packet.time, timescale: 48_000, method: .default).value)
+                    guard await proceeds() else { reachesEnd = false; break }
                 }
-                // Finishing a run that handed over would flush a partial fragment where the
-                // helper's full one belongs.
-                if handedOver { await transcoder?.cancel() } else if let transcoder { _ = try await transcoder.finish() }
+                if reachesEnd {
+                    // A run started past the track's end has no packets, so it decodes the track's
+                    // start to reject an empty or unsupported track as other runs would.
+                    if session == nil { try await Self.validate(track, of: file, codec: codec, layout: configuration.layout) }
+                    let session = try session ?? transcoder(from: nil)
+                    // Padding a segment at a time keeps a long silent tail at the lookahead and lets
+                    // a helper take over.
+                    var mark = reached + segmentFrames
+                    while mark < end {
+                        try await session.pad(to: CMTime(value: mark, timescale: 48_000))
+                        guard await proceeds() else { reachesEnd = false; break }
+                        mark += segmentFrames
+                    }
+                    // Finishing a run that handed over would flush a partial fragment where the
+                    // helper's full one belongs.
+                    if reachesEnd {
+                        _ = try await session.finish(paddingTo: CMTime(value: end, timescale: 48_000))
+                    } else {
+                        await session.cancel()
+                    }
+                } else {
+                    await session?.cancel()
+                }
                 store.end(run: id, failure: nil)
             } catch is CancellationError {
                 store.end(run: id, failure: nil)
@@ -421,6 +449,21 @@ actor StreamEngine {
             }
         }
         return Run(id: id, start: index, task: task)
+    }
+
+    /// A track with no frame for this long has ended, unless it has frames near the end of the
+    /// file. Audio is muxed within a second or two of its video.
+    static let trackEndGap = CMTime(value: 5, timescale: 1)
+
+    /// Decodes the start of `track` until it produces audio, failing as converting it would if
+    /// it is empty or unsupported.
+    private static func validate(_ track: MatroskaAudioTrack, of file: MatroskaFile, codec: SpatialAudioCodec,
+                                 layout: SpatialAudioLayout) async throws {
+        let decoder = try Decoder(codec: codec, layout: layout)
+        for try await packet in file.packets(of: track) {
+            guard try packet.data.withUnsafeBytes({ try decoder.decode($0, end: false) }).isEmpty else { return }
+        }
+        _ = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
     }
 
     /// Starts the planned helper once run `id` has delivered its first segment. Ends the run once it

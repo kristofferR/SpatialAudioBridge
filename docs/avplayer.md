@@ -137,6 +137,6 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 ## Limits
 
 - One audio track per stream; video on demand only.
-- The stream needs the file's duration, which Matroska files declare.
+- The stream needs the file's duration, which Matroska files declare. The audio playlist lasts that long, so a track that ends before the video ends in silence.
 - The host's media server must accept range requests. Its audio-only remux endpoints are unsuitable, because they start early and reset timestamps; see [media servers](media-servers.md).
 - APAC requires an appropriate Apple playback route. Software PCM output cannot carry it.

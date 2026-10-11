@@ -168,6 +168,69 @@ private func collect(_ packets: MatroskaPackets) async throws -> [MatroskaPacket
     #expect(packets.map(\.data) == fixture.trueHD.map(\.frame))
 }
 
+/// Counts the bytes read, to show what a remote file would transfer.
+private final class CountingSource: MediaByteSource, @unchecked Sendable {
+    private let file: FileByteSource
+    private let lock = NSLock()
+    private var count: Int64 = 0
+    var bytesRead: Int64 { lock.withLock { count } }
+    init(url: URL) { file = FileByteSource(url: url) }
+    func length() async throws -> Int64 { try await file.length() }
+    func read(_ range: Range<Int64>) async throws -> Data {
+        let data = try await file.read(range)
+        lock.withLock { count += Int64(data.count) }
+        return data
+    }
+}
+
+/// A minute of one-second clusters of 128 KiB video, each cued, with a TrueHD frame at each of
+/// the `audio` seconds.
+private func videoOutlasting(audio: Set<Int>) throws -> URL {
+    let video = MKV.element(EBML.simpleBlock, MKV.blockBody(track: 1, milliseconds: 0, flags: 0x80, payload: Data(repeating: 0xAA, count: 128 * 1024)))
+    let clusters = (0..<60).map { second in
+        MKV.element(EBML.cluster, [MKV.uint(EBML.timestamp, UInt64(second * 1000)), video] + (audio.contains(second) ? [
+            MKV.element(EBML.simpleBlock, MKV.blockBody(track: 2, milliseconds: 0, flags: 0x80, payload: MKV.trueHD(UInt8(second), sync: true))),
+        ] : []))
+    }
+    let info = MKV.element(EBML.info, [MKV.uint(EBML.timestampScale, 1_000_000), MKV.float(EBML.duration, 60_000)])
+    let tracks = MKV.element(EBML.tracks, [
+        MKV.element(EBML.trackEntry, [MKV.uint(EBML.trackNumber, 1), MKV.uint(EBML.trackType, 1), MKV.string(EBML.codecID, "V_MPEGH/ISO/HEVC")]),
+        MKV.element(EBML.trackEntry, [MKV.uint(EBML.trackNumber, 2), MKV.uint(EBML.trackType, 2), MKV.string(EBML.codecID, "A_TRUEHD")]),
+    ])
+    func seekHead(cues: Int) -> Data {
+        MKV.element(EBML.seekHead, [MKV.element(EBML.seek, [MKV.element(EBML.seekID, MKV.id(EBML.cues)), MKV.uint(EBML.seekPosition, UInt64(cues))])])
+    }
+    var position = seekHead(cues: 0).count + info.count + tracks.count
+    var cuePoints: [Data] = []
+    for (second, cluster) in clusters.enumerated() {
+        cuePoints.append(MKV.element(EBML.cuePoint, [MKV.uint(EBML.cueTime, UInt64(second * 1000)),
+                                                     MKV.element(EBML.cueTrackPositions, [MKV.uint(0xF7, 1), MKV.uint(EBML.cueClusterPosition, UInt64(position))])]))
+        position += cluster.count
+    }
+    let segment = MKV.element(EBML.segment, [seekHead(cues: position), info, tracks] + clusters + [MKV.element(EBML.cues, cuePoints)])
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("matroska-\(UUID().uuidString).mkv")
+    try (MKV.element(EBML.header, [MKV.string(EBML.docType, "matroska")]) + segment).write(to: url)
+    return url
+}
+
+@Test func streamReadingEndsATrackThatStopsBeforeTheVideo() async throws {
+    let gap = CMTime(value: 5, timescale: 1)
+    func seconds(audio: Set<Int>, from start: Int = 0) async throws -> (frames: [Double], read: Double) {
+        let source = CountingSource(url: try videoOutlasting(audio: audio))
+        let file = try await MatroskaFile.open(source)
+        let packets = try await collect(file.packets(of: file.audioTracks[0], from: CMTime(value: Int64(start), timescale: 1), endingAfter: gap))
+        return (packets.map(\.time.seconds), Double(source.bytesRead) / Double(try await source.length()))
+    }
+    // The track ends 5 s after its last frame, without reading the rest of the video.
+    let early = try await seconds(audio: [0, 1, 2])
+    #expect(early.frames == [0, 1, 2])
+    #expect(early.read < 0.5)
+    #expect(try await seconds(audio: [0, 1, 2], from: 30).frames == [])
+    // A track that starts late, or resumes before the last cue, is read to its end.
+    #expect(try await seconds(audio: [20, 21]).frames == [20, 21])
+    #expect(try await seconds(audio: [0, 1, 40, 59]).frames == [0, 1, 40, 59])
+}
+
 @Test func xiphAndFixedLacingSplitFrames() throws {
     let xiph = Data([2, 255, 1, 3]) + Data(repeating: 1, count: 256) + Data(repeating: 2, count: 3) + Data([9])
     #expect(try PacketReader.frames(xiph, lacing: 1).map(\.count) == [256, 3, 1])

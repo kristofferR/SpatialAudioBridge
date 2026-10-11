@@ -43,7 +43,7 @@ let report = try await audio.finish()
 
   A source starting after `startTime` is padded with silence instead.
 - **Backpressure.** Await each call. `append` suspends while Apple's writer catches up and rejects overlapping calls.
-- **Ending.** `finish()` flushes and returns an `APACConversionReport`. `cancel()` or cancelling the task ends the session without output. Any failure is terminal: create a new session to recover.
+- **Ending.** `finish()` flushes and returns an `APACConversionReport`. `finish(paddingTo:)` also pads output that would end before the given presentation time with silence, for example to end a rendition with a playlist sized from a longer video. `cancel()` or cancelling the task ends the session without output. Any failure is terminal: create a new session to recover.
 
 ### Read packets from Matroska
 
