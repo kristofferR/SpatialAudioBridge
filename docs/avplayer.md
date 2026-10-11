@@ -79,7 +79,7 @@ The master rewrite removes the server's audio renditions, replaces audio codecs 
 
 ## Seeking and synchronization
 
-Seek the player as usual. Segments lie on a fixed grid, so every conversion run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
+The APAC rendition starts at media time 0, so the video variants must too, as Jellyfin's stream-copy fMP4 remux does; video on another timeline, such as MPEG-TS starting at 10 s, would play out of sync. Seek the player as usual. Segments lie on a fixed grid, so every conversion run produces the same timestamps and audio keeps its place on the video timeline after any seek. [Architecture](architecture.md#timing) explains the grid.
 
 - Segments already converted are served at once: the lookahead ahead of the playhead, and the last 20 segments (about 64 s) behind it, so skipping back over recent audio is immediate.
 - Other requests start a new conversion run, whose first segment arrives about 2 s later and each following one about 0.7 s apart on Apple TV 4K (2nd generation), 1 s apart at 9.1.6. The stream restarts instead of waiting whenever that is sooner, because `AVPlayer` abandons a seek whose first segment takes more than about 3 s. Once the first segment is ready, a second run converts from 5 segments ahead at the same time, so the segments `AVPlayer` asks for next are often ready; see [concurrency](architecture.md#concurrency-bounds-and-failure).
