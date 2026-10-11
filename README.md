@@ -115,10 +115,10 @@ Symbol documentation is available in Xcode through DocC.
 Add the package from a release, in Xcode or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.1.1")
+.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.2.0")
 ```
 
-Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV, iPhone and iPad, and their arm64 simulators, so the host needs no Rust toolchain. From 1.2.0, apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
+Release tags download the Rust core as a checksummed XCFramework for Apple Silicon Macs, Apple TV, iPhone and iPad, and their arm64 simulators, so the host needs no Rust toolchain. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
 
 The API requires **tvOS 26+**, **iOS 26+** or **macOS 26+**. The package itself builds back to tvOS and iOS 13 and macOS 10.15, so apps that support older systems can depend on it and check `#available` before using it. iPhone and iPad builds link but are untested. The package offers three products:
 
