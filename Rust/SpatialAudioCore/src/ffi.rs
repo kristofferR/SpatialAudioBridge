@@ -33,6 +33,18 @@ pub extern "C" fn sab_create(codec: u32, channels: u32) -> *mut Handle {
     .unwrap_or(ptr::null_mut())
 }
 
+/// Applies TrueHD dialogue normalisation when `enabled` is nonzero; off by default. Call before
+/// the first `sab_push`.
+///
+/// # Safety
+/// `handle` must be a live session.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sab_set_dialogue_normalisation(handle: *mut Handle, enabled: i32) {
+    if let Some(handle) = unsafe { handle.as_mut() } {
+        handle.decoder.set_dialogue_normalisation(enabled != 0);
+    }
+}
+
 /// # Safety
 /// `handle` must be a live session. `data` must reference `length` bytes. The callback
 /// may read PCM only during the call and must not reenter or destroy this session.

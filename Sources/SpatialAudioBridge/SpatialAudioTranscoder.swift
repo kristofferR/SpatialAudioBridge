@@ -102,7 +102,7 @@ public actor SpatialAudioTranscoder {
         self.configuration = configuration
         self.destination = destination
         self.codec = codec
-        self.decoder = try Decoder(codec: codec, layout: configuration.layout)
+        self.decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
     }
 
     /// Pass the compressed audio payload, including DTS-HD extensions. MKV/TS bytes must be demuxed first.

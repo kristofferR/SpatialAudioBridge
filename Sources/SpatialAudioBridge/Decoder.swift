@@ -18,10 +18,11 @@ private final class PCMCollector {
 @available(macOS 26, iOS 26, tvOS 26, *)
 final class Decoder: @unchecked Sendable {
     private let handle: OpaquePointer
-    init(codec: SpatialAudioCodec, layout: SpatialAudioLayout) throws {
+    init(codec: SpatialAudioCodec, layout: SpatialAudioLayout, normalizesDialogue: Bool = false) throws {
         guard let handle = sab_create(codec.rawValue, layout.rawValue) else {
             throw SpatialAudioError.decoding("Could not create the spatial audio decoder")
         }
+        sab_set_dialogue_normalisation(handle, normalizesDialogue ? 1 : 0)
         self.handle = handle
     }
     deinit { sab_destroy(handle) }

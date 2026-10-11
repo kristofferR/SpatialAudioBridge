@@ -10,7 +10,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 |---|---|
 | Atmos source panner | Every panner target routes to its own speaker, interior and ceiling positions match values worked by hand from TS 103 448, and point gains have unit power on at most eight speakers and are continuous over a room grid |
 | Atmos panner against the specification | 2,880 point, size and divergence cases over both layouts match a literal transcription of TS 103 448 pseudocode 3 to 15 within 3.2 × 10⁻⁷ |
-| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, default and custom trims, extended precision and dialogue normalisation pass; warp mode 1 leaves a side surround position unchanged; remaining unsupported controls produce explicit errors |
+| Atmos rendering controls | Size, divergence, snap, zones, elevation disable, screen anchoring, default and custom trims, extended precision and optional dialogue normalisation pass; warp mode 1 leaves a side surround position unchanged; remaining unsupported controls produce explicit errors |
 | DTS:X angular panning | Physical speaker angles, overhead symmetry, unit power and absent channels on their own ring pass |
 | DTS:X alternate routing | All seven presentations in both layouts pass synthetic fold cleanup, role separation and physical-angle tests; object ramps and fallback errors pass |
 | IMAX three-component metadata | Upstream payload parsed and C/L/R components routed correctly in both layouts, using synthetic PCM |
@@ -134,6 +134,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 |---|---|
 | Dolby rendering on macOS | Apple's E-AC-3 decoder, through `ExtAudioFile` and `AVAssetReader`, returned only the 5.1 core of a DD+ Atmos fixture into a 7.1.4 layout, with silent heights, so it gives no reference object rendering |
 | Apple's live Atmos render | `AVPlayer` renders DD+ Atmos objects to 7.1.4 when its output device has that layout: BlackHole 16ch set to Apple's Atmos 7.1.4 layout, with an `MTAudioProcessingTap` recording the 12 channels. Against our 7.1.4 render of the TrueHD originals of three Dolby demos and four film excerpts, level-matched and compared in 200 ms windows: median direction error 0.1–2.1° (90th percentile at most 7.7°), ceiling energy share within 0.6 percentage points and mean elevation within ±0.4° on every clip, median per-channel share error at most 0.4 dB. The panner before the TS 103 448 one was 0.1–6.6° off and put up to 4.1 points too much in the ceiling. The reference passes through a lossy JOC encode; that error has not been separated out |
+| Level against Apple's render | Apple's render of DD+ Atmos ignores dialogue normalisation. Without it, the default since 1.3.0, our 7.1.4 renders of the TrueHD originals of natures-fury (dialogue level −27 dB) and amaze (−31 dB) were 0.15 dB and 0.13 dB below Apple's render of the matched DD+ tracks; with it, natures-fury was 4.15 dB below |
 
 ## Coverage
 

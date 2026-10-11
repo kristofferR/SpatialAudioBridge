@@ -27,6 +27,13 @@ impl Core {
             _ => Err("Unknown input codec".into()),
         }
     }
+    /// Applies TrueHD dialogue normalisation as an AV receiver does. Off by default, as in Apple
+    /// TV's own Atmos playback; DTS:X exposes no dialogue level.
+    pub fn set_dialogue_normalisation(&mut self, enabled: bool) {
+        if let Self::TrueHd(decoder) = self {
+            decoder.normalise_dialogue = enabled;
+        }
+    }
     pub fn push(
         &mut self,
         data: &[u8],
@@ -55,13 +62,14 @@ pub struct TrueHd {
     spatial: bool,
     held: Vec<Vec<Vec<f32>>>,
     held_frames: usize,
+    normalise_dialogue: bool,
     /// Dialogue normalisation gain signalled at the latest major sync, and the gain applied
     /// at the end of the previous access unit.
     dialogue: f32,
     level: Option<f32>,
 }
 
-/// The attenuation a native decoder applies so that dialogue plays at −31 dBFS.
+/// The attenuation an AV receiver applies so that dialogue plays at −31 dBFS.
 fn dialogue_gain(norm: u8) -> f32 {
     if (1..=31).contains(&norm) {
         10f32.powf((f32::from(norm) - 31.) / 20.)
@@ -83,6 +91,7 @@ impl TrueHd {
             spatial: false,
             held: Vec::new(),
             held_frames: 0,
+            normalise_dialogue: false,
             dialogue: 1.,
             level: None,
         }
@@ -117,7 +126,8 @@ impl TrueHd {
             {
                 return Err("This TrueHD stream has no Atmos presentation".into());
             }
-            if let Some(extra) = au
+            if self.normalise_dialogue
+                && let Some(extra) = au
                 .major_sync_info
                 .as_ref()
                 .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
