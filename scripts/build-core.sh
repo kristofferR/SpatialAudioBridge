@@ -6,12 +6,13 @@ ARTIFACTS="$TASK_ROOT/BinaryArtifacts"
 # The headers sit in a folder named after the module: hosts copy every static XCFramework's headers
 # into one include folder, where a top-level module.modulemap collides with other libraries' maps.
 HEADERS="$TASK_ROOT/Rust/SpatialAudioCore/include"
-TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim)
+TARGETS=(aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-tvos aarch64-apple-tvos-sim)
 if [[ "${1:-}" == "--mac-only" ]]; then TARGETS=(aarch64-apple-darwin); fi
 rustup target add "${TARGETS[@]}"
 # Remap local paths and pin deployment targets so the libraries do not depend on where or by whom
 # they are built. This replaces any RUSTFLAGS from the environment. The deployment targets match
-# Package.swift, where Apple Silicon Macs start at 11; the Swift API itself requires 26.
+# Package.swift, where Apple Silicon Macs start at 11 and Intel Macs at 10.15; the Swift API itself
+# requires 26.
 SYSROOT="$(rustc --print sysroot)"
 RUSTC_COMMIT="$(rustc -vV | sed -n 's/^commit-hash: //p')"
 REMAPS=(
@@ -22,15 +23,31 @@ REMAPS=(
 CARGO_ENCODED_RUSTFLAGS="$(IFS=$'\x1f'; echo "${REMAPS[*]}")"
 export CARGO_ENCODED_RUSTFLAGS MACOSX_DEPLOYMENT_TARGET=11.0 IPHONEOS_DEPLOYMENT_TARGET=13.0 TVOS_DEPLOYMENT_TARGET=13.0
 for TARGET in "${TARGETS[@]}"; do
-    cargo build --release --locked -j 1 --manifest-path "$MANIFEST" --target "$TARGET"
+    MACOS="11.0"; [[ "$TARGET" == x86_64-apple-darwin ]] && MACOS="10.15"
+    MACOSX_DEPLOYMENT_TARGET="$MACOS" cargo build --release --locked -j 1 --manifest-path "$MANIFEST" --target "$TARGET"
 done
 mkdir -p "$ARTIFACTS"
 OUTPUT="$ARTIFACTS/SpatialAudioCore.xcframework"
 # Replace only this script's generated framework and notices.
 rm -rf "$OUTPUT" "$ARTIFACTS/licenses"
+# One library per platform. Macs and the iOS simulator get universal ones, so hosts can build for
+# Intel too; Rust has no stable x86_64 tvOS simulator target.
+PLATFORMS=("aarch64-apple-darwin x86_64-apple-darwin" aarch64-apple-ios "aarch64-apple-ios-sim x86_64-apple-ios"
+    aarch64-apple-tvos aarch64-apple-tvos-sim)
 ARGS=()
-for TARGET in "${TARGETS[@]}"; do
-    ARGS+=(-library "$TASK_ROOT/Rust/SpatialAudioCore/target/$TARGET/release/libspatial_audio_core.a" -headers "$HEADERS")
+for PLATFORM in "${PLATFORMS[@]}"; do
+    BUILT=()
+    for TARGET in $PLATFORM; do
+        [[ " ${TARGETS[*]} " == *" $TARGET "* ]] && BUILT+=("$TASK_ROOT/Rust/SpatialAudioCore/target/$TARGET/release/libspatial_audio_core.a")
+    done
+    [[ ${#BUILT[@]} -eq 0 ]] && continue
+    LIBRARY="${BUILT[0]}"
+    if [[ ${#BUILT[@]} -gt 1 ]]; then
+        LIBRARY="$TASK_ROOT/Rust/SpatialAudioCore/target/universal/${PLATFORM%% *}/libspatial_audio_core.a"
+        mkdir -p "$(dirname "$LIBRARY")"
+        lipo -create "${BUILT[@]}" -output "$LIBRARY"
+    fi
+    ARGS+=(-library "$LIBRARY" -headers "$HEADERS")
 done
 xcodebuild -create-xcframework "${ARGS[@]}" -output "$OUTPUT"
 # xcodebuild lists the libraries in a different order on each run.
