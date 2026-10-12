@@ -62,7 +62,7 @@ guard let track = file.audioTracks.first(where: { $0.codec != nil && $0.language
 let stream = try await APACStream.start(file: file, track: track, videoMaster: videoMaster)
 ```
 
-`codec` is nil for tracks the library cannot convert. A TrueHD track's Atmos metadata, or a DTS track's DTS:X presentation, is only verified once decoding starts, which `start` does. To switch tracks during playback, stop the stream and start a new one at the current time.
+`codec` is nil for tracks the library cannot convert. A TrueHD track's Atmos metadata, or a DTS track's DTS:X presentation, is only verified once decoding starts, which `start` does. A refused track therefore costs the time `start` takes to fail, about 1.5 s, before the usual path plays. Where the server labels tracks, try TrueHD only when it is labelled Atmos (Jellyfin's `Profile` reads `Dolby TrueHD + Dolby Atmos`), but every DTS-HD MA track, since servers do not label every DTS:X presentation. To switch tracks during playback, stop the stream and start a new one at the current time.
 
 ## What the stream serves
 
@@ -105,6 +105,8 @@ let stream = try await APACStream.start(file: file, videoMaster: videoMaster, op
 ```
 
 The stream manages start times and always uses the live encoding profile, whatever `configuration` says. The default 7.1.4 layout uses 3.072 Mbit/s, about 1.2 MB per segment, so the defaults keep at most about 42 MB of converted audio; 9.1.6 raises that to about 56 MB. Apple TV folds 9.1.6 into 12 channels; see [Atmos output](atmos-output.md#output-format).
+
+Leave the APAC item's `preferredForwardBufferDuration` at its default. `AVPlayer` requests everything within it, and the stream converts every request, so a long forward buffer keeps conversion running far ahead of playback.
 
 `includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
 

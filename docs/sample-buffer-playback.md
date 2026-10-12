@@ -61,7 +61,10 @@ After a seek, or when attaching to a running output, the bursts may resume betwe
 An mpv host adds an audio output of its own that feeds the renderer, listed before its usual output (`ao=<own output>,audiounit`), and passes only these codecs through (`audio-spdif=truehd,dts-hd`). The output starts a new timeline with a new unpacker whenever mpv (re)starts it, and refuses other formats, such as DTS core alone, so mpv uses its usual output for them.
 
 - mpv's passthrough creates FFmpeg's `spdif` muxer on the first packet. Without it, mpv drops the audio track instead of falling back to PCM, so FFmpeg builds configured with `--disable-muxers` need `--enable-muxer=spdif`.
-- When the library refuses a track, such as DTS-HD MA without DTS:X, do not report a failed output to mpv: its reopen after a failed passthrough output never reached PCM on tvOS 27.2. Instead, on the player's mpv thread rather than the audio output's, remove that codec from `audio-spdif`, then set `aid` to `no` and back to the same track. mpv rebuilds the decoder and output as for a track switch and decodes to PCM. Restore the full `audio-spdif` before the next `loadfile`.
+- When the library refuses a track, such as DTS-HD MA without DTS:X, mpv has to decode it to PCM instead. Two ways worked on the Apple TV:
+  - On the player's mpv thread, rather than the audio output's, remove that codec from `audio-spdif`, then set `aid` to `no` and back to the same track. mpv rebuilds the decoder and output as for a track switch and decodes to PCM, about 40 ms after the refusal. Restore the full `audio-spdif` before the next `loadfile`.
+  - Report the failure from the output and refuse that format when mpv reopens it, so mpv falls back to PCM itself, about 0.6 s after the refusal, with no host code. This needs two mpv fixes for reopening a failed output: drop the frame held for the old output, and wake the output chain after the reset. Without them, the reopen never reached PCM.
+- mpv's software volume and mute never reach passthrough. An output can forward mpv's gain, which already combines volume, mute and replaygain, to `setVolume(_:)`. mpv sets the gain once before it opens the output.
 
 ## Status and errors
 
