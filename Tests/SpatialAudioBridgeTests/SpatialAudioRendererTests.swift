@@ -71,7 +71,11 @@ private func decode(_ packets: [Data], format: CMAudioFormatDescription, channel
     var packets = try encoder.encode(pcm[..<(frames / 2 * channels)])
     packets += try encoder.encode(pcm[(frames / 2 * channels)...], final: true)
     #expect(encoder.primingFrames == 2048)
-    let decoded = try decode(packets, format: encoder.format, channels: channels)
+    // The renderer resumes from sync packets: the first is one, and they recur at least as often as configured.
+    #expect(packets.first?.isIndependent == true)
+    let syncs = packets.indices.filter { packets[$0].isIndependent }
+    #expect(zip(syncs, syncs.dropFirst() + [packets.count]).allSatisfy { $1 - $0 <= 75 })
+    let decoded = try decode(packets.map(\.data), format: encoder.format, channels: channels)
     #expect(decoded.count / channels >= frames + encoder.primingFrames)
     // After the priming, each decoded channel correlates with its own tone and not its neighbour's.
     for channel in 0..<channels {

@@ -81,9 +81,15 @@ final class APACEncoder {
         feed?.deallocate()
     }
 
+    /// One encoded packet, and whether it decodes without the packets before it: an APAC sync packet.
+    struct Packet {
+        let data: Data
+        let isIndependent: Bool
+    }
+
     /// Appends PCM and returns the packets it completes. The live encoder holds 71 packets (1.5 s)
     /// before its first packet. `final` flushes the remaining audio.
-    func encode(_ samples: ArraySlice<Float>, final: Bool = false) throws -> [Data] {
+    func encode(_ samples: ArraySlice<Float>, final: Bool = false) throws -> [Packet] {
         pending.append(contentsOf: samples)
         draining = final
         // A call per TrueHD access unit is common. Waiting for a packet's worth of PCM avoids a
@@ -94,7 +100,7 @@ final class APACEncoder {
         defer { buffer.deallocate() }
         var descriptions = [AudioStreamPacketDescription](repeating: .init(), count: batch)
         var dependencies = [AudioStreamPacketDependencyDescription](repeating: .init(), count: batch)
-        var packets: [Data] = []
+        var packets: [Packet] = []
         while true {
             var count = UInt32(batch)
             var output = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
@@ -103,8 +109,9 @@ final class APACEncoder {
             let status = AudioConverterFillComplexBufferWithPacketDependencies(converter, { _, packets, data, _, context in
                 Unmanaged<APACEncoder>.fromOpaque(context!).takeUnretainedValue().provide(packets, data)
             }, Unmanaged.passUnretained(self).toOpaque(), &count, &output, &descriptions, &dependencies)
-            for description in descriptions.prefix(Int(count)) {
-                packets.append(Data(bytes: buffer + Int(description.mStartOffset), count: Int(description.mDataByteSize)))
+            for (description, dependency) in zip(descriptions.prefix(Int(count)), dependencies) {
+                packets.append(Packet(data: Data(bytes: buffer + Int(description.mStartOffset), count: Int(description.mDataByteSize)),
+                                      isIndependent: dependency.mIsIndependentlyDecodable != 0))
             }
             if status == Self.needsInput || (status == noErr && count == 0) { break }
             try Self.check(status)
