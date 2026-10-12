@@ -101,6 +101,7 @@ options.keptBehind = 20            // played segments kept for skipping back
 options.segmentTimeout = .seconds(30)
 // Offer only the server's stream-copy variant, never its transcoding fallbacks.
 options.includesVideoVariant = { $0.query?.contains("AllowVideoStreamCopy=true") == true }
+options.session = streamSession     // fetches the video master; see below
 let stream = try await APACStream.start(file: file, videoMaster: videoMaster, options: options)
 ```
 
@@ -109,6 +110,8 @@ The stream manages start times and always uses the live encoding profile, whatev
 Leave the APAC item's `preferredForwardBufferDuration` at its default. `AVPlayer` requests everything within it, and the stream converts every request, so a long forward buffer keeps conversion running far ahead of playback.
 
 `includesVideoVariant` matters with media servers that add transcoding variants. When a stream-copy video segment was slow, `AVPlayer` switched to Jellyfin's SDR variant and the server started a full 4K transcode. `start` throws when no variant remains.
+
+Give the stream its own `URLSession`, for both `HTTPByteSource` and `options.session`, when the app makes many requests of its own on `URLSession.shared`. A start or seek reads the file through about 20 sequential range requests, so every request queued ahead of them adds up. In one player, a resume right after launch, while the app synced its library with 8 concurrent requests, waited 83 s for its first range request and then timed out; later in the same session the same resume started in 8 s. A server busy with such a sync can also be slow on its own, so cap how long the player waits for the stream to start before using its usual audio.
 
 ## Monitor
 

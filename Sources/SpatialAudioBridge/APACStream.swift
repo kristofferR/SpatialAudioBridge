@@ -34,6 +34,9 @@ public final class APACStream: Sendable {
         /// Media servers often add transcoding fallbacks, which AVPlayer switches to when a segment
         /// is slow; Jellyfin's stream-copy variant is the one with `AllowVideoStreamCopy=true`.
         public var includesVideoVariant: @Sendable (URL) -> Bool = { _ in true }
+        /// The session that fetches the video master. Give it, and the file's `HTTPByteSource`, a
+        /// session of their own when the app's other traffic would queue ahead of them.
+        public var session: URLSession = .shared
 
         public init() {}
     }
@@ -87,7 +90,7 @@ public final class APACStream: Sendable {
             var request = URLRequest(url: videoMaster)
             for (field, value) in videoHeaders { request.setValue(value, forHTTPHeaderField: field) }
             let (data, response): (Data, URLResponse)
-            do { (data, response) = try await URLSession.shared.data(for: request) } catch { throw redactingURL(error) }
+            do { (data, response) = try await options.session.data(for: request) } catch { throw redactingURL(error) }
             guard (response as? HTTPURLResponse)?.statusCode == 200, let text = String(data: data, encoding: .utf8),
                   text.hasPrefix("#EXTM3U") else {
                 throw SpatialAudioError.source("Could not load the video playlist")
@@ -188,12 +191,21 @@ public final class APACStream: Sendable {
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-enum StreamError: Error {
+enum StreamError: LocalizedError {
     case outOfRange
     /// Conversion restarted elsewhere for a later request, so this segment will not arrive soon.
     case superseded
     case timedOut
     case stopped
+
+    var errorDescription: String? {
+        switch self {
+        case .outOfRange: "The segment is outside the stream"
+        case .superseded: "A later request moved conversion elsewhere"
+        case .timedOut: "Conversion did not reach the segment in time"
+        case .stopped: "The stream has stopped"
+        }
+    }
 }
 
 /// Converts and caches segments, restarting conversion where playback needs it.
