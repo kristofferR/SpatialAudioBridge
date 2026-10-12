@@ -404,9 +404,15 @@ fn trim_gain(
     10f32.powf(decibels / 20.)
 }
 
+/// Frames that play as silence when a DTS-HD stream is entered: lossless reconstruction builds on
+/// the core's filter history from earlier frames, so the first two decode with audible errors
+/// (about 3 dB below the signal in the first, up to −16 dBFS in the second).
+const DTS_WARMUP_FRAMES: u8 = 2;
+
 pub struct Dts {
     buffer: Vec<u8>,
     decoder: dca::HdDecoder,
+    warmup: u8,
     renderer: Renderer,
     fold_renderer: dca::FoldRenderer,
     presentation: Option<dca::XPresentation>,
@@ -418,6 +424,7 @@ impl Dts {
         Self {
             buffer: vec![],
             decoder: dca::HdDecoder::new(),
+            warmup: DTS_WARMUP_FRAMES,
             renderer: Renderer::new(layout),
             fold_renderer: dca::FoldRenderer::new(),
             presentation: None,
@@ -457,20 +464,35 @@ impl Dts {
             if self.buffer.len() < core_len + exss_len {
                 break;
             }
-            let frame = match self.decoder.decode(
+            let pcm = match self.decoder.decode(
                 &self.buffer[..core_len],
                 &self.buffer[core_len..core_len + exss_len],
             ) {
-                Ok(f) => Some(f),
-                Err(dca::HdError::Pending) => None,
+                Ok(frame) => {
+                    let mut pcm = self.render(frame)?;
+                    if self.warmup > 0 {
+                        self.warmup -= 1;
+                        pcm.data.fill(0.);
+                    }
+                    self.seen = true;
+                    pcm
+                }
+                // Entered mid-stream, the lossless layer can span frames and yield nothing yet;
+                // its duration still plays, as silence, so later audio keeps its time.
+                Err(dca::HdError::Pending) => {
+                    let frames = header.samples_per_channel();
+                    let channels = self.renderer.panner.count();
+                    Pcm {
+                        data: vec![0.; frames * channels],
+                        frames,
+                        rate: 48_000,
+                        channels,
+                    }
+                }
                 Err(e) => return Err(format!("DTS-HD decoding: {e:?}")),
             };
             self.buffer.drain(..core_len + exss_len);
-            if let Some(frame) = frame {
-                let pcm = self.render(frame)?;
-                output(pcm)?;
-                self.seen = true;
-            }
+            output(pcm)?;
         }
         if self.buffer.len() > 2 * 1024 * 1024 {
             return Err("DTS-HD access unit exceeds 2 MiB".into());
