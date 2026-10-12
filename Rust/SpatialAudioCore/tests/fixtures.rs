@@ -179,7 +179,19 @@ fn dts_frames(data: &[u8]) -> Vec<Vec<f32>> {
 #[test]
 #[ignore = "requires SAB_DTSX_FIXTURE elementary stream"]
 fn dtsx_entered_mid_stream_starts_silent_instead_of_distorted() {
-    let data = fs::read(env::var("SAB_DTSX_FIXTURE").expect("set the fixture path")).unwrap();
+    enter_mid_stream("SAB_DTSX_FIXTURE");
+}
+
+#[test]
+#[ignore = "requires SAB_DTSX_ALTERNATE_FIXTURE elementary stream"]
+fn alternate_dtsx_entered_mid_stream_starts_silent_instead_of_distorted() {
+    enter_mid_stream("SAB_DTSX_ALTERNATE_FIXTURE");
+}
+
+/// Starts a fresh decoder halfway through the stream, as a seek does, and compares it with a
+/// continuous decode.
+fn enter_mid_stream(variable: &str) {
+    let data = fs::read(env::var(variable).expect("set the fixture path")).unwrap();
     let mut offsets = vec![];
     let mut offset = 0;
     while offset < data.len() {
