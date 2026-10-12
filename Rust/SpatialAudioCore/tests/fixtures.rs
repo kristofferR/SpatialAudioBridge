@@ -162,3 +162,70 @@ fn alternate_dtsx_profiles_preserve_spatial_audio_and_timing() {
     );
     validate(2, variable);
 }
+
+/// Each decoded frame of a DTS-HD stream, as delivered by a fresh decoder.
+fn dts_frames(data: &[u8]) -> Vec<Vec<f32>> {
+    let mut decoder = Core::new(2, Layout::SevenOneFour).unwrap();
+    let mut frames = vec![];
+    decoder
+        .push(data, true, &mut |pcm| {
+            frames.push(pcm.data);
+            Ok(())
+        })
+        .unwrap();
+    frames
+}
+
+#[test]
+#[ignore = "requires SAB_DTSX_FIXTURE elementary stream"]
+fn dtsx_entered_mid_stream_starts_silent_instead_of_distorted() {
+    enter_mid_stream("SAB_DTSX_FIXTURE");
+}
+
+#[test]
+#[ignore = "requires SAB_DTSX_ALTERNATE_FIXTURE elementary stream"]
+fn alternate_dtsx_entered_mid_stream_starts_silent_instead_of_distorted() {
+    enter_mid_stream("SAB_DTSX_ALTERNATE_FIXTURE");
+}
+
+/// Starts a fresh decoder halfway through the stream, as a seek does, and compares it with a
+/// continuous decode.
+fn enter_mid_stream(variable: &str) {
+    let data = fs::read(env::var(variable).expect("set the fixture path")).unwrap();
+    let mut offsets = vec![];
+    let mut offset = 0;
+    while offset < data.len() {
+        offsets.push(offset);
+        let core_len = dca::parse_header(&data[offset..]).unwrap().frame_size;
+        offset += core_len + dca::exss_substream_size(&data[offset + core_len..]).unwrap();
+    }
+    let whole = dts_frames(&data);
+    let entry = offsets.len() / 2;
+    let entered = dts_frames(&data[offsets[entry]..]);
+    assert_eq!(whole.len(), offsets.len(), "every frame plays");
+    assert_eq!(
+        entered.len(),
+        offsets.len() - entry,
+        "every frame keeps its duration"
+    );
+    // A frame the lossless layer is still buffering, then two warm-up frames, play as silence.
+    let silent = entered
+        .iter()
+        .take_while(|frame| frame.iter().all(|value| *value == 0.))
+        .count();
+    assert!((2..=4).contains(&silent), "{silent} silent frames");
+    let error = |frame: usize| {
+        entered[frame]
+            .iter()
+            .zip(&whole[entry + frame])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0f32, f32::max)
+    };
+    let first = error(silent);
+    assert!(
+        first < 0.03,
+        "the first audible frame is within −30 dBFS: {first}"
+    );
+    let later = error(silent + 10);
+    assert!(later < 1e-4, "the decode has converged: {later}");
+}

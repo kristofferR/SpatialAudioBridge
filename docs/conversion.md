@@ -32,7 +32,7 @@ let report = try await audio.finish()
 ```
 
 - **Input.** Pass only the selected track's payloads, in order and without container framing. Chunk boundaries do not matter: the decoded audio is bit-identical whether bytes arrive in 4096- or 317-byte pieces.
-- **Start.** Begin at a TrueHD major sync or a DTS core sync. TrueHD may start at any later major sync, such as one reached by a seek: audio before the first object metadata, usually 7.5–20 ms, is held and rendered at the first known object positions.
+- **Start.** Begin at a TrueHD major sync or a DTS core sync. TrueHD may start at any later major sync, such as one reached by a seek: audio before the first object metadata, usually 7.5–20 ms, is held and rendered at the first known object positions. DTS-HD may start at any later frame. Its lossless layer rebuilds on the core's history, so the first two decoded frames, about 21 ms, play as silence instead of distorted, and a frame the lossless layer is still buffering plays as silence too; every frame keeps its duration.
 - **Timing.** Output timestamps start at `startTime` and advance by decoded samples, without drift. Pass each packet's container time as `time`: a gap or reset in those times then fails the session, which samples alone cannot span. Frames laced into one block may share a time.
 - **Seeking.** A seek, timestamp gap or format change needs a new session. A seek normally lands on a sync point before the target; set `inputStartTime` to that packet's time and `startTime` to the target, and the session discards audio before the target:
 

@@ -55,6 +55,8 @@ TrueHD signals a dialogue level for the object presentation. An AV receiver deco
 
 A stream entered at a later major sync, after a seek or from a server-side remux, usually carries its first object metadata a few access units in: 7.5–20 ms in measured Blu-ray streams, which then repeat it every 32 ms. The decoder holds up to 0.5 s of audio until that metadata arrives and renders it at the first metadata block's positions. Every sample is kept, so timing is unchanged. A stream without object metadata within 0.5 s is rejected.
 
+A DTS-HD stream entered at a later frame needs the core's history from earlier frames for lossless reconstruction. Measured over 120 seeks into five streams, the first decoded frame's error had a median level only 2.7 dB below the signal itself, and the second frame's error still reached −16 dBFS. Those two frames play as silence; the next is within −30 dBFS of a continuous decode and identical within about ten frames. The decoder cannot tell a stream's first frame from a later one, so a conversion from the very start also begins with these 21 ms of silence, where film soundtracks are silent anyway. A frame whose lossless data is still buffering at the entry point, which the decoder reports as pending, plays as silence for its duration, so later audio keeps its time.
+
 The decoder rejects objects outside the room (distance metadata, which TS 103 448 does not render), reserved zone constraints and warp modes, ISF, multiple beds, bed distribution and bed downmix metadata. None of these appeared in the [library census](validation.md#library-census), and of the controls above only warp mode 1, with default trims, did. Hosts should select their existing fallback on these errors.
 
 ## DTS:X
