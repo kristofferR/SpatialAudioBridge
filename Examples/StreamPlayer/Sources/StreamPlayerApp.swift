@@ -16,6 +16,7 @@ import SwiftUI
 /// - `SAB_START`: optional start time in seconds.
 /// - `SAB_RENDERER=1`: plays the audio alone through `SpatialAudioRenderer` instead of AVPlayer.
 /// - `SAB_SEEK_TEST=1`: seeks like a remote would and logs how long each seek takes to play again.
+/// - `SAB_NO_ATMOS=1`: plays without `AtmosOutputActivator`, to compare routes that don't need it, such as AirPods.
 @main struct StreamPlayerApp: App {
     // devicectl --console reads stdout through a pipe; keep diagnostics line-buffered.
     init() { setvbuf(stdout, nil, _IOLBF, 0) }
@@ -34,6 +35,8 @@ import SwiftUI
     /// stall recovery resumes there.
     private var pendingSeek: (target: CMTime, since: ContinuousClock.Instant)?
     private var recoveries = 0
+    /// The last logged audio route.
+    private var route = ""
 
     /// Records a seek from the remote or the seek test.
     func noteSeek(to target: CMTime) { pendingSeek = (target, .now) }
@@ -109,6 +112,8 @@ import SwiftUI
     }
 
     private func activateAtmos(_ attach: (AtmosOutputActivator) -> Void) {
+        logRoute()
+        guard ProcessInfo.processInfo.environment["SAB_NO_ATMOS"] != "1" else { return }
         let atmos = AtmosOutputActivator()
         attach(atmos)
         self.atmos = atmos
@@ -178,6 +183,7 @@ import SwiftUI
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             guard let synchronizer else { return }
+            logRoute()
             let rendering = await renderer.renderingStatus
             log(String(format: "t=%.1f rate=%.1f renderer=%d silentAtmos=%@ available=%d MB", synchronizer.currentTime().seconds,
                        synchronizer.rate, rendering.rawValue, atmos?.isActive == true ? "on" : "off",
@@ -218,6 +224,7 @@ import SwiftUI
                 changed = .now
             }
             guard tick % 20 == 0 else { continue }
+            logRoute()
             let item = player.currentItem
             // Only the file name: server URLs can carry credentials.
             let errors = item?.errorLog()?.events.suffix(2).map {
@@ -238,6 +245,16 @@ import SwiftUI
         case .playing: "playing"
         @unknown default: "unknown"
         }
+    }
+
+    /// Logs the audio route and whether it spatializes, such as AirPods with spatial audio on iPhone,
+    /// whenever it changes.
+    private func logRoute() {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+            .map { "\($0.portType.rawValue) \($0.portName) spatial=\($0.isSpatialAudioEnabled)" }.joined(separator: ", ")
+        guard outputs != route else { return }
+        route = outputs
+        log("route: " + outputs)
     }
 
     private func log(_ message: String) { print("STREAM \(message)") }
@@ -285,10 +302,12 @@ struct PlayerView: UIViewControllerRepresentable {
         let onSeek: (CMTime) -> Void
         init(onSeek: @escaping (CMTime) -> Void) { self.onSeek = onSeek }
 
+        #if os(tvOS)
         func playerViewController(_ playerViewController: AVPlayerViewController,
                                   timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) -> CMTime {
             onSeek(targetTime)
             return targetTime
         }
+        #endif
     }
 }

@@ -37,6 +37,7 @@ try await audio.endOfStream()
 - **Readiness.** The live encoder holds 71 packets (1.5 s) of input before its first packet. Start the synchronizer only when `isReadyToPlay` is true.
 - **Seek.** Pause the synchronizer, call `begin(at:)` with the target, which flushes queued audio and resets the decoder and encoder, then feed packets from the target and start the clock again once ready. An `enqueue` still waiting from before the seek throws `CancellationError` instead of queuing stale audio.
 - **Pause and rate.** The host sets the synchronizer's rate. `AtmosOutputActivator` follows it.
+- **Route changes.** When the output route changes, such as headphones connecting, the system can drop queued audio or switch the output to another format. The renderer enqueues the audio again, from the flush time or the playhead, so the host needs to do nothing.
 - **Mute and volume.** `setMuted(_:)` and `setVolume(_:)` control the APAC output and hold across timelines. Passthrough hosts need them: their own software volume and mute never reach the renderer.
 - **Discontinuities.** A timestamp jump or a format change needs `begin(at:)`, just like a seek.
 

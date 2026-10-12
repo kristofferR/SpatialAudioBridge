@@ -71,7 +71,11 @@ private func decode(_ packets: [Data], format: CMAudioFormatDescription, channel
     var packets = try encoder.encode(pcm[..<(frames / 2 * channels)])
     packets += try encoder.encode(pcm[(frames / 2 * channels)...], final: true)
     #expect(encoder.primingFrames == 2048)
-    let decoded = try decode(packets, format: encoder.format, channels: channels)
+    // The renderer resumes from sync packets: the first is one, and they recur at least as often as configured.
+    #expect(packets.first?.isIndependent == true)
+    let syncs = packets.indices.filter { packets[$0].isIndependent }
+    #expect(zip(syncs, syncs.dropFirst() + [packets.count]).allSatisfy { $1 - $0 <= 75 })
+    let decoded = try decode(packets.map(\.data), format: encoder.format, channels: channels)
     #expect(decoded.count / channels >= frames + encoder.primingFrames)
     // After the priming, each decoded channel correlates with its own tone and not its neighbour's.
     for channel in 0..<channels {
@@ -108,6 +112,41 @@ func rendererPlaysMatroskaAudioFromASeek() async throws {
     }
     #expect(await renderer.renderingStatus == .rendering)
     #expect(synchronizer.currentTime().seconds > 20.5)
+    synchronizer.rate = 0
+}
+
+/// A route change, such as headphones connecting, makes the audio renderer drop queued audio by
+/// itself; the renderer enqueues it again and keeps playing.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"] != nil))
+func rendererRefillsAfterAnAutomaticFlush() async throws {
+    let file = try await MatroskaFile.open(FileByteSource(url: URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAB_MKV_FIXTURE"]!)))
+    let track = try #require(file.audioTracks.first { $0.codec == .trueHDAtmos })
+    let synchronizer = AVSampleBufferRenderSynchronizer()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos, synchronizer: synchronizer)
+    let start = CMTime(seconds: 20, preferredTimescale: 48_000)
+    try await renderer.begin(at: start)
+    var started = false, refills = 0
+    for try await packet in file.packets(of: track, from: start) {
+        try await renderer.enqueue(packet.data, time: packet.time)
+        if !started, await renderer.isReadyToPlay {
+            started = true
+            synchronizer.setRate(1, time: start)
+        }
+        // As the automatic flush would, half a second ahead of the playhead, then as an output
+        // format change would, with no time.
+        if started, refills == 0, synchronizer.currentTime().seconds > 21.5 {
+            refills += 1
+            await renderer.refill(from: CMTimeAdd(synchronizer.currentTime(), CMTime(value: 1, timescale: 2)))
+        } else if refills == 1, synchronizer.currentTime().seconds > 22.5 {
+            refills += 1
+            await renderer.refill(from: nil)
+        }
+        if packet.time.seconds > 30 { break }
+    }
+    #expect(refills == 2)
+    #expect(await renderer.renderingStatus == .rendering)
+    #expect(synchronizer.currentTime().seconds > 23)
     synchronizer.rate = 0
 }
 

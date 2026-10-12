@@ -34,6 +34,12 @@ public actor SpatialAudioRenderer {
     private var generation = 0
     private var state = State.accepting
     private enum State { case accepting, ended, failed }
+    /// Enqueued APAC packets that may not have played yet, from the latest sync packet before the
+    /// playhead on, to enqueue again after an automatic flush.
+    private var queued: [(buffer: CMSampleBuffer, start: CMTime, end: CMTime, isIndependent: Bool)] = []
+    /// Set while a refill is pending, so new audio waits behind it and stays in order.
+    private var refilling = false
+    private var observers: [any NSObjectProtocol] = []
 
     /// Whether enough APAC is queued to start the synchronizer. The encoder holds 71 packets
     /// (1.5 s) before its first packet, so start the clock only once this is true.
@@ -78,6 +84,7 @@ public actor SpatialAudioRenderer {
     }
 
     isolated deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
         audioRenderer.flush()
         synchronizer.removeRenderer(audioRenderer, at: synchronizer.currentTime())
     }
@@ -87,8 +94,11 @@ public actor SpatialAudioRenderer {
     /// before `time`; audio before `time` is discarded so playback starts exactly there.
     public func begin(at time: CMTime) throws {
         guard time.isNumeric else { throw SpatialAudioError.invalidConfiguration("The timeline must start at a finite time") }
+        if observers.isEmpty { observeOutput() }
         generation += 1
         audioRenderer.flush()
+        queued = []
+        refilling = false
         state = .failed
         decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
         encoder = try APACEncoder(configuration: configuration)
@@ -190,9 +200,9 @@ public actor SpatialAudioRenderer {
 
     /// Enqueues packets with timestamps shifted back by the encoder priming, so decoded audio lands
     /// at its presentation time, as the asset-writer path does.
-    private func submit(_ encoded: [Data], generation current: Int) async throws {
+    private func submit(_ encoded: [APACEncoder.Packet], generation current: Int) async throws {
         guard !encoded.isEmpty else { return }
-        while !audioRenderer.isReadyForMoreMediaData {
+        while refilling || !audioRenderer.isReadyForMoreMediaData {
             if audioRenderer.status == .failed { break }
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
@@ -202,10 +212,86 @@ public actor SpatialAudioRenderer {
         if audioRenderer.status == .failed {
             throw audioRenderer.error ?? SpatialAudioError.encoding("The audio renderer could not play APAC")
         }
-        let start = CMTimeSubtract(CMTimeAdd(timeline, CMTime(value: packets * 1024, timescale: 48_000)),
-                                   CMTime(value: Int64(encoder.primingFrames), timescale: 48_000))
-        audioRenderer.enqueue(try Self.sampleBuffer(encoded, format: encoder.format, at: start))
-        packets += Int64(encoded.count)
+        // One packet per buffer, so a flush always falls between packets.
+        for packet in encoded {
+            let start = CMTimeSubtract(CMTimeAdd(timeline, CMTime(value: packets * 1024, timescale: 48_000)),
+                                       CMTime(value: Int64(encoder.primingFrames), timescale: 48_000))
+            let buffer = try Self.sampleBuffer([packet.data], format: encoder.format, at: start)
+            audioRenderer.enqueue(buffer)
+            packets += 1
+            queued.append((buffer, start, CMTimeAdd(start, CMTime(value: 1024, timescale: 48_000)), packet.isIndependent))
+        }
+        // Keep what has yet to play, from the sync packet it decodes from.
+        let now = synchronizer.currentTime()
+        if let unplayed = queued.firstIndex(where: { $0.end > now }),
+           let sync = queued[...unplayed].lastIndex(where: \.isIndependent), sync > 0 {
+            queued.removeFirst(sync)
+        }
+    }
+
+    /// When the route changes, such as headphones connecting, the renderer may drop queued audio or
+    /// find the output in another format; either way it needs the audio enqueued again.
+    private func observeOutput() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: .AVSampleBufferAudioRendererWasFlushedAutomatically, object: audioRenderer, queue: nil) { [weak self] notification in
+                let time = (notification.userInfo?[AVSampleBufferAudioRendererFlushTimeKey] as? NSValue)?.timeValue
+                Task { await self?.refill(from: time) }
+            },
+            center.addObserver(forName: .AVSampleBufferAudioRendererOutputConfigurationDidChange, object: audioRenderer, queue: nil) { [weak self] _ in
+                Task { await self?.refill(from: nil) }
+            },
+        ]
+    }
+
+    /// Enqueues again what an automatic flush dropped, from the flush time on, or with no time
+    /// everything yet to play. Audio enqueued while the notification was on its way may have survived
+    /// the flush, so flush from that time first.
+    func refill(from time: CMTime?) {
+        guard state != .failed, !refilling, !queued.isEmpty else { return }
+        guard let time, time.isNumeric else { return requeue() }
+        let current = generation
+        refilling = true
+        audioRenderer.flush(fromSourceTime: time) { [weak self] flushed in
+            Task { await self?.enqueueAgain(from: time, flushed: flushed, generation: current) }
+        }
+    }
+
+    private func enqueueAgain(from time: CMTime, flushed: Bool, generation current: Int) {
+        // A newer timeline has reset the refill, and may have started its own.
+        guard generation == current else { return }
+        refilling = false
+        // Too close to the playhead to flush part of the queue: start over from what has yet to play.
+        guard flushed else { return requeue() }
+        for entry in queued where entry.start >= time { audioRenderer.enqueue(entry.buffer) }
+    }
+
+    /// Flushes and enqueues everything yet to play again, which also reconfigures the output for it.
+    /// The flush resets the decoder, so it starts at the sync packet before the playhead; the packets
+    /// before the playhead only prime the decoder.
+    private func requeue() {
+        audioRenderer.flush()
+        let now = synchronizer.currentTime()
+        guard let unplayed = queued.firstIndex(where: { $0.end > now }) else { return }
+        let sync = queued[...unplayed].lastIndex(where: \.isIndependent) ?? unplayed
+        for (index, entry) in queued.enumerated() where index >= sync {
+            guard index < unplayed, let primer = Self.trimmed(entry.buffer) else {
+                audioRenderer.enqueue(entry.buffer)
+                continue
+            }
+            audioRenderer.enqueue(primer)
+        }
+    }
+
+    /// A copy of a one-packet buffer that the renderer decodes but does not play.
+    private static func trimmed(_ buffer: CMSampleBuffer) -> CMSampleBuffer? {
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopy(allocator: kCFAllocatorDefault, sampleBuffer: buffer, sampleBufferOut: &copy) == noErr,
+              let copy else { return nil }
+        CMSetAttachment(copy, key: kCMSampleBufferAttachmentKey_TrimDurationAtStart,
+                        value: CMTimeCopyAsDictionary(CMTime(value: 1024, timescale: 48_000), allocator: kCFAllocatorDefault),
+                        attachmentMode: kCMAttachmentMode_ShouldPropagate)
+        return copy
     }
 
     private static func sampleBuffer(_ encoded: [Data], format: CMAudioFormatDescription, at time: CMTime) throws -> CMSampleBuffer {
