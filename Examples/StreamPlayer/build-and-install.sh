@@ -13,6 +13,7 @@ xcodebuild -project "$APP_DIR/StreamPlayer.xcodeproj" -scheme StreamPlayer \
   DEVELOPMENT_TEAM="${SAB_DEVELOPMENT_TEAM:-S5Q742QZEL}" \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build > "$APP_DIR/build.log" 2>&1 \
   || { tail -n 30 "$APP_DIR/build.log"; echo "Build failed; see $APP_DIR/build.log" >&2; exit 1; }
-# The app was just built for this device's platform: Apple TV or iPhone and iPad.
-APP="$(ls -td "$APP_DIR"/DerivedData/Build/Products/Debug-*os/StreamPlayer.app | head -n 1)"
-xcrun devicectl device install app --device "$DEVICE_ID" "$APP" --json-output "$APP_DIR/install.json"
+# The product directory for this device's platform: Apple TV, or iPhone and iPad.
+PRODUCTS="$(xcodebuild -project "$APP_DIR/StreamPlayer.xcodeproj" -scheme StreamPlayer -destination "id=$DEVICE_ID" \
+  -derivedDataPath "$APP_DIR/DerivedData" -showBuildSettings 2>/dev/null | sed -n 's/^ *TARGET_BUILD_DIR = //p' | head -n 1)"
+xcrun devicectl device install app --device "$DEVICE_ID" "$PRODUCTS/StreamPlayer.app" --json-output "$APP_DIR/install.json"
