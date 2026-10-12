@@ -25,6 +25,8 @@
 | `.source("Could not load the video playlist")` | The video master URL failed or did not return a playlist; check its authorization. |
 | `.source(…)` from `HTTPByteSource` | The server rejected the request or ignored the range. Server errors (5xx), timeouts and lost connections arrive as `URLError` instead. It must answer range requests with status 206. |
 
+To skip a track the next time it plays, remember only `.decoding` errors: they describe the track, so every later attempt fails the same way. `.source`, `.encoding`, `.coreMedia` and `URLError` failures can come from the network, a timestamp jump or the encoder, so fall back for that playback only.
+
 Jellyfin 12.2 returns 401 for the older `api_key` query parameter; use `ApiKey` or a header.
 
 ## AVPlayer error log entries
