@@ -2,6 +2,7 @@ name: StreamPlayer
 options:
   deploymentTarget:
     tvOS: '26.0'
+    iOS: '26.0'
 packages:
   SpatialAudioBridge:
     path: ../..
@@ -11,11 +12,10 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     DEVELOPMENT_TEAM: S5Q742QZEL
     CODE_SIGN_STYLE: Automatic
-    TARGETED_DEVICE_FAMILY: '3'
 targets:
   StreamPlayer:
     type: application
-    platform: tvOS
+    supportedDestinations: [tvOS, iOS]
     sources:
       - Sources
     dependencies:
@@ -36,6 +36,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Stream Player
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations[sdk=iphone*]": UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         ASSETCATALOG_COMPILER_APPICON_NAME: ''
 schemes:
   StreamPlayer:

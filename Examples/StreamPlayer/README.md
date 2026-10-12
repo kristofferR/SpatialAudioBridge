@@ -1,11 +1,11 @@
-# StreamPlayer for Apple TV
+# StreamPlayer
 
-A small tvOS 26+ player that plays a media server's MKV with its TrueHD Atmos or DTS:X track converted to APAC. It is the end-to-end test for the library's playback paths:
+A small tvOS and iOS 26+ player that plays a media server's MKV with its TrueHD Atmos or DTS:X track converted to APAC. It is the end-to-end test for the library's playback paths:
 
 - **AVPlayer (default):** `APACStream` serves the audio beside the server's HLS video, played in `AVPlayerViewController`.
 - **Renderer (`SAB_RENDERER=1`):** audio only, through `SpatialAudioRenderer` on an `AVSampleBufferRenderSynchronizer`.
 
-Both modes attach `AtmosOutputActivator` and configure the audio session as in the [Atmos output guide](../../docs/atmos-output.md).
+Both modes attach `AtmosOutputActivator` and configure the audio session as in the [Atmos output guide](../../docs/atmos-output.md). On iPhone and iPad the same app tests spatial audio on headphones, such as AirPods: the log shows the audio route and whether it spatializes when playback starts and whenever the route changes, and `SAB_NO_ATMOS=1` leaves out the activator, which only HDMI receivers need.
 
 ## Build and install
 
@@ -16,7 +16,7 @@ cd Examples/StreamPlayer
 SAB_DEVELOPMENT_TEAM="YOUR_TEAM_ID" ./build-and-install.sh "DEVICE_ID"
 ```
 
-`xcrun devicectl list devices` shows the Apple TV's identifier. The script generates the project, builds with one job and installs the app.
+`xcrun devicectl list devices` shows the Apple TV's or iPhone's identifier. The script generates the project, builds with one job and installs the app.
 
 ## Run
 
@@ -31,6 +31,7 @@ The app reads its configuration from the launch environment. With `devicectl`, p
 | `SAB_START` | Optional start time in seconds |
 | `SAB_RENDERER` | `1` to play the audio through `SpatialAudioRenderer` instead of AVPlayer |
 | `SAB_SEEK_TEST` | `1` to run a scripted seek test: skips, scrubs and jumps as a remote issues them, each timed until playback resumes |
+| `SAB_NO_ATMOS` | `1` to play without `AtmosOutputActivator`, to compare routes that don't need it, such as AirPods |
 | `OS_ACTIVITY_DT_MODE` | `enable` to mirror the library's log, such as each segment request and restart, to the console |
 
 For Jellyfin, with an API key in `KEY` and the item and media source ID in `ID` (see [media servers](../../docs/media-servers.md)):
