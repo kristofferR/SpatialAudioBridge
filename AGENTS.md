@@ -53,13 +53,13 @@ Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV 
 
 ## Development and validation
 
-Run general Rust development and fixture processing on the Linux workstation. Use macOS for Apple SDK work and native encoding/decoding, with one build job on the resource-limited Mac.
+Run general Rust development and fixture processing on the Linux workstation. Build and test for Apple platforms on GitHub Actions: the Core workflow builds the release archive and runs the package tests on every pull request. Kris's Mac is not for builds; media fixture tests, which need the private fixtures, run on a Mac only when he asks.
 
 ```sh
 cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
 cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
 
-# On macOS; rebuild the XCFramework after Rust changes.
+# On macOS (GitHub Actions); rebuild the XCFramework after Rust changes.
 ./scripts/build-core.sh
 swift build -j 1 -Xswiftc -warnings-as-errors
 swift test -j 1 -Xswiftc -warnings-as-errors
@@ -69,4 +69,4 @@ Media tests require `SAB_TRUEHD_FIXTURE`, `SAB_DTSX_FIXTURE`, `SAB_DTSX_ALTERNAT
 
 Keep [README.md](README.md), the guides in [docs](docs/) and [docs/validation.md](docs/validation.md) aligned with supported behavior and measured results. Do not repeat expensive validation unless a change or unresolved failure justifies it.
 
-To release, run `./scripts/release-core.sh VERSION` on a clean checkout of the latest `origin/main`, then push the tag and create the GitHub release with the printed commands. The release commit stays off `main`: hosts get a downloaded core from release tags, while `main` keeps the local binary target so tests always link the Rust sources. Never move or replace a published tag or archive; its checksum is pinned by dependents.
+To release, run the Core workflow on `main` with the version (`gh workflow run core.yml -f version=VERSION`). It runs `./scripts/release-core.sh VERSION`, tests the package, pushes the tag and creates the GitHub release. The release commit stays off `main`: hosts get a downloaded core from release tags, while `main` keeps the local binary target so tests always link the Rust sources. Never move or replace a published tag or archive; its checksum is pinned by dependents.

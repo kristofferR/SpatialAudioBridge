@@ -1,0 +1,72 @@
+name: Core
+
+# Builds the Rust core's release archive and tests the package against it. Run by hand on main
+# with a version, it instead tags and publishes that release, as scripts/release-core.sh describes.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release to tag and publish (MAJOR.MINOR.PATCH); leave empty to only build
+        required: false
+        default: ""
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    if: inputs.version == ''
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchains
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+          xcodebuild -version
+      - name: Build the release archive
+        run: ./scripts/release-core.sh
+      - name: Build and test the package
+        run: |
+          swift build -Xswiftc -warnings-as-errors
+          swift test -Xswiftc -warnings-as-errors
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpatialAudioCore
+          path: BinaryArtifacts/SpatialAudioCore.xcframework.zip
+
+  release:
+    if: inputs.version != ''
+    runs-on: macos-26
+    permissions:
+      contents: write # pushes the release tag and creates the release
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Toolchains
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+          xcodebuild -version
+      - name: Build the archive and tag the release commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ./scripts/release-core.sh "$VERSION"
+      - name: Build and test the package
+        run: |
+          swift build -Xswiftc -warnings-as-errors
+          swift test -Xswiftc -warnings-as-errors
+      - name: Publish the release
+        run: |
+          git push origin "$VERSION"
+          gh release create "$VERSION" BinaryArtifacts/SpatialAudioCore.xcframework.zip --verify-tag \
+            --title "$VERSION" --notes-file BinaryArtifacts/release-notes.md
