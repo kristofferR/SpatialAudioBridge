@@ -118,7 +118,7 @@ Add the package from a release, in Xcode or in `Package.swift`:
 .package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.6.1")
 ```
 
-Release tags download the Rust core as a checksummed XCFramework for Macs, Apple TV, iPhone and iPad, and their simulators (universal for Macs and the iOS simulator), so the host needs no Rust toolchain. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
+Release tags download the Rust core as a checksummed XCFramework for Macs, Apple TV, iPhone and iPad, and their simulators (universal for Macs and the iOS simulator), so the host needs no Rust toolchain. Its library exports only the core's C functions and a weak `rust_eh_personality`, so it links beside other Rust static libraries, such as LibDovi. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
 
 The API requires **tvOS 26+**, **iOS 26+** or **macOS 26+**. The package itself builds back to tvOS and iOS 13 and macOS 10.15, so apps that support older systems can depend on it and check `#available` before using it. iPhone and iPad builds link but are untested. The package offers three products:
 

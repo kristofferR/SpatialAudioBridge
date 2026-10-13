@@ -83,6 +83,10 @@ Allow local networking in App Transport Security (`NSAllowsLocalNetworking`), an
 
 `… has been modified since the module file … was built`, followed by missing `sab_…` functions, means Xcode or SwiftPM reused the previous release's precompiled `SpatialAudioCore` module. Delete the `SpatialAudioCore-*.pcm` files in the build's module caches (in DerivedData, `SwiftExplicitPrecompiledModules` and `ModuleCache.noindex`; for SwiftPM, under `.build`), or clean the build.
 
+## The link fails with "Too many personality routines"
+
+The core catches its own panics with Rust's `rust_eh_personality`, and compact unwind fits at most three personality routines in one executable or dynamic library. C++ and Objective-C usually take two, so a third language with its own routine, such as LuaJIT in mpv's macOS builds, leaves no room. The linker also counts routines that only DWARF unwind information uses, and `-Wl,-no_compact_unwind` produced binaries that crashed when an exception was thrown, so link one of them into a separate dynamic library instead. Other Rust static libraries do not add a routine: the core's copy is weak and merges with theirs.
+
 ## Media tests are skipped
 
 The fixture tests need the fixture paths in environment variables; see [validation](validation.md#obtain-fixtures).
