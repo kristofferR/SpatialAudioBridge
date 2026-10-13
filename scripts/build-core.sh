@@ -38,9 +38,11 @@ prelink() {
     (cd "$work/members" && ar -x "$release/libspatial_audio_core.a" && rm -f __.SYMDEF*)
     printf '%s\n' '_sab_*' _rust_eh_personality > "$work/exports"
     local members=("$work"/members/*) version
-    # The objects' platform and minimum OS; ld -r would otherwise record an older default.
-    read -r -a version < <(otool -l "${members[0]}" | awk '$1 == "platform" {p = $2} $1 == "minos" {m = $2}
-        $1 == "sdk" {print p, m, ($2 == "n/a" ? "0.0" : $2); exit}')
+    # The platform and minimum OS the crate was compiled for; ld -r would otherwise record an older
+    # default. Precompiled compiler_builtins objects can carry only an older LC_VERSION_MIN_*.
+    read -r -a version < <(otool -l "${members[@]}" | awk '$1 == "platform" {p = $2} $1 == "minos" {m = $2}
+        $1 == "sdk" && p != "" {print p, m, ($2 == "n/a" ? "0.0" : $2); exit}')
+    [[ ${#version[@]} -eq 3 ]] || { echo "No LC_BUILD_VERSION in the $1 library" >&2; exit 1; }
     ld -r -platform_version "${version[@]}" -exported_symbols_list "$work/exports" -o "$work/core.o" "${members[@]}"
     strip -S "$work/core.o"
     # Neither ld nor strip can mark a definition weak: set N_WEAK_DEF in the symbol table.
