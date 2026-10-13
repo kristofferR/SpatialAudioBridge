@@ -197,7 +197,7 @@ cargo test --release --locked -- --include-ignored --test-threads=1
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-The `render` example reports each rendered channel's peak and the samples above full scale; write to `/dev/null` to measure a whole film:
+The `render` example writes unlimited PCM and reports each rendered channel's peak and the samples above full scale, before limiting; write to `/dev/null` to measure a whole film:
 
 ```sh
 cargo run --release --locked --example render -- truehd film.thd /dev/null 7.1.4
