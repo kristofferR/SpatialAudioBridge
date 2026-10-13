@@ -1,4 +1,6 @@
-import AVFoundation
+// Xcode 26's SDK does not mark AVSampleBufferRenderSynchronizer Sendable, and these tests keep
+// using the synchronizer they hand to the renderer.
+@preconcurrency import AVFoundation
 import Foundation
 import Testing
 @testable import SpatialAudioBridge
