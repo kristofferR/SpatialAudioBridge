@@ -68,6 +68,14 @@ impl Limiter {
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut released = Vec::with_capacity(self.pending.len());
+        let frames = self.pending.len() / self.channels;
+        if frames > 0 {
+            // A short stream has not filled the lookahead yet. Advance with silence until
+            // every minimum used for its first frame includes that frame.
+            for _ in frames..LOOKAHEAD - 1 {
+                self.step(0., false, &mut released);
+            }
+        }
         while !self.pending.is_empty() {
             self.step(0., true, &mut released);
         }
@@ -87,8 +95,8 @@ impl Limiter {
             return;
         }
         // Every window averaged here includes the released frame, so the gain never exceeds
-        // what that frame needs.
-        let falling = self.minima.iter().sum::<f32>() / LOOKAHEAD as f32;
+        // what that frame needs. Cap summation rounding at that frame's required gain.
+        let falling = (self.minima.iter().sum::<f32>() / LOOKAHEAD as f32).min(self.needed[0]);
         self.reduction *= self.release;
         if self.reduction < RECOVERED {
             self.reduction = 0.;
@@ -150,6 +158,37 @@ mod tests {
         let input = tone(10_000, 3, |_| 0.98);
         assert_eq!(limit(&input, 3, 4096), input);
         assert_eq!(limit(&input, 3, 1), input);
+    }
+
+    #[test]
+    fn short_streams_limit_every_peak_without_adding_frames() {
+        for frames in 1..=LOOKAHEAD {
+            for peak_frame in 0..frames {
+                let mut input = vec![0.25; frames * 2];
+                input[peak_frame * 2] = 4.;
+                input[peak_frame * 2 + 1] = -2.;
+                let output = limit(&input, 2, frames);
+                assert_eq!(output.len(), input.len());
+                assert_eq!(output, limit(&input, 2, 1));
+                assert!(
+                    output
+                        .iter()
+                        .all(|x| x.abs() <= CEILING * (1. + f32::EPSILON)),
+                    "{frames} frames, peak at {peak_frame}: {output:?}"
+                );
+                for (before, after) in input
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .zip(output.as_chunks::<2>().0)
+                {
+                    assert_eq!(after[0] / before[0], after[1] / before[1]);
+                }
+            }
+            let quiet = vec![0.25; frames * 2];
+            assert_eq!(limit(&quiet, 2, 1), quiet);
+        }
+        assert!(limit(&[], 2, 1).is_empty());
     }
 
     #[test]

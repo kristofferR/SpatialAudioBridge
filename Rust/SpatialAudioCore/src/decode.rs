@@ -18,10 +18,10 @@ pub struct Pcm {
     pub rate: u32,
     pub channels: usize,
 }
-/// Decodes and renders one stream, holding the speaker feeds below full scale.
+/// Decodes and renders one stream, holding the speaker feeds below full scale by default.
 pub struct Core {
     source: Source,
-    limiter: Limiter,
+    limiter: Option<Limiter>,
 }
 enum Source {
     TrueHd(Box<TrueHd>),
@@ -36,8 +36,15 @@ impl Core {
         };
         Ok(Self {
             source,
-            limiter: Limiter::new(layout.count()),
+            limiter: Some(Limiter::new(layout.count())),
         })
+    }
+    /// Decodes without peak limiting for measurements of the rendered speaker feeds.
+    /// Samples can exceed full scale; use `new` for playback.
+    pub fn new_unlimited(codec: u32, layout: Layout) -> Result<Self, String> {
+        let mut core = Self::new(codec, layout)?;
+        core.limiter = None;
+        Ok(core)
     }
     /// Applies TrueHD dialogue normalisation as an AV receiver does. Off by default, as in Apple
     /// TV's own Atmos playback; DTS:X exposes no dialogue level.
@@ -46,8 +53,8 @@ impl Core {
             decoder.normalise_dialogue = enabled;
         }
     }
-    /// Decodes `data`. The last few milliseconds of output wait for the audio after them, until
-    /// a call with `end` releases them.
+    /// Decodes `data`. With limiting enabled, the last few milliseconds of output wait for the
+    /// audio after them, until a call with `end` releases them.
     pub fn push(
         &mut self,
         data: &[u8],
@@ -55,13 +62,16 @@ impl Core {
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
     ) -> Result<(), String> {
         let limiter = &mut self.limiter;
-        let mut limited = |pcm: Pcm| limiter.push(pcm, output);
+        let mut limited = |pcm: Pcm| match limiter {
+            Some(limiter) => limiter.push(pcm, output),
+            None => output(pcm),
+        };
         match &mut self.source {
             Source::TrueHd(d) => d.push(data, end, &mut limited)?,
             Source::Dts(d) => d.push(data, end, &mut limited)?,
         }
-        if end {
-            self.limiter.finish(output)?;
+        if end && let Some(limiter) = &mut self.limiter {
+            limiter.finish(output)?;
         }
         Ok(())
     }
