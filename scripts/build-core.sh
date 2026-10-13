@@ -40,7 +40,7 @@ prelink() {
     local members=("$work"/members/*) version
     # The objects' platform and minimum OS; ld -r would otherwise record an older default.
     read -r -a version < <(otool -l "${members[0]}" | awk '$1 == "platform" {p = $2} $1 == "minos" {m = $2}
-        $1 == "sdk" {print p, m, ($2 == "n/a" ? 0 : $2); exit}')
+        $1 == "sdk" {print p, m, ($2 == "n/a" ? "0.0" : $2); exit}')
     ld -r -platform_version "${version[@]}" -exported_symbols_list "$work/exports" -o "$work/core.o" "${members[@]}"
     strip -S "$work/core.o"
     # Neither ld nor strip can mark a definition weak: set N_WEAK_DEF in the symbol table.
