@@ -42,7 +42,8 @@ public struct APACConfiguration: Sendable {
     /// The rendered speaker layout. Defaults to 7.1.4: on the tested Apple TV, Dolby Atmos
     /// output carries 12 channels and folds 9.1.6's wides and top middles into their neighbours.
     public var layout: SpatialAudioLayout
-    /// Gain before encoding. No automatic normalization or clipping is applied.
+    /// Gain before encoding, after the renderer's peak limiter, so a positive gain can exceed full
+    /// scale. No automatic normalization is applied.
     public var gainDB: Float
     /// Total APAC bit rate in bits per second. Unless set, 256 kbit/s per channel of `layout`, at most
     /// 4.096 Mbit/s.

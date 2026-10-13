@@ -1,4 +1,7 @@
-use crate::render::{Event, Gains, Layout, Object, Renderer, Speaker, TrimLayout};
+use crate::{
+    limit::Limiter,
+    render::{Event, Gains, Layout, Object, Renderer, Speaker, TrimLayout},
+};
 use truehd::{
     process::{
         decode::{DecodedAccessUnit, Decoder},
@@ -15,35 +18,52 @@ pub struct Pcm {
     pub rate: u32,
     pub channels: usize,
 }
-pub enum Core {
+/// Decodes and renders one stream, holding the speaker feeds below full scale.
+pub struct Core {
+    source: Source,
+    limiter: Limiter,
+}
+enum Source {
     TrueHd(Box<TrueHd>),
     Dts(Box<Dts>),
 }
 impl Core {
     pub fn new(codec: u32, layout: Layout) -> Result<Self, String> {
-        match codec {
-            1 => Ok(Self::TrueHd(Box::new(TrueHd::new(layout)))),
-            2 => Ok(Self::Dts(Box::new(Dts::new(layout)))),
-            _ => Err("Unknown input codec".into()),
-        }
+        let source = match codec {
+            1 => Source::TrueHd(Box::new(TrueHd::new(layout))),
+            2 => Source::Dts(Box::new(Dts::new(layout))),
+            _ => return Err("Unknown input codec".into()),
+        };
+        Ok(Self {
+            source,
+            limiter: Limiter::new(layout.count()),
+        })
     }
     /// Applies TrueHD dialogue normalisation as an AV receiver does. Off by default, as in Apple
     /// TV's own Atmos playback; DTS:X exposes no dialogue level.
     pub fn set_dialogue_normalisation(&mut self, enabled: bool) {
-        if let Self::TrueHd(decoder) = self {
+        if let Source::TrueHd(decoder) = &mut self.source {
             decoder.normalise_dialogue = enabled;
         }
     }
+    /// Decodes `data`. The last few milliseconds of output wait for the audio after them, until
+    /// a call with `end` releases them.
     pub fn push(
         &mut self,
         data: &[u8],
         end: bool,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
     ) -> Result<(), String> {
-        match self {
-            Self::TrueHd(d) => d.push(data, end, output),
-            Self::Dts(d) => d.push(data, end, output),
+        let limiter = &mut self.limiter;
+        let mut limited = |pcm: Pcm| limiter.push(pcm, output);
+        match &mut self.source {
+            Source::TrueHd(d) => d.push(data, end, &mut limited)?,
+            Source::Dts(d) => d.push(data, end, &mut limited)?,
         }
+        if end {
+            self.limiter.finish(output)?;
+        }
+        Ok(())
     }
 }
 
