@@ -158,8 +158,8 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidConfiguration(String)
     /// The call does not fit the session's state, such as appending after `finish()`.
     case invalidState(String)
-    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos object size
-    /// or an IMAX DTS:X profile.
+    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos ISF or an
+    /// unknown DTS:X profile.
     case decoding(String)
     case encoding(String)
     /// The media source could not be read or is not a supported container.

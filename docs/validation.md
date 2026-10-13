@@ -21,6 +21,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Truncation | Removing the final compressed byte produces an error for all three fixtures |
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
 | DTS:X mid-stream start | Entering the standard (Object Emulator) and alternate (Experience) fixtures halfway keeps every frame's duration; a pending frame and the two warm-up frames play as silence, the next is within −30 dBFS of a continuous decode, and ten frames later within 1e-4 |
+| TrueHD damaged access unit | Damage 50 access units before a major sync is concealed with silence up to it, keeping every sample, independent of input chunking; damage at that major sync as well fails |
 | Rendered peaks, earlier panner | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
 
 ### Encoding and packaging
@@ -105,30 +106,32 @@ ffmpeg -ss 1800 -t 60 -i "$URL" -map 0:a:0 -c copy -f truehd - |
   cargo run --release --example census --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -
 ```
 
-The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. On 2026-10-10 the census ran over HTTP on every TrueHD Atmos and DTS-HD title in the Jellyfin library:
+The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. On 2026-10-12 and 13 the census read every TrueHD and DTS track of the 895 such files in the movie and TV libraries, over the NAS share:
 
-- **TrueHD Atmos**: five 60-second windows, at 10%, 30%, 50%, 70% and 90%, from each of 179 titles (74 films and 105 episodes of four series), 15.8 hours in all, and ten of the films in full, 24.8 hours.
-- **DTS:X**: all eight titles in full, 17.2 hours.
-- **DTS-HD MA without a DTS:X label**: one to three windows from each of 112 titles. FFmpeg, and so Jellyfin, labels the alternate D4 fixture plain DTS-HD MA, so the label alone does not rule out DTS:X.
+- **TrueHD Atmos**: every frame of all 265 tracks (160 films and 105 episodes of four series), 450 hours.
+- **DTS:X**: every frame of all 29 films, 63 hours.
+- **DTS-HD MA and High Resolution without a DTS:X label**: every frame of 172 tracks (144 films and 28 episodes), 326 hours. FFmpeg, and so Jellyfin, labels the alternate D4 fixture plain DTS-HD MA, so the label alone does not rule out DTS:X.
+- **Other tracks**: every frame of the 19 TrueHD tracks without Atmos, and a 60-second window from the middle of each of 447 DTS core tracks, which cannot carry DTS:X.
 
 | TrueHD Atmos | Result |
 |---|---|
-| Warp mode | One title. *Black Hawk Down* (2001) carries trim elements with `warp_mode` 1 in 21% of its metadata payloads, in whole scenes from 11:04; three of its five windows had none. The renderer rejected it until warp mode was accepted; a 10-minute excerpt with its first two warped scenes now renders in both layouts |
-| Rejected | None with the current renderer |
+| Warp mode | One film. *Black Hawk Down* (2001) carries trim elements with `warp_mode` 1 in 21% of its metadata payloads, in whole scenes from 11:04, and renders in both layouts |
 | Other trim metadata | None; *Black Hawk Down*'s trims are the defaults |
-| Size, snap, zones, screen anchoring, distance, divergence, elevation disable, bed distribution or downmix, ISF, multiple beds | Not used in any window or full film |
-| Bed | LFE only in every title, with 11 objects alongside in 143 titles, 13 in 14 and 15 in 22 |
-| Object blocks inside the room (at least 2.5% of the room size from every wall) | In 239 of 895 windows, from 81 titles, up to 42% of active blocks; in 7 of the 10 full films, up to 17% |
-| Dialogue level | −31 dB in 166 titles; −23 to −29 dB in 13, most often −27 dB |
-| Peaks above full scale in 7.1.4 | 28 of 895 windows from 22 titles, highest +6.2 dBFS, most often in the front heights and centre. In full, *Alita: Battle Angel* reached +7.6 dBFS and *Sinners* +1.5 dBFS, though none of the *Sinners* windows exceeded full scale. The *Black Hawk Down* excerpt reached +2.4 dBFS once warp mode was accepted |
+| Size, snap, zones, screen anchoring, distance, divergence, elevation disable, bed distribution or downmix, ISF, multiple beds | Not used in any frame |
+| Rejected | None. Two films join clips partway through: the access unit before the join is cut short and the next ones lack the restart they follow, so they cannot be decoded, in *Toy Story* (1995) at 17:49 (51 access units) and *Star Wars: Episode I* (1999) at 54:25 (27). The decoder rejected both until it [concealed such joins](rendering.md#damaged-access-units); FFmpeg and truehdd decode through them |
+| Bed | LFE only in every track, with 11 objects alongside in 196 tracks, 13 in 44 and 15 in 25 |
+| Object blocks inside the room (at least 2.5% of the room size from every wall) | In 194 tracks |
+| Dialogue level | −31 dB in 225 tracks; −23 to −30 dB in 40, most often −27 dB |
+| Peaks above full scale | 135 of 265 tracks in 7.1.4 and 124 in 9.1.6, most often in the centre, then front left and the front heights. The highest reached +8.9 dBFS (*Looper*); 39 tracks exceeded +3 dBFS and 6 exceeded +6 dBFS |
 
 | DTS | Result |
 |---|---|
-| DTS:X presentation | Standard 7.1.4, four fixed heights and no objects, in every frame of all eight films. Every film used its heights; the loudest height channel peaked between −16 and 0 dBFS |
+| DTS:X presentation | Standard 7.1.4, four fixed heights and no objects, in every frame of 28 films. *Independence Day* (1996, extended cut) uses the IMAX Enhanced presentation, 7.1.4 with two objects, both at 12° elevation |
 | Bed folds | Stated in every frame |
 | Rejected | None of the DTS:X films |
-| Peaks above full scale | None; highest 0.0 dBFS |
-| DTS-HD MA without a DTS:X label | No DTS:X extension, standard or alternate, in any of the 112 titles; the renderer rejects them, as intended |
+| Peaks above full scale | Two films: *Independence Day* at +1.2 dBFS and one at 0.0 dBFS |
+| DTS-HD without a DTS:X label | No DTS:X extension, standard or alternate, in any of the 172 tracks; the renderer rejects them, as intended |
+| DTS core | No DTS-HD extension in any window but one episode of *The Expanse*, a lossless extension without DTS:X |
 
 ### Reference rendering
 
@@ -140,7 +143,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 ## Coverage
 
-The suite includes 30 Rust unit tests, 6 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 30 Rust unit tests, 7 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 
@@ -150,7 +153,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Lip sync with dialogue, measured rather than observed.
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
-- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in at least 24 of 179 Atmos titles. See [levels](rendering.md#levels).
+- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in 135 of 265 Atmos tracks. See [levels](rendering.md#levels).
 - A release archive rebuilt on another Mac.
 - Placement against Dolby's own renderer: the panner matches [Apple's Atmos render](#reference-rendering) closely, but no Dolby reference renderer output of the same content has been compared.
 
