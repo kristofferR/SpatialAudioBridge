@@ -114,6 +114,54 @@ fn truehd_starts_at_a_later_major_sync_without_losing_samples() {
     );
 }
 
+/// Offset and length of every access unit, and whether it starts at a major sync.
+fn access_units(data: &[u8]) -> Vec<(usize, usize, bool)> {
+    use truehd::process::{extract::Extractor, parse::Parser};
+    let (mut extractor, mut parser) = (Extractor::default(), Parser::default());
+    extractor.push_bytes(data);
+    let mut units = Vec::new();
+    while let Some(Ok(frame)) = extractor.next() {
+        let au = parser.parse(&frame).unwrap();
+        units.push((
+            frame.offset as usize,
+            frame.as_ref().len(),
+            au.major_sync_info.is_some(),
+        ));
+    }
+    units
+}
+
+#[test]
+#[ignore = "requires SAB_TRUEHD_FIXTURE elementary stream"]
+fn truehd_conceals_damage_until_the_next_major_sync() {
+    let data = fs::read(env::var("SAB_TRUEHD_FIXTURE").expect("set the fixture path")).unwrap();
+    let units = access_units(&data);
+    let damage = |damaged: &[usize]| {
+        let mut data = data.clone();
+        for &unit in damaged {
+            let (offset, length, _) = units[unit];
+            data[offset + length / 2] ^= 0xFF;
+        }
+        data
+    };
+    let sync = (1050..units.len())
+        .find(|&unit| units[unit].2)
+        .expect("a later major sync");
+    let intact = digest(1, &data, 4096);
+    let concealed = damage(&[sync - 50]);
+    let a = digest(1, &concealed, 4096);
+    assert_eq!(a, digest(1, &concealed, 317));
+    assert_ne!(a.1, intact.1, "the damage must be concealed");
+    assert_eq!(a.0, intact.0, "concealed access units keep their samples");
+    let mut decoder = Core::new(1, Layout::SevenOneFour).unwrap();
+    assert!(
+        decoder
+            .push(&damage(&[sync - 50, sync]), true, &mut |_| Ok(()))
+            .is_err(),
+        "damage at the major sync that would end concealment must fail"
+    );
+}
+
 #[test]
 #[ignore = "requires SAB_DTSX_ALTERNATE_FIXTURE elementary stream"]
 fn alternate_dtsx_profiles_preserve_spatial_audio_and_timing() {

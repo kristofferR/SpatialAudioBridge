@@ -51,6 +51,9 @@ impl Core {
 /// Atmos streams repeat their metadata every few tens of milliseconds.
 const MAX_HELD_FRAMES: usize = 24_000;
 
+/// FBA streams repeat their major sync at least every 128 access units.
+const MAX_SYNC_INTERVAL: usize = 128;
+
 pub struct TrueHd {
     extractor: Extractor,
     parser: Parser,
@@ -67,6 +70,11 @@ pub struct TrueHd {
     /// at the end of the previous access unit.
     dialogue: f32,
     level: Option<f32>,
+    /// The error that lost an access unit, and how many access units have been concealed with
+    /// silence since, until the stream restarts at its next major sync.
+    lost: Option<(String, usize)>,
+    /// Length and channel count of the latest decoded access unit.
+    unit: Option<(usize, usize)>,
 }
 
 /// The attenuation an AV receiver applies so that dialogue plays at −31 dBFS.
@@ -94,6 +102,8 @@ impl TrueHd {
             normalise_dialogue: false,
             dialogue: 1.,
             level: None,
+            lost: None,
+            unit: None,
         }
     }
     fn push(
@@ -117,10 +127,22 @@ impl TrueHd {
                 );
             }
             self.consumed = frame.offset + frame.as_ref().len() as u64;
-            let au = self
-                .parser
-                .parse(&frame)
-                .map_err(|e| format!("TrueHD parsing: {e}"))?;
+            // Access units after a lost one cannot decode before the stream restarts.
+            let restarting = match self.lost.take() {
+                Some(lost) if !frame.is_major_sync() => {
+                    self.lost = Some(lost);
+                    self.conceal(output)?;
+                    continue;
+                }
+                lost => lost.map(|(error, _)| error),
+            };
+            let au = match self.parser.parse(&frame) {
+                Ok(au) => au,
+                Err(e) => {
+                    self.lose(restarting, format!("TrueHD parsing: {e}"), output)?;
+                    continue;
+                }
+            };
             if let Some(sync) = &au.major_sync_info
                 && sync.substreams < 4
             {
@@ -134,9 +156,13 @@ impl TrueHd {
             {
                 self.dialogue = dialogue_gain(extra.sixteench_dialogue_norm);
             }
-            self.decoder
+            if let Err(e) = self
+                .decoder
                 .decode_presentation_into(&au, 3, &mut self.decoded)
-                .map_err(|e| format!("TrueHD decoding: {e}"))?;
+            {
+                self.lose(restarting, format!("TrueHD decoding: {e}"), output)?;
+                continue;
+            }
             if self.decoded.is_duplicate {
                 continue;
             }
@@ -157,40 +183,8 @@ impl TrueHd {
                         .collect()
                 })
                 .collect();
-            if !self.spatial {
-                let Some(first) = self.decoded.oamd.first() else {
-                    // A stream entered at a later major sync carries its first object metadata
-                    // a few access units in. Hold the audio until then so no samples are lost.
-                    self.held_frames += frames;
-                    if self.held_frames > MAX_HELD_FRAMES {
-                        return Err("Atmos presentation has no object metadata within 0.5 s".into());
-                    }
-                    self.held.push(input);
-                    continue;
-                };
-                // Held audio takes the first known object state.
-                set_initial_state(&mut self.renderer, first, self.decoded.channel_count)?;
-                self.spatial = true;
-                for held in std::mem::take(&mut self.held) {
-                    let frames = held.first().map_or(0, Vec::len);
-                    output(Pcm {
-                        data: self.renderer.render(&held, frames),
-                        frames,
-                        rate: self.decoded.sampling_frequency,
-                        channels: self.renderer.panner.count(),
-                    })?;
-                }
-                self.held_frames = 0;
-            }
-            for metadata in &self.decoded.oamd {
-                schedule_oamd(&mut self.renderer, metadata, self.decoded.channel_count)?;
-            }
-            output(Pcm {
-                data: self.renderer.render(&input, frames),
-                frames,
-                rate: self.decoded.sampling_frequency,
-                channels: self.renderer.panner.count(),
-            })?;
+            self.unit = Some((frames, self.decoded.channel_count));
+            self.emit(input, frames, true, output)?;
         }
         if self.extractor.error_count() != 0 {
             return Err("TrueHD extractor lost synchronization".into());
@@ -198,10 +192,99 @@ impl TrueHd {
         if self.bytes - self.consumed > 64 * 1024 {
             return Err("TrueHD sync not found within 64 KiB".into());
         }
+        if end && let Some((error, _)) = self.lost.take() {
+            return Err(error);
+        }
         if end && (self.consumed != self.bytes || !self.spatial) {
             return Err("Empty or truncated TrueHD stream".into());
         }
         Ok(())
+    }
+
+    /// Conceals an access unit that failed to parse or decode, and those after it up to the
+    /// next major sync, with silence of their length. Discs join clips this way: the access
+    /// unit before the join is cut short, and those after it lack the restart they follow. A
+    /// failure at that major sync, or none within the longest interval, ends the session.
+    fn lose(
+        &mut self,
+        restarting: Option<String>,
+        error: String,
+        output: &mut impl FnMut(Pcm) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(first) = restarting {
+            return Err(first);
+        }
+        if self.unit.is_none() {
+            return Err(error);
+        }
+        self.parser.reset_for_next_major_sync();
+        self.decoder.reset_for_next_major_sync();
+        self.lost = Some((error, 0));
+        self.conceal(output)
+    }
+
+    /// Writes silence for one lost access unit.
+    fn conceal(
+        &mut self,
+        output: &mut impl FnMut(Pcm) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some((error, count)) = &mut self.lost {
+            *count += 1;
+            if *count > MAX_SYNC_INTERVAL {
+                return Err(error.clone());
+            }
+        }
+        let (frames, channels) = self.unit.unwrap_or_default();
+        self.emit(vec![vec![0.; frames]; channels], frames, false, output)
+    }
+
+    /// Renders one access unit, with the object metadata just decoded if `metadata` is set.
+    fn emit(
+        &mut self,
+        input: Vec<Vec<f32>>,
+        frames: usize,
+        metadata: bool,
+        output: &mut impl FnMut(Pcm) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let oamd = if metadata {
+            self.decoded.oamd.as_slice()
+        } else {
+            &[]
+        };
+        if !self.spatial {
+            let Some(first) = oamd.first() else {
+                // A stream entered at a later major sync carries its first object metadata
+                // a few access units in. Hold the audio until then so no samples are lost.
+                self.held_frames += frames;
+                if self.held_frames > MAX_HELD_FRAMES {
+                    return Err("Atmos presentation has no object metadata within 0.5 s".into());
+                }
+                self.held.push(input);
+                return Ok(());
+            };
+            // Held audio takes the first known object state.
+            set_initial_state(&mut self.renderer, first, input.len())?;
+            self.spatial = true;
+            for held in std::mem::take(&mut self.held) {
+                let frames = held.first().map_or(0, Vec::len);
+                output(Pcm {
+                    data: self.renderer.render(&held, frames),
+                    frames,
+                    rate: 48_000,
+                    channels: self.renderer.panner.count(),
+                })?;
+            }
+            self.held_frames = 0;
+        }
+        for metadata in oamd {
+            schedule_oamd(&mut self.renderer, metadata, input.len())?;
+        }
+        output(Pcm {
+            data: self.renderer.render(&input, frames),
+            frames,
+            rate: 48_000,
+            channels: self.renderer.panner.count(),
+        })
     }
 }
 
