@@ -32,22 +32,30 @@ Every playback path also needs [`AtmosOutputActivator`](atmos-output.md) to swit
 
 ## Fit with existing players
 
-Some open-source Apple TV players read the file on the device and hand `AVPlayer` a loopback HLS stream, so they already hold the compressed packets. They convert TrueHD and DTS to E-AC-3 5.1 or FLAC, which drops the objects. The others leave demuxing to the server or to an engine that decodes to PCM.
+Some open-source Apple TV players read the file on the device and hand `AVPlayer` a loopback HLS stream, so they already hold the compressed packets. Engines with only E-AC-3 or FLAC conversion lose the separate object presentation at that step; AetherEngine also has its own APAC path. Other players leave demuxing to the server or to an engine that decodes to PCM.
 
 | Player | Engine | Integration |
 |---|---|---|
-| [AetherEngine](https://github.com/superuser404notfound/AetherEngine), and [Sodalite](https://github.com/superuser404notfound/Sodalite) on it | FFmpeg demux into loopback HLS for `AVPlayer`; TrueHD and DTS become E-AC-3 5.1 or FLAC | Feed the packets to `SpatialAudioTranscoder` and serve the APAC segments as the HLS audio |
-| [Tomo TV](https://github.com/keiver/tomotv) | Its own FFmpeg engine, into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | The same, in its engine |
-| [Lumen](https://github.com/joaoalvess/lumen-player) | KSPlayer, with an MKV remux into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | The same, in its remux engine |
+| [AetherEngine](https://github.com/superuser404notfound/AetherEngine), used by [Sodalite](https://github.com/superuser404notfound/Sodalite), and the [Silo fork](https://github.com/Silo-Server/AetherEngine) | FFmpeg demux into loopback HLS for `AVPlayer`; its own optional TrueHD Atmos/DTS:X rendering and APAC encoding alongside channel-based conversion | Independent spatial pipeline, separate from SAB (see below) |
+| [Tomo TV](https://github.com/keiver/tomotv) | Its own FFmpeg engine, into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | Feed the packets to `SpatialAudioTranscoder` and serve the APAC segments as the HLS audio |
+| [Lumen](https://github.com/joaoalvess/lumen-player) | KSPlayer, with an MKV remux into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | Feed the packets to `SpatialAudioTranscoder` in its remux engine and serve the APAC segments as the HLS audio |
 | [Swiftfin](https://github.com/jellyfin/Swiftfin), and its fork [Reefy](https://github.com/jmhunter83/reefy) | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
 | [Stingray](https://github.com/benjaminRoberts01375/Stingray) | `AVPlayer` with Jellyfin's HLS | `APACStream` with Jellyfin URLs |
 | [Streamyfin](https://github.com/streamyfin/streamyfin), Yattee | mpv | An mpv audio output that passes its passthrough bursts through `IEC61937Unpacker` to `SpatialAudioRenderer`, keeping mpv's video, subtitles and UI; or a native `AVPlayer` route for these tracks |
 | VLC for tvOS | libVLC | Requires patching libVLC for packet access |
 | KSPlayer | FFmpeg, closed core | Needs vendor support for packet access |
 
-The engines that remux on the device fit best: they work with any server that serves the original file, and only their audio conversion step changes. Segments from a [`.segments`](conversion.md#write-hls) destination start with an APAC sync packet; after a seek, start a new session on the same segment grid, as [`APACStream` does](architecture.md#the-segment-grid). For MKV, `APACStream` given the engine's loopback video playlist is a shortcut, at the cost of reading the file twice.
+For engines that remux on the device and lack spatial conversion, replacing the audio conversion step is a natural fit: they work with any server that serves the original file. Segments from a [`.segments`](conversion.md#write-hls) destination start with an APAC sync packet; after a seek, start a new session on the same segment grid, as [`APACStream` does](architecture.md#the-segment-grid). For MKV, `APACStream` given the engine's loopback video playlist is a shortcut, at the cost of reading the file twice.
 
-For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. Route by the server's Atmos or DTS:X label there: sending every lossless track would move plain TrueHD and DTS-HD MA from the other engine's lossless decode to the server's lossy fallback whenever the library refuses them. The cost is that alternate DTS:X presentations labelled plain `DTS-HD MA` stay on the other engine; none appeared among the DTS:X titles in the library census. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
+### AetherEngine's existing spatial path
+
+Source checked on 15 October 2026: both [upstream](https://github.com/superuser404notfound/AetherEngine/tree/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial) and the [Silo fork](https://github.com/Silo-Server/AetherEngine/tree/b0712217abb7399aeb21f875bcc7c26e7af92fd8/Sources/AetherEngine/Audio/Spatial) include object decoding, speaker rendering, APAC encoding and Atmos activation. The host opts into [`ObjectAudioRendering.apac`](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/ObjectAudioRendering.swift) for supported 48 kHz TrueHD Atmos and DTS:X on OS 26 or later. This is an engine capability, not evidence that every consuming app enables it or ships these revisions.
+
+AetherEngine's internal type named `SpatialAudioBridge` is its own implementation, not this package. Its [TrueHD adapter](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/TrueHDObjectAudioDecoder.swift) and [DTS:X adapter](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/DTSXObjectAudioDecoder.swift) use LibTrueHD and LibDTSX decoder wrappers; AetherEngine supplies the player-facing rendering, encoding and HLS integration. Neither its renderer nor SAB's is a licensed reference renderer.
+
+### Players that switch engines
+
+For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. Route by the server's Atmos or DTS:X label there: sending every lossless track would move plain TrueHD and DTS-HD MA from the other engine's lossless decode to the server's lossy fallback whenever the library refuses them. The cost is that alternate DTS:X presentations labelled plain `DTS-HD MA` stay on the other engine. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
 
 ## Requirements
 
