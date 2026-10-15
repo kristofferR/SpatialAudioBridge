@@ -73,7 +73,7 @@ The output is rendered speaker audio encoded as APAC; the original bitstream and
 |---|---|
 | Atmos placement against Apple's Atmos render | Seven demo and film clips at 7.1.4, rendered by SpatialAudioBridge from TrueHD and by Apple's decoder from a Dolby Digital Plus Atmos version of the same audio: median direction error 0.1–2.1°, ceiling share within 0.6 percentage points, median per-channel level error at most 0.4 dB |
 | Atmos panner against the specification | 2,880 point, size and divergence cases match a literal transcription of the TS 103 448 pseudocode within 3.2 × 10⁻⁷ |
-| Standard DTS:X | No panning: the bed and four height channels play on their own speakers once the heights folded into the bed are removed with the stream's own coefficients. All eight DTS:X films in the [library census](docs/validation.md#library-census) use this presentation |
+| Standard DTS:X | No panning: the bed and four height channels play on their own speakers once the heights folded into the bed are removed with the stream's own coefficients. 28 of the 29 DTS:X films in the [library census](docs/validation.md#library-census) use this presentation; the other is IMAX Enhanced |
 | APAC encoding | 48.4 dB signal-to-error on a 9.1.6 film excerpt with all 16 channels active; distinct tones in all 16 channels stay in their own channel |
 
 Apple's render passed through a lossy Dolby Digital Plus encode, so part of the remaining error on busier clips is probably codec error. Objects in the alternate DTS:X presentations use a [documented approximation](docs/rendering.md#presentations-and-polar-objects) that no DTS reference render has checked.

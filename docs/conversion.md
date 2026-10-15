@@ -93,7 +93,7 @@ To recognise the APAC rendition in AVFoundation, match its `NAME`, which is the 
 |---|---|---|
 | `layout` | `.sevenOneFour` | `.nineOneSix` for 16 channels. Apple TV's Atmos output carries 12 channels and folds 9.1.6 into them; see [Atmos output](atmos-output.md#output-format) |
 | `bitRate` | 256 kbit/s per channel of `layout`, at most 4.096 Mbit/s | 3.072 Mbit/s for 7.1.4, 4.096 Mbit/s for 9.1.6. Once set, it no longer follows `layout` |
-| `gainDB` | 0 | −60 to +12 dB, applied before encoding. No normalization or limiting. |
+| `gainDB` | 0 | −60 to +12 dB, applied before encoding and after the renderer's [peak limiter](rendering.md#levels), so a positive gain can exceed full scale. No normalization. |
 | `startTime` | zero | Presentation time of the first output sample |
 | `inputStartTime` | nil | Container time of the first input packet, after a seek |
 | `syncPacketFrequency` | 75 | APAC packets between sync packets: 1.6 s at 48 kHz |

@@ -59,6 +59,10 @@ A DTS-HD stream entered at a later frame needs the core's history from earlier f
 
 The decoder rejects objects outside the room (distance metadata, which TS 103 448 does not render), reserved zone constraints and warp modes, ISF, multiple beds, bed distribution and bed downmix metadata. None of these appeared in the [library census](validation.md#library-census), and of the controls above only warp mode 1, with default trims, did. Hosts should select their existing fallback on these errors.
 
+### Damaged access units
+
+Discs can join two clips partway through a track. The access unit before the join is cut short, and those after it cannot be decoded until the next major sync, because they follow a restart the join removed. The decoder replaces an access unit that fails to parse or decode with silence of its length, and every one after it up to the next major sync, then resumes there. Every sample is kept, so timing is unchanged. Two of 265 Atmos films in the [library census](validation.md#library-census) have such a join, concealing 42.5 ms and 22.5 ms. A failure at that major sync, no major sync within 128 access units, a stream that ends before it, or a failure before any audio has decoded is rejected.
+
 ## DTS:X
 
 ### Bed and height rings
@@ -96,6 +100,8 @@ Before recombination, `dca::FoldPlan` removes every known spatial contribution f
 
 ## Levels
 
-Rendering is linear, with no limiting or headroom gain, and without dialogue normalisation unless `normalizesDialogue` is set. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. `APACConfiguration.gainDB` scales the output, and the conversion report's `peakPCM` gives the largest rendered sample.
+Rendering is linear, and without dialogue normalisation unless `normalizesDialogue` is set. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. Before the limiter below, the [library census](validation.md#library-census) found 135 of 265 Atmos tracks above full scale in 7.1.4, the highest at +8.9 dBFS and 39 above +3 dBFS; the centre exceeded it most often, then front left and the front heights. Two of 29 DTS:X films exceeded it, the IMAX presentation by 1.2 dB. Dolby's own 7.1 presentation of the loudest, *Looper*, peaks at −0.02 dBFS. APAC keeps such peaks (tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder), but integer PCM on the way to HDMI cannot.
 
-With the earlier panner, 38 minutes of a TrueHD Atmos film peaked at −0.2 dBFS before encoding, the DTS:X fixture at −0.3 dBFS and the Helicopter fixture at −9.8 dBFS, while one 20-second film excerpt reached +4 dBFS in a 9.1.6 height channel. With this panner, the [library census](validation.md#library-census) found 28 of 895 one-minute windows above full scale in 7.1.4, from 22 of 179 Atmos titles, the highest at +6.2 dBFS; front heights and the centre exceeded it most often. No DTS:X film exceeded it. APAC keeps such peaks: tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder. Whether tvOS or the HDMI output then clips them is unverified. A limiter would also change the measured peaks just below full scale, so the renderer leaves the level to the mix and the host's `gainDB`.
+A lookahead peak limiter therefore holds every channel at or below −0.1 dBFS. One gain applies to all channels, so the balance between speakers holds. It falls linearly over 2 ms to meet a peak exactly and recovers with a 100 ms time constant, returning to exactly 1 about 1.3 s later. Audio with no peak within reach passes bit for bit. Output trails the decoder by 2 ms until the stream ends, so frame counts and timing are unchanged. In the five films that exceeded full scale most, it changed 0.9–7.0% of each film, in 34 to 384 stretches of at most 9.7 s including recovery, reducing the level by up to 9 dB.
+
+`APACConfiguration.gainDB` scales the output after the limiter, so a positive gain can exceed full scale again; the conversion report's `peakPCM` gives the largest encoded sample.

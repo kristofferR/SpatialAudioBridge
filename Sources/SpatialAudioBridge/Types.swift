@@ -42,7 +42,8 @@ public struct APACConfiguration: Sendable {
     /// The rendered speaker layout. Defaults to 7.1.4: on the tested Apple TV, Dolby Atmos
     /// output carries 12 channels and folds 9.1.6's wides and top middles into their neighbours.
     public var layout: SpatialAudioLayout
-    /// Gain before encoding. No automatic normalization or clipping is applied.
+    /// Gain before encoding, after the renderer's peak limiter, so a positive gain can exceed full
+    /// scale. No automatic normalization is applied.
     public var gainDB: Float
     /// Total APAC bit rate in bits per second. Unless set, 256 kbit/s per channel of `layout`, at most
     /// 4.096 Mbit/s.
@@ -158,8 +159,8 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidConfiguration(String)
     /// The call does not fit the session's state, such as appending after `finish()`.
     case invalidState(String)
-    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos object size
-    /// or an IMAX DTS:X profile.
+    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos ISF or an
+    /// unknown DTS:X profile.
     case decoding(String)
     case encoding(String)
     /// The media source could not be read or is not a supported container.
