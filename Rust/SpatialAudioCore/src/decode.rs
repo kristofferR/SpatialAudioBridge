@@ -1072,6 +1072,28 @@ mod dts_tests {
     ];
 
     #[test]
+    fn damaged_spatial_metadata_is_rejected_even_with_an_intact_compatible_bed() {
+        let presentation = XPresentation::ObjectsD0;
+        let metadata = XMetadata::parse(&IMAX_COMPONENT_PAYLOAD, 7).unwrap();
+        let mut frame = frame(presentation, &metadata, &[0.1, 0.2, 0.3, 0., 0., 0., 0.], 8);
+        frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
+        let original_bed = frame.samples.clone();
+        let original_feeds = frame.x_samples.clone();
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let mut decoder = Dts::new(layout);
+            assert_eq!(decoder.render(&frame).unwrap().frames, 8);
+            // Remove metadata bytes only; decoded bed/feed samples and presentation stay intact.
+            frame.x_payload.truncate(4);
+            assert_eq!(XPresentation::detect(&frame), Some(presentation));
+            let error = decoder.render(&frame).err().expect("damaged metadata must fail");
+            assert!(error.starts_with("DTS:X spatial metadata:"), "{error}");
+            assert_eq!(frame.samples, original_bed);
+            assert_eq!(frame.x_samples, original_feeds);
+            frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
+        }
+    }
+
+    #[test]
     fn imax_marker_and_parsed_components_route_to_centre_left_right() {
         let presentation = XPresentation::ObjectsD0;
         let metadata = XMetadata::parse(&IMAX_COMPONENT_PAYLOAD, 7).unwrap();
