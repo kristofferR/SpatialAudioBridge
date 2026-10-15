@@ -1,0 +1,5 @@
+truehd_sync="\xf8\x72\x6f\xba"
+dts_core_sync="\x7f\xfe\x80\x01"
+dts_extension_sync="\x64\x58\x20\x25"
+zero_length="\x00\x00"
+large_length="\xff\xff"

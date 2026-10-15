@@ -1,0 +1,56 @@
+name: Rust fuzz
+
+on:
+  pull_request:
+    paths: ['Rust/**', 'scripts/fuzz-core.sh', '.github/workflows/fuzz.yml']
+  push:
+    branches: [main]
+    paths: ['Rust/**', 'scripts/fuzz-core.sh', '.github/workflows/fuzz.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install nightly-2026-10-01 --profile minimal --component rust-src,clippy
+          cargo +nightly-2026-10-01 install cargo-fuzz --version 0.13.2 --locked
+      - name: Bootstrap fuzz lockfile
+        run: |
+          cp Rust/SpatialAudioCore/Cargo.lock Rust/SpatialAudioCore/fuzz/Cargo.lock
+          cargo +nightly-2026-10-01 fetch --manifest-path Rust/SpatialAudioCore/fuzz/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-lockfile
+          path: Rust/SpatialAudioCore/fuzz/Cargo.lock
+      - uses: actions/cache@v4
+        with:
+          path: Rust/SpatialAudioCore/fuzz/corpus
+          key: rust-fuzz-v1-${{ runner.os }}-${{ github.ref }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            rust-fuzz-v1-${{ runner.os }}-${{ github.ref }}-
+            rust-fuzz-v1-${{ runner.os }}-refs/heads/main-
+      - name: Harness Clippy
+        run: cargo +nightly-2026-10-01 clippy --locked --manifest-path Rust/SpatialAudioCore/fuzz/Cargo.toml -- -D warnings
+      - name: Bounded stream and session fuzzing
+        run: ./scripts/fuzz-core.sh 60
+      - name: Preserve failures and corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-fuzz-${{ github.run_id }}
+          path: |
+            Rust/SpatialAudioCore/fuzz/artifacts
+            Rust/SpatialAudioCore/fuzz/corpus
+          if-no-files-found: ignore
+          retention-days: 14
