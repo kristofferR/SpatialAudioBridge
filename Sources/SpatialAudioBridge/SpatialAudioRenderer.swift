@@ -194,7 +194,7 @@ public actor SpatialAudioRenderer {
             }
             pcm.append(contentsOf: samples)
         }
-        // No normalization or limiting, as in the transcoder.
+        // No normalization, as in the transcoder; the renderer has already limited the peaks.
         return gain == 1 ? pcm : vDSP.multiply(gain, pcm)
     }
 

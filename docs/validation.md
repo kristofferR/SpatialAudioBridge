@@ -22,6 +22,7 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | TrueHD mid-stream start | Starting at a later major sync without object metadata keeps every sample, preserves height audio and is independent of input chunking |
 | DTS:X mid-stream start | Entering the standard (Object Emulator) and alternate (Experience) fixtures halfway keeps every frame's duration; a pending frame and the two warm-up frames play as silence, the next is within −30 dBFS of a continuous decode, and ten frames later within 1e-4 |
 | TrueHD damaged access unit | Damage 50 access units before a major sync is concealed with silence up to it, keeping every sample, independent of input chunking; damage at that major sync as well fails |
+| Peak limiter | Whole 7.1.4 renders of *Looper*, *F9*, *Alita: Battle Angel*, *Edge of Tomorrow* and *The Matrix Reloaded*, the films furthest above full scale, peak at −0.10 dBFS instead of +5.2 to +8.9 dBFS. 0.9–7.0% of each film changed, in 34 to 384 stretches of at most 9.7 s including recovery, with reductions up to 9.0 dB; every other sample is bit-identical. Synthetic tests cover the ceiling, chunk independence, frame count and the return to unchanged output |
 | Rendered peaks, earlier panner | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
 
 ### Encoding and packaging
@@ -98,7 +99,7 @@ On a 97.5 Mbit/s 4K remux with keyframes at most 0.9 s apart, the same scripted 
 
 ### Library census
 
-`examples/census.rs` reports which object metadata controls a TrueHD stream uses, or which DTS:X presentation, object positions and bed folds a DTS stream carries. For both, it reports where the renderer first rejects the stream and the rendered peaks in both layouts. It accepts a TrueHD stream starting mid-access-unit, so FFmpeg can cut windows from a film:
+`examples/census.rs` reports which object metadata controls a TrueHD stream uses, or which DTS:X presentation, object positions and bed folds a DTS stream carries. For both, it reports where the renderer first rejects the stream and the rendered peaks before limiting in both layouts, using the Rust-only `Core::new_unlimited` measurement path. Playback remains limited by default. It accepts a TrueHD stream starting mid-access-unit, so FFmpeg can cut windows from a film:
 
 ```sh
 # A 60-second window from 30:00; use -f dts for a DTS track.
@@ -122,14 +123,14 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 | Bed | LFE only in every track, with 11 objects alongside in 196 tracks, 13 in 44 and 15 in 25 |
 | Object blocks inside the room (at least 2.5% of the room size from every wall) | In 194 tracks |
 | Dialogue level | −31 dB in 225 tracks; −23 to −30 dB in 40, most often −27 dB |
-| Peaks above full scale | 135 of 265 tracks in 7.1.4 and 124 in 9.1.6, most often in the centre, then front left and the front heights. The highest reached +8.9 dBFS (*Looper*); 39 tracks exceeded +3 dBFS and 6 exceeded +6 dBFS |
+| Peaks above full scale, before the [limiter](rendering.md#levels) | 135 of 265 tracks in 7.1.4 and 124 in 9.1.6, most often in the centre, then front left and the front heights. The highest reached +8.9 dBFS (*Looper*); 39 tracks exceeded +3 dBFS and 6 exceeded +6 dBFS |
 
 | DTS | Result |
 |---|---|
 | DTS:X presentation | Standard 7.1.4, four fixed heights and no objects, in every frame of 28 films. *Independence Day* (1996, extended cut) uses the IMAX Enhanced presentation, 7.1.4 with two objects, both at 12° elevation |
 | Bed folds | Stated in every frame |
 | Rejected | None of the DTS:X films |
-| Peaks above full scale | Two films: *Independence Day* at +1.2 dBFS and one at 0.0 dBFS |
+| Peaks above full scale, before the limiter | Two films: *Independence Day* at +1.2 dBFS and one at 0.0 dBFS |
 | DTS-HD without a DTS:X label | No DTS:X extension, standard or alternate, in any of the 172 tracks; the renderer rejects them, as intended |
 | DTS core | No DTS-HD extension in any window but one episode of *The Expanse*, a lossless extension without DTS:X |
 
@@ -143,7 +144,7 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 ## Coverage
 
-The suite includes 30 Rust unit tests, 7 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
+The suite includes 33 Rust unit tests, 7 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
 
@@ -153,7 +154,7 @@ HLS codec strings are derived from the platform encoder's documented format mapp
 - Lip sync with dialogue, measured rather than observed.
 - Receiver output from `SpatialAudioRenderer` itself, beyond its rendering status; the earlier listening test fed the renderer from a file.
 - Memory use over a full film, Wi-Fi playback, and other Apple TV models and receivers.
-- Whether the playback output clips rendered peaks above full scale. APAC preserves them, and the [census](#library-census) found them in 135 of 265 Atmos tracks. See [levels](rendering.md#levels).
+- Whether the peak limiter is audible. AtmosAB clips of the films' worst moments are prepared for a blind comparison against the unlimited render and DD+.
 - A release archive rebuilt on another Mac.
 - Placement against Dolby's own renderer: the panner matches [Apple's Atmos render](#reference-rendering) closely, but no Dolby reference renderer output of the same content has been compared.
 
@@ -196,7 +197,7 @@ cargo test --release --locked -- --include-ignored --test-threads=1
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-The `render` example reports each rendered channel's peak and the samples above full scale; write to `/dev/null` to measure a whole film:
+The `render` example writes unlimited PCM and reports each rendered channel's peak and the samples above full scale, before limiting; write to `/dev/null` to measure a whole film:
 
 ```sh
 cargo run --release --locked --example render -- truehd film.thd /dev/null 7.1.4

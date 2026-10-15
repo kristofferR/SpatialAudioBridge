@@ -1,6 +1,6 @@
 use spatial_audio_core::{decode::Core,render::Layout};
 use std::{env,fs::File,io::{BufWriter,Read,Write}};
-/// Renders an elementary stream to interleaved Float32 speaker feeds and reports each channel's
+/// Renders an elementary stream to unlimited interleaved Float32 speaker feeds and reports each channel's
 /// peak and how many samples exceed full scale. Pass /dev/null as the output to measure only.
 fn main()->Result<(),Box<dyn std::error::Error>> {
     let args:Vec<_>=env::args().collect();
@@ -8,7 +8,7 @@ fn main()->Result<(),Box<dyn std::error::Error>> {
     let codec=match args[1].as_str() {"truehd"=>1,"dtsx"=>2,_=>return Err("unknown codec".into())};
     let layout=match args.get(4).map(String::as_str) {None|Some("9.1.6")=>Layout::NineOneSix,Some("7.1.4")=>Layout::SevenOneFour,_=>return Err("unknown layout".into())};
     let channels=layout as usize;
-    let mut core=Core::new(codec,layout)?;
+    let mut core=Core::new_unlimited(codec,layout)?;
     let mut input=File::open(&args[2])?;let mut output=BufWriter::new(File::create(&args[3])?);
     let mut buffer=[0u8;4096];let mut frames=0u64;let mut rate=0;
     let (mut peak,mut over,mut energy)=(vec![0f32;channels],vec![0u64;channels],vec![0f64;channels]);

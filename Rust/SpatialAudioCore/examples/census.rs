@@ -1,6 +1,6 @@
 //! Reports which Atmos metadata controls a TrueHD stream uses, or which DTS:X presentation,
 //! object positions and bed folds a DTS stream carries, where the renderer first rejects
-//! it, and the rendered peak levels in both layouts.
+//! it, and the rendered peak levels before limiting in both layouts.
 //!
 //! usage: census <elementary-stream|-> [...]
 use dca::{
@@ -51,7 +51,7 @@ impl Render {
     fn new(codec: u32, layout: Layout) -> Self {
         Self {
             layout,
-            core: Core::new(codec, layout).unwrap(),
+            core: Core::new_unlimited(codec, layout).unwrap(),
             frames: 0,
             peaks: vec![0.; layout.count()],
             over: 0,
