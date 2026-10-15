@@ -166,7 +166,10 @@ impl TrueHd {
                 }
                 lost => lost.map(|(error, _)| error),
             };
-            let au = match self.parser.parse(&frame) {
+            let parsed = self.parser.parse(&frame);
+            // Splice records are diagnostic history, not decoder state. Bound them even on errors.
+            drop(self.parser.take_branches());
+            let au = match parsed {
                 Ok(au) => au,
                 Err(e) => {
                     self.lose(restarting, format!("TrueHD parsing: {e}"), output)?;
