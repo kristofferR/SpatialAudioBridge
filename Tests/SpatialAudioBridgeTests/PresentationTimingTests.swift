@@ -116,6 +116,10 @@ struct PresentationTimingTests {
                 let time = try #require(segment.startTime)
                 let duration = try #require(segment.duration)
                 #expect(abs(CMTimeSubtract(time, end).seconds) <= 1.0 / 48_000)
+                // Check the stored tfdt too: a standalone AVAssetReader rebases the decoded
+                // timeline, so its PCM timestamps alone cannot establish the fragment origin.
+                let stored = try fragmentTiming(segment.data)
+                #expect(stored.decodeTime == UInt64(CMTimeConvertScale(end, timescale: 48_000, method: .default).value))
                 codedFrames += CMTimeConvertScale(duration, timescale: 48_000, method: .default).value
                 end = CMTimeAdd(time, duration)
             }
@@ -124,9 +128,9 @@ struct PresentationTimingTests {
         }
 
         let decoded = try await readPresentedAudio(url, layout: layout)
-        // File sessions map their source start to movie time zero. Fragmented output retains
-        // media time; at zero it cannot place priming at a negative timestamp.
-        let expectedStart: CMTime = fragmented ? max(start, priming) : .zero
+        // Both standalone files and init+fragments read as one file present from movie time zero.
+        // Assert that mapping explicitly; the stored fragment origin is checked separately above.
+        let expectedStart = CMTime.zero
         print("APAC timing: fragmented=\(fragmented), sourceStart=\(startFrames), discarded=\(discardedFrames), priming=\(priming.value), decodedStart=\(decoded.firstTime.seconds), frames=\(decoded.frames)")
         #expect(abs(CMTimeSubtract(decoded.firstTime, expectedStart).seconds) <= 1.0 / 48_000)
         try #require(decoded.frames == frames, "Decoded duration must exclude priming and end padding")

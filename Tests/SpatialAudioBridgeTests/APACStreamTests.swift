@@ -254,7 +254,7 @@ private func mediaSegment(_ index: Int) -> APACSegment {
 
 /// The base media decode time and sample count of a single-fragment segment.
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames: Int) {
+func fragmentTiming(_ data: Data) throws -> (decodeTime: UInt64, frames: Int) {
     var decodeTime: UInt64?, packets = 0
     func walk(_ range: Range<Int>) {
         var offset = range.lowerBound
