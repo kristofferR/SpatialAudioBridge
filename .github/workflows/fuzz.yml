@@ -25,14 +25,6 @@ jobs:
         run: |
           rustup toolchain install nightly-2026-10-01 --profile minimal --component rust-src,clippy
           cargo +nightly-2026-10-01 install cargo-fuzz --version 0.13.2 --locked
-      - name: Bootstrap fuzz lockfile
-        run: |
-          cp Rust/SpatialAudioCore/Cargo.lock Rust/SpatialAudioCore/fuzz/Cargo.lock
-          cargo +nightly-2026-10-01 fetch --manifest-path Rust/SpatialAudioCore/fuzz/Cargo.toml
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-lockfile
-          path: Rust/SpatialAudioCore/fuzz/Cargo.lock
       - uses: actions/cache@v4
         with:
           path: Rust/SpatialAudioCore/fuzz/corpus
