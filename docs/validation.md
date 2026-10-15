@@ -42,6 +42,40 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Conversion speed by layout | On an Apple Silicon Mac, one conversion at a time, 21 minutes of TrueHD Atmos in eight files converted at 12.0× real time to 7.1.4 and 7.8× to 9.1.6 |
 | Release archive | Built from a worktree and from a fresh clone at a path with spaces on one Mac, the archives were byte-identical and their libraries recorded no local paths. A package using the archive as its binary target linked and called the core; SwiftPM kept the license notices beside the XCFramework. Once 1.0.0 was public, a scratch package resolved it from GitHub, verified the downloaded archive's checksum, built, and converted an eight-second TrueHD Atmos clip to 7.1.4 APAC with the release's `apac-convert`. The 1.1.0 archive, with iOS slices added, was again byte-identical across two builds; a package declaring macOS 10.15, iOS 13 and tvOS 13 resolved it from GitHub and linked the core behind `#available` into a dynamic library for macOS, tvOS and iOS devices and arm64 simulators. 1.1.0 failed beside LibDovi 2.1.0, another static XCFramework with a top-level module map ("Multiple commands produce module.modulemap"); with 1.1.1's nested headers, a package depending on both resolved from GitHub and built for macOS, tvOS and the tvOS simulator. 1.2.0 resolved from GitHub the same way, and its tvOS build bundled `ThirdPartyNotices.txt` in the package's resource bundle. The 1.3.0 to 1.6.1 archives were each byte-identical across two builds and resolved from GitHub into the same low-minimum package, which built for macOS and tvOS, and from 1.5.0, with its x86_64 slices, also as a universal arm64 and x86_64 macOS build. 1.5.1 and 1.6.0 changed only Swift code, so their archives match 1.5.0's. From 1.6.2, GitHub Actions builds the archive with Xcode 26.6: Cargo builds only the staticlib, so the profile's LTO applies, and each library is prelinked into one object. Two runs from different commits with the same core sources built byte-identical 4.8 MB archives, down from 1.6.1's 56 MB, and every slice exported only the five `sab_*` functions and a weak `rust_eh_personality`, with its target's platform and minimum OS. On a Mac with Xcode 27.1, the fixture tests passed against the prelinked macOS library, and a test app with its own Objective-C and C++ exceptions linked it beside a Rust 1.86 static library and caught a panic thrown in that library; the plain Cargo library failed there with a duplicate `rust_eh_personality`. Four personality routines in one binary (Objective-C, C++, C and Rust) failed to link with or without DWARF unwind information in the core, and `-Wl,-no_compact_unwind` produced binaries that crashed on the first exception, even without the core |
 
+### APAC peak measurements
+
+On 2026-10-15, [Core run 38806510480](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38806510480) passed all 32 synthetic cases on macOS 26.6.2 (25G83): four signals, two layouts, file/live profiles and 0/+3 dB post-limiter gain. At 0 dB gain, the maximum over the two layouts was:
+
+| Signal | Input sample peak | Limited sample peak | Limited reconstructed estimate | Decoded sample peak | Decoded reconstructed estimate |
+|---|---:|---:|---:|---:|---:|
+| 1 kHz tone | +6.021 | −0.100 | −0.100 | −0.099 | −0.099 |
+| 8 kHz tone | +4.771 | −0.100 | +1.566 | −0.090 | +1.565 |
+| Isolated transients | +12.041 | −0.100 | −0.100 | −0.100 | −0.100 |
+| Multichannel tones | +5.105 | −0.100 | +0.959 | +0.455 | +0.954 |
+
+All values are dB relative to full scale; reconstructed values are the four-times estimates described below. File and live profiles produced identical peak measurements for each matching case in this short run. The multichannel decoded sample peak was 0.555 dB above the encoder-input sample peak and exceeded full scale. The 8 kHz reconstruction peak already exceeded full scale before encoding and changed little after decoding, so it is not evidence of APAC adding that overshoot. Adding +3 dB after the limiter raised decoded peaks by approximately 3 dB, as expected.
+
+The −0.1 dBFS limiter ceiling therefore applies to its output samples, not post-APAC samples or reconstructed peaks. Keep that ceiling unchanged for now: these short probes establish the limitation but do not establish a universally sufficient replacement margin. The direct encoder, broader signal/configuration coverage and receiver behavior remain unmeasured by this experiment.
+
+#### Reproduction
+
+The Core workflow generates two-second synthetic 1 kHz and 8 kHz tones, isolated transients and multichannel tones on Linux with `examples/peak_probes.rs`. It runs the production limiter source on each signal in 7.1.4 and 9.1.6, preserving the input and limited PCM as temporary little-endian Float32 artifacts. No private media is used or committed.
+
+On the Apple runner, `PeakMeasurementTests` feeds that limited PCM into the transcoder's existing accumulator, encodes file and live fragmented output, and reads it back through `AVAssetReader`. It checks finite PCM, exact presented duration and the reported encoder-input peak. Cases use both 0 dB and +3 dB `gainDB`: that gain is applied **after** the limiter, so it can intentionally exceed the limiter ceiling. Bitrate and sync frequency stay at the layout's defaults; the JSON records those settings, queried priming and the runner's OS.
+
+Each `SAB_PEAK_MEASUREMENT` JSON line reports sample peaks before limiting, after limiting, after gain and after decoding, plus reconstructed-peak estimates after limiting, gain and decoding. The `apac-peak-measurements` artifact retains the test log. These are measurements, not assertions that APAC preserves a ceiling. The reconstruction estimate evaluates four phases with a 33-tap Blackman-windowed sinc filter, calibrated with a known intersample-peak tone; it is not a certified true-peak meter or a bound over every continuous-time peak. Separate input and decoded estimates avoid attributing pre-existing intersample peaks to APAC.
+
+To regenerate the inputs on Linux:
+
+```sh
+cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" \
+  --example peak_probes -- "/tmp/sab-peak-probes"
+```
+
+The Apple test enables the experiment only when `SAB_PEAK_PROBES_DIR` names that artifact directory. This measures the asset-writer file and fragment paths, not the direct sample-buffer encoder, receiver output or HDMI behavior. Aggregate limiter/recovery diagnostics remain separate work; this experiment does not change the limiter or public API.
+
+A later [Apple run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38808096964) returned 117,760 decoded frames instead of 96,000 for the live 9.1.6 multichannel case. The duration mismatch remains unexplained. The test retains a failing synthetic MP4 when `SAB_PEAK_FAILURES_DIR` is set and logs container timings and a second read; a successful second read does not erase the original failure. For a deliberate diagnostic run on an Apple build host, `SAB_PEAK_STRESS=1` repeats that case 32 times per gain. Required PR CI leaves this flag unset and runs the normal 32-case matrix, with the exact-duration assertion intact.
+
 ### Sources and streaming
 
 | Check | Result |

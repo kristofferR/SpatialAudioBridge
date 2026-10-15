@@ -37,6 +37,13 @@ jobs:
         run: cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
       - name: Clippy
         run: cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
+      - name: Generate synthetic limiter probes
+        run: cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example peak_probes -- "$RUNNER_TEMP/peak-probes"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peak-probes
+          path: ${{ runner.temp }}/peak-probes
+          retention-days: 7
 
   build:
     needs: rust
@@ -56,10 +63,28 @@ jobs:
         run: ./scripts/release-core.sh
       - name: Verify mixed-language host linking and unwinding
         run: ./scripts/test-mixed-host.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: peak-probes
+          path: ${{ runner.temp }}/peak-probes
       - name: Build and test the package
+        env:
+          SAB_PEAK_PROBES_DIR: ${{ runner.temp }}/peak-probes
+          SAB_PEAK_FAILURES_DIR: ${{ runner.temp }}/peak-failures
         run: |
+          set -o pipefail
           swift build -Xswiftc -warnings-as-errors
-          swift test -Xswiftc -warnings-as-errors
+          swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
+      - name: Preserve peak measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apac-peak-measurements
+          path: |
+            ${{ runner.temp }}/package-tests.log
+            ${{ runner.temp }}/peak-failures
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: SpatialAudioCore

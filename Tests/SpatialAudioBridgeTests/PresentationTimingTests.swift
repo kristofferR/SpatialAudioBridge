@@ -4,7 +4,7 @@ import Testing
 @testable import SpatialAudioBridge
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-private struct PresentedAudio {
+struct PresentedAudio {
     let firstTime: CMTime
     let samples: [Float]
     let channels: Int
@@ -20,7 +20,7 @@ private struct PresentedAudio {
 
 /// Read sample timestamps as well as PCM: flattening the data alone would hide a muxing offset.
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func readPresentedAudio(_ url: URL, layout: SpatialAudioLayout) async throws -> PresentedAudio {
+func readPresentedAudio(_ url: URL, layout: SpatialAudioLayout) async throws -> PresentedAudio {
     let asset = AVURLAsset(url: url)
     let track = try #require(try await asset.loadTracks(withMediaType: .audio).first)
     let format = try #require(try await track.load(.formatDescriptions).first)
