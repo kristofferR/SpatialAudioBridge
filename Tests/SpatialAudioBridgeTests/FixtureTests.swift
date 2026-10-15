@@ -4,7 +4,7 @@ import Testing
 @testable import SpatialAudioBridge
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-private final class SegmentCollector: @unchecked Sendable {
+final class SegmentCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var segments: [APACSegment] = []
     func append(_ segment: APACSegment) { lock.withLock { segments.append(segment) } }
