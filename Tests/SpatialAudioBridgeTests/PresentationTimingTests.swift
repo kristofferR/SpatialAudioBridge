@@ -56,7 +56,7 @@ private func readPresentedAudio(_ url: URL, layout: SpatialAudioLayout) async th
             CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: bytes, destination: $0.baseAddress!)
         }
         try #require(status == noErr)
-        #expect(pcm.allSatisfy(\.isFinite))
+        #expect(pcm.allSatisfy { $0.isFinite })
         samples.append(contentsOf: pcm)
     }
     try #require(reader.status == .completed, "\(String(describing: reader.error))")
