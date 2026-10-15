@@ -85,9 +85,9 @@ struct DRCMeasurementTests {
                            first: firstPacketInput, beforeFlush: packetsBeforeFlush)
             }
 
-            // Disabled DRC currently produces writer output rejected by the native reader.
+            // Disabled DRC currently produces fragmented output rejected by the native reader.
             // Keep that experiment explicit; the direct-encoder comparison above remains required.
-            if disabled && ProcessInfo.processInfo.environment["SAB_DRC_WRITER_DIAGNOSTICS"] != "1" {
+            if fragmented && disabled && ProcessInfo.processInfo.environment["SAB_DRC_WRITER_DIAGNOSTICS"] != "1" {
                 continue
             }
             let trace = DRCFragmentTrace()
