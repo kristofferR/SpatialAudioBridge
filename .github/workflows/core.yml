@@ -70,6 +70,7 @@ jobs:
       - name: Build and test the package
         env:
           SAB_PEAK_PROBES_DIR: ${{ runner.temp }}/peak-probes
+          SAB_PEAK_FAILURES_DIR: ${{ runner.temp }}/peak-failures
         run: |
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
@@ -79,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apac-peak-measurements
-          path: ${{ runner.temp }}/package-tests.log
+          path: |
+            ${{ runner.temp }}/package-tests.log
+            ${{ runner.temp }}/peak-failures
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4

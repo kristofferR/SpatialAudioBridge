@@ -82,7 +82,10 @@ struct PeakMeasurementTests {
     func measureAPACPeaks(live: Bool, channels: Int) async throws {
         let directory = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["SAB_PEAK_PROBES_DIR"]))
         let layout: SpatialAudioLayout = channels == 12 ? .sevenOneFour : .nineOneSix
-        for signal in ["tone1k", "tone8k", "transients", "multichannel"] {
+        // Temporarily repeat the case that returned extra decoded frames, to retain a failing file.
+        let signals = ["tone1k", "tone8k", "transients", "multichannel"]
+            + (live && channels == 16 ? Array(repeating: "multichannel", count: 7) : [])
+        for signal in signals {
             let input = try probePCM(directory, signal: signal, channels: channels, stage: "input")
             let limited = try probePCM(directory, signal: signal, channels: channels, stage: "limited")
             try #require(samplePeak(input) > 1)
@@ -109,6 +112,19 @@ struct PeakMeasurementTests {
                     try collector.snapshot().reduce(into: Data()) { $0.append($1.data) }.write(to: url)
                 }
                 let decoded = try await readPresentedAudio(url, layout: layout)
+                if decoded.frames != 96_000 {
+                    if let path = ProcessInfo.processInfo.environment["SAB_PEAK_FAILURES_DIR"] {
+                        let failures = URL(fileURLWithPath: path)
+                        try FileManager.default.createDirectory(at: failures, withIntermediateDirectories: true)
+                        try FileManager.default.copyItem(at: url, to: failures.appendingPathComponent(
+                            "\(signal)-\(channels)-live\(live)-gain\(gainDB)-\(UUID().uuidString).mp4"))
+                    }
+                    let segments = try collector.snapshot().filter { $0.kind == .media }.map { segment in
+                        let stored = try fragmentTiming(segment.data)
+                        return "tfdt=\(stored.decodeTime) frames=\(stored.frames) reportedStart=\(String(describing: segment.startTime)) reportedDuration=\(String(describing: segment.duration))"
+                    }
+                    print("SAB_PEAK_DURATION_FAILURE signal=\(signal) channels=\(channels) live=\(live) gainDB=\(gainDB) decodedFrames=\(decoded.frames) fragments=\(segments)")
+                }
                 try #require(decoded.frames == 96_000)
                 let scaled = limited.map { $0 * powf(10, gainDB / 20) }
                 #expect(abs(report.peakPCM - samplePeak(scaled)) < 0.00001)
