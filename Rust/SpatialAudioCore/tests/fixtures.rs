@@ -240,8 +240,8 @@ fn alternate_dtsx_entered_mid_stream_starts_silent_instead_of_distorted() {
     enter_mid_stream("SAB_DTSX_ALTERNATE_FIXTURE");
 }
 
-/// Starts a fresh decoder halfway through the stream, as a seek does, and compares it with a
-/// continuous decode.
+/// Starts a fresh decoder near the middle of an audible passage, as a seek does, and compares
+/// it with a continuous decode. Source silence must not be counted as decoder warm-up.
 fn enter_mid_stream(variable: &str) {
     let data = fs::read(env::var(variable).expect("set the fixture path")).unwrap();
     let mut offsets = vec![];
@@ -252,7 +252,16 @@ fn enter_mid_stream(variable: &str) {
         offset += core_len + dca::exss_substream_size(&data[offset + core_len..]).unwrap();
     }
     let whole = dts_frames(&data, offsets.len());
-    let entry = offsets.len() / 2;
+    // Up to four warm-up frames and ten more before the convergence check must contain audio
+    // in the reference. Prefer the qualifying passage nearest the stream's midpoint.
+    let entry = (0..whole.len().saturating_sub(14))
+        .filter(|&entry| {
+            whole[entry..entry + 15]
+                .iter()
+                .all(|frame| frame.iter().any(|sample| sample.abs() > 1e-4))
+        })
+        .min_by_key(|&entry| entry.abs_diff(whole.len() / 2))
+        .expect("fixture needs 15 consecutive audible frames for the seek check");
     let entered = dts_frames(&data[offsets[entry]..], offsets.len() - entry);
     assert_eq!(
         entered[0].len(),
