@@ -45,6 +45,22 @@ let report = try await audio.finish()
 - **Backpressure.** Await each call. `append` suspends while Apple's writer catches up and rejects overlapping calls.
 - **Ending.** `finish()` flushes and returns an `APACConversionReport`. `finish(paddingTo:)` also pads output that would end before the given presentation time with silence, for example to end a rendition with a playlist sized from a longer video. `cancel()` or cancelling the task ends the session without output. Any failure is terminal: create a new session to recover.
 
+### Report concealed input
+
+`report.recovery` contains `concealedFrames`, `concealmentEvents` and `longestConcealmentFrames`.
+The same cumulative snapshot is available as `await audio.recoveryStatistics` during conversion
+and after completion, cancellation or failure. A new session starts at zero.
+
+These counters describe accepted TrueHD concealment: one event is a contiguous span of damaged
+access units replaced with silence, whether or not a later major sync successfully resumes decoding.
+Frames are source sample frames across all channels, not a count of individual channel samples.
+They include decoded seek pre-roll that the host later discards, but exclude encoder priming,
+end padding and limiter lookahead. At the supported 48 kHz, divide frame counts by 48,000 for seconds.
+DTS:X reports zero; its normal decoder warm-up silence is not damage recovery.
+
+Concealment limits and terminal errors are unchanged. The snapshot does not make a failed session
+usable again, and it does not report spatial accuracy, per-channel energy or limiter activity.
+
 ### Read packets from Matroska
 
 `MatroskaFile` provides those packets for MKV and MKA files, without a host demuxer:

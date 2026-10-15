@@ -65,6 +65,9 @@ The stream reads the MKV's TrueHD or DTS track over HTTP range requests, convert
 
 Rejected tracks fail with a clear error so the player can fall back. The [rendering model](docs/rendering.md) documents how objects are placed.
 
+Conversions report TrueHD concealed frames, events and longest spans through `report.recovery`;
+an active transcoder exposes the same [recovery snapshot](docs/conversion.md#report-concealed-input).
+
 ## Accuracy
 
 The output is rendered speaker audio encoded as APAC; the original bitstream and its objects are not passed through.

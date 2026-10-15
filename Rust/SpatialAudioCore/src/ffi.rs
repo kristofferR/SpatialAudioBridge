@@ -1,5 +1,5 @@
 use crate::{
-    decode::{Core, Pcm},
+    decode::{Core, Pcm, RecoveryStatistics},
     render::Layout,
 };
 use std::{
@@ -133,11 +133,53 @@ pub unsafe extern "C" fn sab_error(
     bytes.len() + 1
 }
 
+/// Copies cumulative recovery statistics, including after finishing or an error.
+/// Returns -1 for a null handle or output pointer, otherwise zero.
+/// # Safety
+/// Non-null `handle` must be live and `output` must point to writable, aligned storage.
+/// Serialize with all other calls on this session; do not call from its PCM callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sab_recovery_statistics(
+    handle: *const Handle,
+    output: *mut RecoveryStatistics,
+) -> i32 {
+    let Some(handle) = (unsafe { handle.as_ref() }) else {
+        return -1;
+    };
+    if output.is_null() {
+        return -1;
+    }
+    unsafe { output.write(handle.decoder.recovery_statistics()) };
+    0
+}
+
 /// # Safety
 /// The pointer must be null or a live session created by `sab_create`, destroyed once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sab_destroy(handle: *mut Handle) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_snapshot_rejects_nulls_and_survives_terminal_error() {
+        let mut snapshot = RecoveryStatistics::default();
+        unsafe {
+            assert_eq!(sab_recovery_statistics(ptr::null(), &mut snapshot), -1);
+            let handle = sab_create(1, 12);
+            assert!(!handle.is_null());
+            assert_eq!(sab_recovery_statistics(handle, ptr::null_mut()), -1);
+            assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
+            assert_eq!(snapshot, RecoveryStatistics::default());
+            assert_eq!(sab_push(handle, ptr::null(), 0, 0, None, ptr::null_mut()), -1);
+            assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
+            assert_eq!(snapshot, RecoveryStatistics::default());
+            sab_destroy(handle);
+        }
     }
 }
