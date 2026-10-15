@@ -36,7 +36,7 @@ Some open-source Apple TV players read the file on the device and hand `AVPlayer
 
 | Player | Engine | Integration |
 |---|---|---|
-| [AetherEngine](https://github.com/superuser404notfound/AetherEngine), used by [Sodalite](https://github.com/superuser404notfound/Sodalite), and the [Silo fork](https://github.com/Silo-Server/AetherEngine) | FFmpeg demux into loopback HLS for `AVPlayer`; its own optional TrueHD Atmos/DTS:X rendering and APAC encoding alongside channel-based conversion | Independent spatial pipeline, separate from SAB (see below) |
+| [AetherEngine](https://github.com/superuser404notfound/AetherEngine), used by [Sodalite](https://github.com/superuser404notfound/Sodalite), and the [Silo fork](https://github.com/Silo-Server/AetherEngine) | FFmpeg demux into loopback HLS for `AVPlayer`; its own optional TrueHD Atmos/DTS:X rendering and APAC encoding alongside channel-based conversion | Independent spatial pipeline, separate from SAB |
 | [Tomo TV](https://github.com/keiver/tomotv) | Its own FFmpeg engine, into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | Feed the packets to `SpatialAudioTranscoder` and serve the APAC segments as the HLS audio |
 | [Lumen](https://github.com/joaoalvess/lumen-player) | KSPlayer, with an MKV remux into loopback HLS for `AVPlayer`; TrueHD and DTS become FLAC | Feed the packets to `SpatialAudioTranscoder` in its remux engine and serve the APAC segments as the HLS audio |
 | [Swiftfin](https://github.com/jellyfin/Swiftfin), and its fork [Reefy](https://github.com/jmhunter83/reefy) | VLC by default; native `AVPlayer` option | `APACStream` in the native player, with Jellyfin URLs |
@@ -46,12 +46,6 @@ Some open-source Apple TV players read the file on the device and hand `AVPlayer
 | KSPlayer | FFmpeg, closed core | Needs vendor support for packet access |
 
 For engines that remux on the device and lack spatial conversion, replacing the audio conversion step is a natural fit: they work with any server that serves the original file. Segments from a [`.segments`](conversion.md#write-hls) destination start with an APAC sync packet; after a seek, start a new session on the same segment grid, as [`APACStream` does](architecture.md#the-segment-grid). For MKV, `APACStream` given the engine's loopback video playlist is a shortcut, at the cost of reading the file twice.
-
-### AetherEngine's existing spatial path
-
-Source checked on 15 October 2026: both [upstream](https://github.com/superuser404notfound/AetherEngine/tree/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial) and the [Silo fork](https://github.com/Silo-Server/AetherEngine/tree/b0712217abb7399aeb21f875bcc7c26e7af92fd8/Sources/AetherEngine/Audio/Spatial) include object decoding, speaker rendering, APAC encoding and Atmos activation. The host opts into [`ObjectAudioRendering.apac`](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/ObjectAudioRendering.swift) for supported 48 kHz TrueHD Atmos and DTS:X on OS 26 or later. This is an engine capability, not evidence that every consuming app enables it or ships these revisions.
-
-AetherEngine's internal type named `SpatialAudioBridge` is its own implementation, not this package. Its [TrueHD adapter](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/TrueHDObjectAudioDecoder.swift) and [DTS:X adapter](https://github.com/superuser404notfound/AetherEngine/blob/eb3a72ad05c0b139331c4d2400be7cda660d7cea/Sources/AetherEngine/Audio/Spatial/DTSXObjectAudioDecoder.swift) use LibTrueHD and LibDTSX decoder wrappers; AetherEngine supplies the player-facing rendering, encoding and HLS integration. Neither its renderer nor SAB's is a licensed reference renderer.
 
 ### Players that switch engines
 
