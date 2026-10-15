@@ -140,6 +140,8 @@ swift test -j 1
 
 `./scripts/release-core.sh` builds the release archive and prints its checksum. Each release's notes name the commit and toolchain to rebuild it with and compare.
 
+CI checks the packaged macOS core in a mixed Rust, Objective-C and C++ host before artifact upload or release publication, including both Rust archive orders and caught exceptions. See [packaging coverage](docs/validation.md#mixed-language-packaging-check) for the toolchains and limits.
+
 ## Decoder dependencies
 
 - **[truehdd](https://github.com/truehdd/truehdd)** (`truehd` crate): TrueHD framing, parsing and decoding, including Atmos presentation PCM and object metadata. This library uses the pinned [harletty fork](https://github.com/harletty/truehdd/tree/5c8b880405946e7ff1aee884cf9988415fe2c3a9).

@@ -48,11 +48,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Toolchains
         run: |
+          rustup toolchain install 1.86.0 --profile minimal
           rustup toolchain install 1.99.0 --profile minimal
           rustup default 1.99.0
           xcodebuild -version
       - name: Build the release archive
         run: ./scripts/release-core.sh
+      - name: Verify mixed-language host linking and unwinding
+        run: ./scripts/test-mixed-host.sh
       - name: Build and test the package
         run: |
           swift build -Xswiftc -warnings-as-errors
@@ -76,6 +79,7 @@ jobs:
           fetch-depth: 0
       - name: Toolchains
         run: |
+          rustup toolchain install 1.86.0 --profile minimal
           rustup toolchain install 1.99.0 --profile minimal
           rustup default 1.99.0
           xcodebuild -version
@@ -84,6 +88,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ./scripts/release-core.sh "$VERSION"
+      - name: Verify mixed-language host linking and unwinding
+        run: ./scripts/test-mixed-host.sh
       - name: Build and test the package
         run: |
           swift build -Xswiftc -warnings-as-errors

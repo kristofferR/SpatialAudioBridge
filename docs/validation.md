@@ -146,6 +146,25 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 The Core workflow runs Rust tests and Clippy on Linux before the Apple archive and package checks. Clippy treats warnings as errors. Public CI has no private media: Rust's compressed-fixture tests remain ignored, and fixture-dependent Swift tests are skipped. A successful workflow does not establish compressed-media or receiver behavior.
 
+### Mixed-language packaging check
+
+The Apple build and release jobs run `scripts/test-mixed-host.sh` after creating the release ZIP, before uploading the artifact or publishing a release. It extracts the ZIP into a path with spaces and uses its macOS library and headers to build an Objective-C/C++ executable alongside an independent Rust static library. Both archive orders run with companion libraries built by Rust 1.86.0 and 1.99.0; the core is built by Rust 1.99.0.
+
+The executable exercises SAB session creation, configuration, input/error handling and destruction before and after the companion library catches a deliberate Rust panic. It also checks Objective-C catch/finally and C++ catch/destructor behavior. Each language catches its own exception or panic before returning through the C ABI. The negative control links the original, unisolated Cargo archive with the Rust 1.86.0 companion and requires a duplicate `rust_eh_personality` diagnostic; an unrelated build failure does not pass the control.
+
+This checks the native macOS architecture of the `macos-26` runner (Apple Silicon), with Xcode/Clang and OS versions recorded in the job log. The script also supports native Intel macOS with a 10.15 deployment target; Apple Silicon uses 11.0. A deployment target is not a runtime test on that older OS. The harness does not deliberately panic inside SAB, decode programme media, run iOS/tvOS slices, or establish receiver/HDMI behavior.
+
+To reproduce on a macOS build host after building the archive, install the two Rust toolchains and run:
+
+```sh
+rustup toolchain install 1.86.0 1.99.0 --profile minimal
+./scripts/test-mixed-host.sh
+```
+
+An optional argument selects another release ZIP. The matching unisolated Cargo archive must still be present under `Rust/SpatialAudioCore/target/<native-target>/release` for the negative control. No simulator, signing or private fixtures are needed.
+
+### Package and renderer coverage
+
 The suite includes 33 Rust unit tests, 7 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
