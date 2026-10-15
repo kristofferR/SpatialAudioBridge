@@ -146,6 +146,8 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 The Core workflow runs Rust tests and Clippy on Linux before the Apple archive and package checks. Clippy treats warnings as errors. Public CI has no private media: Rust's compressed-fixture tests remain ignored, and fixture-dependent Swift tests are skipped. A successful workflow does not establish compressed-media or receiver behavior.
 
+The separate [Rust fuzz harness](../Rust/SpatialAudioCore/fuzz/README.md) exercises compressed-input chunking, truncation, repeated input and C session terminal state with synthetic framing seeds on Linux. It uses AddressSanitizer, bounded runtime and memory, corpus caching and reproducible failure artifacts. A short clean run is not proof that malformed inputs cannot crash or grow buffers; the initial seeds do not establish valid spatial-decoding coverage. Swift parser fuzzing remains separate work.
+
 ### Mixed-language packaging check
 
 The Apple build and release jobs run `scripts/test-mixed-host.sh` after creating the release ZIP, before uploading the artifact or publishing a release. It extracts the ZIP into a path with spaces and uses its macOS library and headers to build an Objective-C/C++ executable alongside an independent Rust static library. Both archive orders run with companion libraries built by Rust 1.86.0 and 1.99.0; the core is built by Rust 1.99.0.
