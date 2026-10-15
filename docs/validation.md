@@ -86,6 +86,8 @@ The direct decoder's raw frame count includes priming and trailing packet paddin
 
 The [first measurement run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38821687971) on macOS 26.6.2 showed first direct output after 73,728 submitted frames with live Capture DRC and 1,024 with DRC disabled, for both layouts. Offline Movie DRC produced no packet before flushing four seconds; disabling it also gave first output at 1,024 frames. Direct decoded duration, peak and RMS matched between settings. However, all four fragmented-writer outputs with DRC disabled failed native decoding with `Cannot Decode` / `bada`; the corresponding default-DRC cases passed. This is unresolved and does not support changing writer defaults.
 
+Normal package tests exercise both DRC settings through the direct encoder and the current defaults through both writer destinations. On an authorized Apple test host, `SAB_DRC_WRITER_DIAGNOSTICS=1 swift test --filter DRCMeasurementTests` additionally runs the disabled-DRC writer probes. Their native decode assertions remain strict, so this opt-in diagnostic can fail; required PR and release jobs leave the flag unset.
+
 ### Sources and streaming
 
 | Check | Result |
