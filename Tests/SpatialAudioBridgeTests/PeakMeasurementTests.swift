@@ -84,7 +84,7 @@ struct PeakMeasurementTests {
         let layout: SpatialAudioLayout = channels == 12 ? .sevenOneFour : .nineOneSix
         // Temporarily repeat the case that returned extra decoded frames, to retain a failing file.
         let signals = ["tone1k", "tone8k", "transients", "multichannel"]
-            + (live && channels == 16 ? Array(repeating: "multichannel", count: 7) : [])
+            + (live && channels == 16 ? Array(repeating: "multichannel", count: 31) : [])
         for signal in signals {
             let input = try probePCM(directory, signal: signal, channels: channels, stage: "input")
             let limited = try probePCM(directory, signal: signal, channels: channels, stage: "limited")
@@ -108,8 +108,13 @@ struct PeakMeasurementTests {
                 }
                 let report = try await transcoder.finish()
                 try #require(report.sampleFrames == 96_000)
+                let segments = collector.snapshot()
                 if live {
-                    try collector.snapshot().reduce(into: Data()) { $0.append($1.data) }.write(to: url)
+                    try segments.reduce(into: Data()) { $0.append($1.data) }.write(to: url)
+                    let media = segments.filter { $0.kind == .media }
+                    let duration = media.reduce(CMTime.zero) { CMTimeAdd($0, $1.duration ?? .zero) }
+                    let timings = try media.map { try fragmentTiming($0.data) }
+                    print("SAB_PEAK_CONTAINER signal=\(signal) channels=\(channels) gainDB=\(gainDB) reportedFrames=\(CMTimeConvertScale(duration, timescale: 48_000, method: .default).value) packetFrames=\(timings.map(\.frames)) decodeTimes=\(timings.map(\.decodeTime))")
                 }
                 let decoded = try await readPresentedAudio(url, layout: layout)
                 if decoded.frames != 96_000 {
@@ -119,11 +124,14 @@ struct PeakMeasurementTests {
                         try FileManager.default.copyItem(at: url, to: failures.appendingPathComponent(
                             "\(signal)-\(channels)-live\(live)-gain\(gainDB)-\(UUID().uuidString).mp4"))
                     }
-                    let segments = try collector.snapshot().filter { $0.kind == .media }.map { segment in
+                    let timingDetails = try segments.filter { $0.kind == .media }.map { segment in
                         let stored = try fragmentTiming(segment.data)
                         return "tfdt=\(stored.decodeTime) frames=\(stored.frames) reportedStart=\(String(describing: segment.startTime)) reportedDuration=\(String(describing: segment.duration))"
                     }
-                    print("SAB_PEAK_DURATION_FAILURE signal=\(signal) channels=\(channels) live=\(live) gainDB=\(gainDB) decodedFrames=\(decoded.frames) fragments=\(segments)")
+                    print("SAB_PEAK_DURATION_FAILURE signal=\(signal) channels=\(channels) live=\(live) gainDB=\(gainDB) decodedFrames=\(decoded.frames) fragments=\(timingDetails)")
+                    // Diagnostic only: a successful second read does not erase the first failure.
+                    let repeated = try await readPresentedAudio(url, layout: layout)
+                    print("SAB_PEAK_SECOND_READ frames=\(repeated.frames)")
                 }
                 try #require(decoded.frames == 96_000)
                 let scaled = limited.map { $0 * powf(10, gainDB / 20) }
