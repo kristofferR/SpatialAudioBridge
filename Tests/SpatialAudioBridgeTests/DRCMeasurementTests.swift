@@ -34,6 +34,17 @@ struct DRCMeasurementTests {
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.timeLimit(.minutes(3)), arguments: [false, true], [12, 16])
     func compareEncoderBuffering(live: Bool, channels: Int) async throws {
+        try await compare(live: live, channels: channels, fragmented: true)
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test(.timeLimit(.minutes(3)), arguments: [false, true], [12, 16])
+    func compareFileWriter(live: Bool, channels: Int) async throws {
+        try await compare(live: live, channels: channels, fragmented: false)
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    private func compare(live: Bool, channels: Int, fragmented: Bool) async throws {
         let frames = 192_000
         let layout: SpatialAudioLayout = channels == 12 ? .sevenOneFour : .nineOneSix
         // Distinct tones, changing levels and isolated transients, with silent edges.
@@ -49,33 +60,39 @@ struct DRCMeasurementTests {
         for disabled in [false, true] {
             var configuration = APACConfiguration(layout: layout, liveEncoding: live)
             configuration.disablesDynamicRangeControl = disabled
-            let encoder = try APACEncoder(configuration: configuration)
             let queriedPriming = try configuration.encoderPrimingDuration().value
-            #expect(Int64(encoder.primingFrames) == queriedPriming,
-                    "The configured encoder and session priming query must agree")
-            var packets: [APACEncoder.Packet] = []
-            var firstPacketInput: Int?
-            for offset in stride(from: 0, to: frames, by: 1024) {
-                let end = min(offset + 1024, frames)
-                let output = try encoder.encode(pcm[offset * channels..<end * channels])
-                if !output.isEmpty && firstPacketInput == nil { firstPacketInput = end }
-                packets += output
+            if fragmented {
+                let encoder = try APACEncoder(configuration: configuration)
+                #expect(Int64(encoder.primingFrames) == queriedPriming,
+                        "The configured encoder and session priming query must agree")
+                var packets: [APACEncoder.Packet] = []
+                var firstPacketInput: Int?
+                for offset in stride(from: 0, to: frames, by: 1024) {
+                    let end = min(offset + 1024, frames)
+                    let output = try encoder.encode(pcm[offset * channels..<end * channels])
+                    if !output.isEmpty && firstPacketInput == nil { firstPacketInput = end }
+                    packets += output
+                }
+                let packetsBeforeFlush = packets.count
+                packets += try encoder.encode([], final: true)
+                #expect(packets.first?.isIndependent == true)
+                let decoded = try decode(packets.map(\.data), format: encoder.format, channels: channels)
+                let decodedFrames = decoded.count / channels
+                try #require(decodedFrames >= frames + encoder.primingFrames)
+                let presented = Array(decoded[(encoder.primingFrames * channels)..<((encoder.primingFrames + frames) * channels)])
+                try record(path: "direct", configuration: configuration, input: pcm, decoded: presented,
+                           decodedFrames: decodedFrames, priming: encoder.primingFrames,
+                           first: firstPacketInput, beforeFlush: packetsBeforeFlush)
             }
-            let packetsBeforeFlush = packets.count
-            packets += try encoder.encode([], final: true)
-            #expect(packets.first?.isIndependent == true)
-            let decoded = try decode(packets.map(\.data), format: encoder.format, channels: channels)
-            let decodedFrames = decoded.count / channels
-            try #require(decodedFrames >= frames + encoder.primingFrames)
-            let presented = Array(decoded[(encoder.primingFrames * channels)..<((encoder.primingFrames + frames) * channels)])
-            try record(path: "direct", configuration: configuration, input: pcm, decoded: presented,
-                       decodedFrames: decodedFrames, priming: encoder.primingFrames,
-                       first: firstPacketInput, beforeFlush: packetsBeforeFlush)
 
             let trace = DRCFragmentTrace()
+            let name = "drc-live\(live)-channels\(channels)-disabled\(disabled)-fragmented\(fragmented).mp4"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-\(name)")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let destination: APACDestination = fragmented
+                ? .segments(syncPeriodsPerSegment: 1, onSegment: { trace.append($0) }) : .file(url)
             let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos,
-                destination: .segments(syncPeriodsPerSegment: 1, onSegment: { trace.append($0) }),
-                configuration: configuration)
+                destination: destination, configuration: configuration)
             for offset in stride(from: 0, to: frames, by: 1024) {
                 let end = min(offset + 1024, frames)
                 trace.feeding(end)
@@ -87,12 +104,21 @@ struct DRCMeasurementTests {
             let report = try await transcoder.finish()
             #expect(report.sampleFrames == Int64(frames))
             let snapshot = trace.snapshot()
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("drc-\(UUID().uuidString).mp4")
-            defer { try? FileManager.default.removeItem(at: url) }
-            try snapshot.segments.reduce(into: Data()) { $0.append($1.data) }.write(to: url)
+            if fragmented {
+                try snapshot.segments.reduce(into: Data()) { $0.append($1.data) }.write(to: url)
+            }
+            // Preserve synthetic output before reading, including files the native decoder rejects.
+            if let directory = ProcessInfo.processInfo.environment["SAB_DRC_OUTPUTS_DIR"] {
+                let directory = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let output = directory.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: output.path) { try FileManager.default.removeItem(at: output) }
+                try FileManager.default.copyItem(at: url, to: output)
+            }
+            print("SAB_DRC_WRITER file=\(name) firstOutputAtSubmittedFrames=\(String(describing: snapshot.first)) outputsBeforeFlush=\(snapshot.beforeFlush) segments=\(snapshot.segments.count)")
             let read = try await readPresentedAudio(url, layout: layout)
             #expect(read.frames == frames)
-            try record(path: "fragmented-writer", configuration: configuration, input: pcm,
+            try record(path: fragmented ? "fragmented-writer" : "file-writer", configuration: configuration, input: pcm,
                        decoded: read.samples, decodedFrames: read.frames, priming: Int(queriedPriming),
                        first: snapshot.first, beforeFlush: snapshot.beforeFlush)
         }
