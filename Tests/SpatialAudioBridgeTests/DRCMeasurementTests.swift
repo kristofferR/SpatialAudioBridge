@@ -101,7 +101,7 @@ struct DRCMeasurementTests {
     @available(macOS 26, iOS 26, tvOS 26, *)
     private func record(path: String, configuration: APACConfiguration, input: [Float], decoded: [Float],
                         decodedFrames: Int, priming: Int, first: Int?, beforeFlush: Int) throws {
-        #expect(decoded.allSatisfy(\.isFinite))
+        #expect(decoded.allSatisfy { $0.isFinite })
         let peak = decoded.reduce(Float(0)) { max($0, abs($1)) }
         let rms = sqrt(decoded.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(decoded.count))
         let values: [String: Any] = [
