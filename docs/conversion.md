@@ -33,7 +33,7 @@ let report = try await audio.finish()
 
 - **Input.** Pass only the selected track's payloads, in order and without container framing. Chunk boundaries do not matter: the decoded audio is bit-identical whether bytes arrive in 4096- or 317-byte pieces.
 - **Start.** Begin at a TrueHD major sync or a DTS core sync. TrueHD may start at any later major sync, such as one reached by a seek: audio before the first object metadata, usually 7.5–20 ms, is held and rendered at the first known object positions. DTS-HD may start at any later frame. Its lossless layer rebuilds on the core's history, so the first two decoded frames, about 21 ms, play as silence instead of distorted, and a frame the lossless layer is still buffering plays as silence too; every frame keeps its duration.
-- **Timing.** Output timestamps start at `startTime` and advance by decoded samples, without drift. Pass each packet's container time as `time`: a gap or reset in those times then fails the session, which samples alone cannot span. Frames laced into one block may share a time.
+- **Timing.** Encoder input timestamps start at `startTime` and advance by decoded samples, without drift. Standalone MP4 files map that source start to movie time zero; fragmented output keeps the media timeline with the [priming offset](#encoder-priming). Pass each packet's container time as `time`: a gap or reset in those times then fails the session, which samples alone cannot span. Frames laced into one block may share a time.
 - **Seeking.** A seek, timestamp gap or format change needs a new session. A seek normally lands on a sync point before the target; set `inputStartTime` to that packet's time and `startTime` to the target, and the session discards audio before the target:
 
   ```swift
@@ -94,7 +94,7 @@ To recognise the APAC rendition in AVFoundation, match its `NAME`, which is the 
 | `layout` | `.sevenOneFour` | `.nineOneSix` for 16 channels. Apple TV's Atmos output carries 12 channels and folds 9.1.6 into them; see [Atmos output](atmos-output.md#output-format) |
 | `bitRate` | 256 kbit/s per channel of `layout`, at most 4.096 Mbit/s | 3.072 Mbit/s for 7.1.4, 4.096 Mbit/s for 9.1.6. Once set, it no longer follows `layout` |
 | `gainDB` | 0 | −60 to +12 dB, applied before encoding and after the renderer's [peak limiter](rendering.md#levels), so a positive gain can exceed full scale. No normalization. |
-| `startTime` | zero | Presentation time of the first output sample |
+| `startTime` | zero | Source time of the first output sample; standalone MP4 presents it at movie time zero |
 | `inputStartTime` | nil | Container time of the first input packet, after a seek |
 | `syncPacketFrequency` | 75 | APAC packets between sync packets: 1.6 s at 48 kHz |
 | `liveEncoding` | false | The live profile trails input by about 1.6 s instead of about 20 s; see [live and offline encoding](architecture.md#live-and-offline-encoding) |

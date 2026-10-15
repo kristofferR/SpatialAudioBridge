@@ -52,8 +52,8 @@ public struct APACConfiguration: Sendable {
         set { explicitBitRate = newValue }
     }
     private var explicitBitRate: Int?
-    /// Presentation time of the first output sample. Fragment timestamps start here, less the
-    /// encoder priming.
+    /// Source time of the first output sample. Standalone MP4 files map it to movie time zero.
+    /// Fragment timestamps start here, less the encoder priming.
     public var startTime: CMTime
     /// Container time of the first decoded sample, when it differs from `startTime`.
     /// Earlier audio is discarded and a later start is padded with silence, so the output begins

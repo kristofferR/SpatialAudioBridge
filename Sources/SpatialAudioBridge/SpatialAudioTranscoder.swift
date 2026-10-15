@@ -219,7 +219,8 @@ public actor SpatialAudioTranscoder {
         .encoding(writer.error?.localizedDescription ?? "APAC encoder stopped")
     }
 
-    private func accumulate(_ block: PCMBlock) async throws {
+    /// Accepts renderer output. Internal so synthetic PCM can exercise muxing and timing without media fixtures.
+    func accumulate(_ block: PCMBlock) async throws {
         guard block.channels == configuration.layout.channelCount,
               pendingRate == 0 || pendingRate == block.sampleRate else {
             throw SpatialAudioError.encoding("Audio format changed; begin a new session at a discontinuity")
