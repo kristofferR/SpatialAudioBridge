@@ -82,9 +82,10 @@ struct PeakMeasurementTests {
     func measureAPACPeaks(live: Bool, channels: Int) async throws {
         let directory = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["SAB_PEAK_PROBES_DIR"]))
         let layout: SpatialAudioLayout = channels == 12 ? .sevenOneFour : .nineOneSix
-        // Temporarily repeat the case that returned extra decoded frames, to retain a failing file.
+        // Repeat the intermittent duration case only in an explicitly requested diagnostic run.
+        let stress = ProcessInfo.processInfo.environment["SAB_PEAK_STRESS"] == "1"
         let signals = ["tone1k", "tone8k", "transients", "multichannel"]
-            + (live && channels == 16 ? Array(repeating: "multichannel", count: 31) : [])
+            + (stress && live && channels == 16 ? Array(repeating: "multichannel", count: 31) : [])
         for signal in signals {
             let input = try probePCM(directory, signal: signal, channels: channels, stage: "input")
             let limited = try probePCM(directory, signal: signal, channels: channels, stage: "limited")

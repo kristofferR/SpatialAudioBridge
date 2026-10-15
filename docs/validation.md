@@ -74,6 +74,8 @@ cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" 
 
 The Apple test enables the experiment only when `SAB_PEAK_PROBES_DIR` names that artifact directory. This measures the asset-writer file and fragment paths, not the direct sample-buffer encoder, receiver output or HDMI behavior. Aggregate limiter/recovery diagnostics remain separate work; this experiment does not change the limiter or public API.
 
+A later [Apple run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38808096964) returned 117,760 decoded frames instead of 96,000 for the live 9.1.6 multichannel case. The duration mismatch remains unexplained. The test retains a failing synthetic MP4 when `SAB_PEAK_FAILURES_DIR` is set and logs container timings and a second read; a successful second read does not erase the original failure. For a deliberate diagnostic run on an Apple build host, `SAB_PEAK_STRESS=1` repeats that case 32 times per gain. Required PR CI leaves this flag unset and runs the normal 32-case matrix, with the exact-duration assertion intact.
+
 ### Sources and streaming
 
 | Check | Result |
