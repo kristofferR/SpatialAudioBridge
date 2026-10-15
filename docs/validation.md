@@ -144,6 +144,8 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 
 ## Coverage
 
+The Core workflow runs Rust tests and Clippy on Linux before the Apple archive and package checks. Clippy treats warnings as errors. Public CI has no private media: Rust's compressed-fixture tests remain ignored, and fixture-dependent Swift tests are skipped. A successful workflow does not establish compressed-media or receiver behavior.
+
 The suite includes 33 Rust unit tests, 7 Rust fixture tests and 58 Swift tests. Without fixture variables, 45 Swift tests run: configuration, final-fragment trimming, silence padding to the playlist's end, playlists and variant filtering, subtitle routing and WebVTT time maps, the bundled notices, IEC 61937 unpacking of synthetic MAT and type IV bursts, the loopback server with pipelined requests, HTTP error handling, the stream's restart rule, cache window, helper runs, run endings and timestamp continuity, synthetic and malformed Matroska files, tracks that end before the video, the encoder round trip, renderer settings and failures, and the activator. Four tests need `SAB_TRUEHD_FIXTURE` or `SAB_DTSX_FIXTURE` (one of them also FFmpeg at `/opt/homebrew/bin/ffmpeg`), one needs `SAB_DTSX_ALTERNATE_FIXTURE`, and eight need `SAB_MKV_FIXTURE`. Rust Clippy and the Swift build pass with warnings treated as errors.
 
 HLS codec strings are derived from the platform encoder's documented format mapping; this check does not independently parse the APAC profile from its opaque bitstream. The PCM chunk comparison checks that network and demuxer buffering do not change output. These checks do not establish equivalence to a licensed reference renderer. Full compressed alternate-profile media has been validated for D4 only. The other alternate profiles have synthetic routing checks; the IMAX component vector validates metadata parsing with synthetic PCM, not a complete IMAX track or APAC round trip. Full media and listening validation for those profiles remain outstanding.
@@ -186,21 +188,28 @@ For the Matroska and streaming tests, keep the Helicopter MKV's TrueHD track in 
 ffmpeg -i "atmos-sample.mkv" -map 0:a:0 -c copy "atmos-only.mkv"
 ```
 
-Fixture media remains local. Run full decoder checks on a development machine:
+Fixture media remains local. Run ordinary Rust checks on Linux:
 
 ```sh
-cd Rust/SpatialAudioCore
+cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
+cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
+```
+
+From the repository root, explicitly run all ignored Rust fixture tests on Linux:
+
+```sh
 SAB_TRUEHD_FIXTURE="/absolute/path/atmos.thd" \
 SAB_DTSX_FIXTURE="/absolute/path/dtsx.dts" \
 SAB_DTSX_ALTERNATE_FIXTURE="/absolute/path/dtsx-alternate.dts" \
-cargo test --release --locked -- --include-ignored --test-threads=1
-cargo clippy --all-targets --locked -- -D warnings
+./scripts/test-rust-fixtures.sh
 ```
+
+The script rejects missing, unreadable or empty fixture files before invoking Cargo. It runs the `fixtures` test target with `--ignored`; ordinary `cargo test` does not run those tests, even when fixture variables are set.
 
 The `render` example writes unlimited PCM and reports each rendered channel's peak and the samples above full scale, before limiting; write to `/dev/null` to measure a whole film:
 
 ```sh
-cargo run --release --locked --example render -- truehd film.thd /dev/null 7.1.4
+cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example render -- truehd film.thd /dev/null 7.1.4
 ```
 
 Run the Apple round-trip, streaming and renderer checks on macOS. Use the full Atmos elementary stream with the MKV made from it, because one test compares the MKV's track with it byte for byte. For both DTS:X fixtures, eight-second, complete-access-unit excerpts are sufficient. The fixture suites serialize their encoder jobs.

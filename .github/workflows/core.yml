@@ -16,7 +16,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  rust:
+    if: inputs.version == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --component clippy
+          rustup default 1.99.0
+          rustc --version
+          cargo clippy --version
+      - name: Coverage scope
+        run: |
+          echo 'Rust unit tests and Clippy run without private media. The ignored compressed-fixture tests are not run by this workflow; use scripts/test-rust-fixtures.sh with all three fixture paths to run them explicitly.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Rust tests
+        run: cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
+      - name: Clippy
+        run: cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
+
   build:
+    needs: rust
     if: inputs.version == ''
     runs-on: macos-26
     permissions:
