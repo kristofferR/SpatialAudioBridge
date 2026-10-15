@@ -76,6 +76,14 @@ The Apple test enables the experiment only when `SAB_PEAK_PROBES_DIR` names that
 
 A later [Apple run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38808096964) returned 117,760 decoded frames instead of 96,000 for the live 9.1.6 multichannel case. The duration mismatch remains unexplained. The test retains a failing synthetic MP4 when `SAB_PEAK_FAILURES_DIR` is set and logs container timings and a second read; a successful second read does not erase the original failure. For a deliberate diagnostic run on an Apple build host, `SAB_PEAK_STRESS=1` repeats that case 32 times per gain. Required PR CI leaves this flag unset and runs the normal 32-case matrix, with the exact-duration assertion intact.
 
+### APAC dynamic-range-control buffering
+
+`DRCMeasurementTests` compares the current Capture/Movie DRC settings with disabled DRC using four seconds of synthetic multichannel tones, changing levels and transients. It keeps bitrate and sync frequency fixed, covers both layouts and live/offline content profiles, and exercises the direct packet encoder and fragmented asset-writer path. Playback defaults remain unchanged; the DRC switch is internal to the experiment.
+
+Each `SAB_DRC_MEASUREMENT` JSON line records submitted frames at the first pre-flush output, output count before flushing, queried priming, decoded frame count, sample peak, RMS and OS/configuration. A null first-output value means no output was observed before flushing the four-second input, not infinite latency. Writer callback scheduling makes its submitted-frame observation an upper bound; it is not a precise count of frames consumed by the native codec. Offline content settings are tested with fragmented output so callbacks remain observable, not with a standalone file destination.
+
+The direct decoder's raw frame count includes priming and trailing packet padding; its peak/RMS measurements use the source-length span after priming. The native file reader checks presented duration and contiguous timestamps for concatenated fragments. Core CI retains these lines in the package-test log within `apac-peak-measurements`. This experiment does not measure player seek recovery, receiver behavior or device latency, and its four-second input cannot determine longer lookahead exactly.
+
 ### Sources and streaming
 
 | Check | Result |
