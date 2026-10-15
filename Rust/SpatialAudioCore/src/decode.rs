@@ -528,6 +528,7 @@ const DTS_WARMUP_FRAMES: u8 = 2;
 pub struct Dts {
     buffer: Vec<u8>,
     decoder: dca::HdDecoder,
+    decoded: dca::HdFrame,
     warmup: u8,
     renderer: Renderer,
     fold_renderer: dca::FoldRenderer,
@@ -540,6 +541,7 @@ impl Dts {
         Self {
             buffer: vec![],
             decoder: dca::HdDecoder::new(),
+            decoded: dca::HdFrame::default(),
             warmup: DTS_WARMUP_FRAMES,
             renderer: Renderer::new(layout),
             fold_renderer: dca::FoldRenderer::new(),
@@ -580,12 +582,17 @@ impl Dts {
             if self.buffer.len() < core_len + exss_len {
                 break;
             }
-            let pcm = match self.decoder.decode(
+            let pcm = match self.decoder.decode_into(
                 &self.buffer[..core_len],
                 &self.buffer[core_len..core_len + exss_len],
+                &mut self.decoded,
             ) {
-                Ok(frame) => {
-                    let mut pcm = self.render(frame)?;
+                Ok(()) => {
+                    // Lend the frame to rendering, then retain its buffers for the next decode.
+                    let frame = std::mem::take(&mut self.decoded);
+                    let rendered = self.render(&frame);
+                    self.decoded = frame;
+                    let mut pcm = rendered?;
                     if self.warmup > 0 {
                         self.warmup -= 1;
                         pcm.data.fill(0.);
@@ -618,15 +625,14 @@ impl Dts {
         }
         Ok(())
     }
-    fn render(&mut self, frame: dca::HdFrame) -> Result<Pcm, String> {
+    fn render(&mut self, frame: &dca::HdFrame) -> Result<Pcm, String> {
         if !frame.lossless || !(frame.x_present || frame.x_imax) {
             return Err("This stream is not lossless DTS:X".into());
         }
         if let Some(e) = frame.x_decode_error {
             return Err(format!("DTS:X extension decoding: {e}"));
         }
-        let presentation =
-            dca::XPresentation::detect(&frame).ok_or("Unknown DTS:X presentation")?;
+        let presentation = dca::XPresentation::detect(frame).ok_or("Unknown DTS:X presentation")?;
         let metadata = dca::XMetadata::parse(&frame.x_payload, presentation.feed_count())
             .map_err(|e| format!("DTS:X spatial metadata: {e:?}"))?;
         self.render_spatial(frame, presentation, metadata)
@@ -634,11 +640,11 @@ impl Dts {
 
     fn render_spatial(
         &mut self,
-        frame: dca::HdFrame,
+        frame: &dca::HdFrame,
         presentation: dca::XPresentation,
         metadata: dca::XMetadata,
     ) -> Result<Pcm, String> {
-        if dca::XPresentation::detect(&frame) != Some(presentation) {
+        if dca::XPresentation::detect(frame) != Some(presentation) {
             return Err("DTS:X PCM does not match its presentation".into());
         }
         if frame.sample_rate != 48_000 {
@@ -1081,7 +1087,7 @@ mod dts_tests {
             let mut frame = frame(presentation, &metadata, &[0.1, 0.2, 0.3, 0., 0., 0., 0.], 8);
             frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
             assert!(!frame.x_present && frame.x_imax);
-            let pcm = Dts::new(layout).render(frame).unwrap();
+            let pcm = Dts::new(layout).render(&frame).unwrap();
             for sample in pcm.data.chunks_exact(layout.count()) {
                 for (i, value) in sample.iter().enumerate() {
                     let expected = match i {
@@ -1116,7 +1122,7 @@ mod dts_tests {
             frame.samples[speaker as usize] = Some(vec![plan.gain(speaker as usize, 0); 8]);
         }
         let pcm = Dts::new(Layout::SevenOneFour)
-            .render_spatial(frame, presentation, metadata)
+            .render_spatial(&frame, presentation, metadata)
             .unwrap();
         for sample in pcm.data.as_chunks::<12>().0 {
             for (i, value) in sample.iter().enumerate() {
@@ -1139,7 +1145,7 @@ mod dts_tests {
                     .collect();
                 let frame = frame(presentation, &metadata, &amplitudes, 8);
                 let pcm = Dts::new(layout)
-                    .render_spatial(frame, presentation, metadata)
+                    .render_spatial(&frame, presentation, metadata)
                     .unwrap();
                 let mut expected = vec![0.; layout.count()];
                 expected[2] = amplitudes[presentation.object_feeds()].iter().sum();
@@ -1177,14 +1183,14 @@ mod dts_tests {
         let initial = metadata(presentation, position(0, 0));
         decoder
             .render_spatial(
-                frame(presentation, &initial, &[1.], 4),
+                &frame(presentation, &initial, &[1.], 4),
                 presentation,
                 initial,
             )
             .unwrap();
         let moved = metadata(presentation, position(30, 0));
         let pcm = decoder
-            .render_spatial(frame(presentation, &moved, &[1.], 4), presentation, moved)
+            .render_spatial(&frame(presentation, &moved, &[1.], 4), presentation, moved)
             .unwrap();
         for (i, sample) in pcm.data.as_chunks::<12>().0.iter().enumerate() {
             let right = (i + 1) as f32 / 4.;
@@ -1200,7 +1206,7 @@ mod dts_tests {
         let metadata = metadata(presentation, position(0, 25));
         let pcm = Dts::new(Layout::SevenOneFour)
             .render_spatial(
-                frame(presentation, &metadata, &[1.], 4),
+                &frame(presentation, &metadata, &[1.], 4),
                 presentation,
                 metadata,
             )
@@ -1231,7 +1237,7 @@ mod dts_tests {
             let metadata = XMetadata::from_sources(&[SourceMetadata { role, fold }]).unwrap();
             let error = Dts::new(Layout::SevenOneFour)
                 .render_spatial(
-                    frame(presentation, &metadata, &[1.], 4),
+                    &frame(presentation, &metadata, &[1.], 4),
                     presentation,
                     metadata,
                 )
@@ -1247,7 +1253,7 @@ mod dts_tests {
         let initial = metadata(XPresentation::ObjectOnly, position(0, 0));
         decoder
             .render_spatial(
-                frame(XPresentation::ObjectOnly, &initial, &[1.], 4),
+                &frame(XPresentation::ObjectOnly, &initial, &[1.], 4),
                 XPresentation::ObjectOnly,
                 initial,
             )
@@ -1255,7 +1261,7 @@ mod dts_tests {
         let next = metadata(XPresentation::ObjectD0, position(0, 0));
         let error = decoder
             .render_spatial(
-                frame(XPresentation::ObjectD0, &next, &[1.; 5], 4),
+                &frame(XPresentation::ObjectD0, &next, &[1.; 5], 4),
                 XPresentation::ObjectD0,
                 next,
             )
