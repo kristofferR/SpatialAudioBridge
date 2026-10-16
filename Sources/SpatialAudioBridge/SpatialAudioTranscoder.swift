@@ -22,7 +22,7 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     private var closed = false
     private var held: APACSegment?
     private var coded = CMTime.zero
-    /// The end of the latest accepted fragment and its bytes, to recognize a repeated fragment.
+    /// The end of the latest accepted fragment and its content, to recognize a repeated fragment.
     private var acceptedEnd = CMTime.negativeInfinity
     private var accepted: Data?
     var error: String? { lock.withLock { failure } }
@@ -44,12 +44,13 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
                 // AVAssetWriter can repeat its final fragment while finishing, sometimes before
                 // the original (#56). Keep the first copy; differing content is a real overlap.
                 // Reported boundaries may round by a frame, so overlap means half a packet.
+                let content = fragmentContent(segment.data)
                 if CMTimeAdd(start, CMTime(value: 512, timescale: 48_000)) < acceptedEnd {
-                    if segment.data != accepted { record("APAC fragments overlap") }
+                    if content != accepted { record("APAC fragments overlap") }
                     return
                 }
                 acceptedEnd = CMTimeAdd(start, duration)
-                accepted = segment.data
+                accepted = content
             }
             coded = CMTimeAdd(coded, segment.duration ?? .zero)
             guard holding else { return deliver(segment) }

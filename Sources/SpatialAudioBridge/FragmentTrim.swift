@@ -47,6 +47,18 @@ func trimmingLastSample(of segment: Data, by frames: UInt32) -> Data? {
     return Data(bytes)
 }
 
+/// `segment` with its `mfhd` sequence number cleared. AVAssetWriter can repeat its final fragment
+/// under the next sequence number with the same samples (#56).
+@available(macOS 26, iOS 26, tvOS 26, *)
+func fragmentContent(_ segment: Data) -> Data {
+    var bytes = [UInt8](segment)
+    guard let moof = MP4Box.children(of: bytes, in: 0..<bytes.count).first(where: { $0.type == "moof" }),
+          let mfhd = MP4Box.children(of: bytes, in: moof.body).first(where: { $0.type == "mfhd" }),
+          mfhd.body.count >= 8 else { return segment }
+    MP4Box.setUInt32(&bytes, 0, at: mfhd.body.lowerBound + 4)
+    return Data(bytes)
+}
+
 /// A minimal reader for the plain 32-bit-sized boxes AVAssetWriter writes in fragments.
 @available(macOS 26, iOS 26, tvOS 26, *)
 private struct MP4Box {
