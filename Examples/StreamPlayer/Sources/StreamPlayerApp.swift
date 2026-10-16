@@ -5,6 +5,10 @@ import SpatialAudioBridge
 import SpatialAudioPlayback
 import SwiftUI
 
+// Older SDKs omit the Sendable annotation that newer AVFoundation SDKs provide.
+// This subclass adds no mutable state; the host controls the clock while SAB queues audio.
+private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unchecked Sendable {}
+
 /// Plays a Matroska file's TrueHD Atmos or DTS:X track as APAC beside a server's HLS video.
 ///
 /// Configure with launch environment variables:
@@ -28,7 +32,7 @@ import SwiftUI
     let player = AVPlayer()
     var status = "Starting…"
     private var stream: APACStream?
-    private var synchronizer: AVSampleBufferRenderSynchronizer?
+    private var synchronizer: PlaybackSynchronizer?
     private var atmos: AtmosOutputActivator?
     private var monitor: Task<Void, Never>?
     /// The latest seek target and when it was requested, until playback has resumed after it, so a
@@ -89,7 +93,7 @@ import SwiftUI
                 ?? file.audioTracks.first(where: { $0.codec != nil }), let codec = track.codec else {
             throw SpatialAudioError.source("The file has no TrueHD or DTS track")
         }
-        let synchronizer = AVSampleBufferRenderSynchronizer()
+        let synchronizer = PlaybackSynchronizer()
         self.synchronizer = synchronizer
         let renderer = try SpatialAudioRenderer(codec: codec, synchronizer: synchronizer)
         activateAtmos { $0.attach(to: synchronizer) }
