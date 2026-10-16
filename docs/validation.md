@@ -28,6 +28,9 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 
 ### Encoding and packaging
 
+The opt-in [direct encoder profile](encoder-performance.md) records timing, process memory and
+packet hashes in a separate cloud test process before evaluating buffer reuse.
+
 | Check | Result |
 |---|---|
 | HLS codec metadata | Layouts expose `apac.31.03` / `apac.31.04` using Apple's published platform profile/level mapping |
