@@ -87,6 +87,10 @@ public actor SpatialAudioTranscoder {
     /// Whether the decoder holds input to flush.
     private var hasInput = false
 
+    /// Cumulative decoder concealment, readable while accepting input and after completion or
+    /// failure. A fresh session resets it; sample frames include any discarded seek pre-roll.
+    public var recoveryStatistics: SpatialAudioRecoveryStatistics { decoder.recoveryStatistics }
+
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
     public init(codec: SpatialAudioCodec, destination: APACDestination,
@@ -160,7 +164,8 @@ public actor SpatialAudioTranscoder {
             try checkActive()
             state = .finished
             return APACConversionReport(sampleRate: sampleRate, sampleFrames: frames,
-                                        layout: configuration.layout, peakPCM: peak)
+                                        layout: configuration.layout, peakPCM: peak,
+                                        recovery: decoder.recoveryStatistics)
         } catch { fail(); throw error }
     }
 
@@ -352,5 +357,7 @@ public actor SpatialAudioTranscoder {
 extension APACConfiguration {
     /// The content source and dynamic-range profile for the chosen encoding mode.
     var contentSource: AVAudioContentSource { liveEncoding ? .appleAV_Spatial_Live : .appleAV_Spatial_Offline }
-    var dynamicRangeConfiguration: AVAudioDynamicRangeControlConfiguration { liveEncoding ? .capture : .movie }
+    var dynamicRangeConfiguration: AVAudioDynamicRangeControlConfiguration {
+        disablesDynamicRangeControl ? .none : (liveEncoding ? .capture : .movie)
+    }
 }

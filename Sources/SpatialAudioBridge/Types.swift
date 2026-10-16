@@ -66,6 +66,8 @@ public struct APACConfiguration: Sendable {
     /// ahead for loudness and dynamic range, so it suits files rather than playback.
     /// `APACStream` and `SpatialAudioRenderer` always use the live profile.
     public var liveEncoding: Bool
+    /// Internal comparison setting for encoder experiments; playback defaults are unchanged.
+    var disablesDynamicRangeControl = false
     /// Attenuates TrueHD by its signalled dialogue level, as an AV receiver does: 4 dB at −27 dB.
     /// Off by default, as in Apple TV's own Atmos playback, so converted tracks play at the level of
     /// native Atmos content. DTS:X exposes no dialogue level.
@@ -140,6 +142,16 @@ public enum APACDestination: Sendable {
     case segments(syncPeriodsPerSegment: Int = 2, onSegment: @Sendable (APACSegment) throws -> Void)
 }
 
+/// Decoder concealment since this session began. Counts source sample frames across all channels,
+/// including seek pre-roll, excluding encoder priming and end padding. DTS:X reports zero.
+@available(macOS 26, iOS 26, tvOS 26, *)
+public struct SpatialAudioRecoveryStatistics: Sendable, Equatable {
+    public let concealedFrames: UInt64
+    /// Contiguous spans of accepted concealment, not a count of completed recoveries.
+    public let concealmentEvents: UInt64
+    public let longestConcealmentFrames: UInt64
+}
+
 /// What a finished session converted.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACConversionReport: Sendable {
@@ -149,6 +161,7 @@ public struct APACConversionReport: Sendable {
     public let layout: SpatialAudioLayout
     /// The largest absolute sample before encoding; above 1 exceeds full scale.
     public let peakPCM: Float
+    public let recovery: SpatialAudioRecoveryStatistics
     public var duration: TimeInterval { Double(sampleFrames) / Double(sampleRate) }
 }
 

@@ -71,6 +71,7 @@ jobs:
         env:
           SAB_PEAK_PROBES_DIR: ${{ runner.temp }}/peak-probes
           SAB_PEAK_FAILURES_DIR: ${{ runner.temp }}/peak-failures
+          SAB_DRC_OUTPUTS_DIR: ${{ runner.temp }}/drc-outputs
         run: |
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
@@ -90,6 +91,7 @@ jobs:
             ${{ runner.temp }}/package-tests.log
             ${{ runner.temp }}/encoder-profile.log
             ${{ runner.temp }}/peak-failures
+            ${{ runner.temp }}/drc-outputs
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4

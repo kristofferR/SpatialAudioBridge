@@ -18,6 +18,16 @@ pub struct Pcm {
     pub rate: u32,
     pub channels: usize,
 }
+
+/// Concealment accepted by this decoder session, measured in source sample frames, not channels.
+/// Includes input before any host-side seek trimming; excludes encoder priming and padding.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecoveryStatistics {
+    pub concealed_frames: u64,
+    pub concealment_events: u64,
+    pub longest_concealment_frames: u64,
+}
 /// Decodes and renders one stream, holding the speaker feeds below full scale by default.
 pub struct Core {
     source: Source,
@@ -28,6 +38,13 @@ enum Source {
     Dts(Box<Dts>),
 }
 impl Core {
+    /// Cumulative snapshot; fresh sessions and DTS:X sessions start at zero.
+    pub fn recovery_statistics(&self) -> RecoveryStatistics {
+        match &self.source {
+            Source::TrueHd(decoder) => decoder.recovery,
+            Source::Dts(_) => RecoveryStatistics::default(),
+        }
+    }
     pub fn new(codec: u32, layout: Layout) -> Result<Self, String> {
         let source = match codec {
             1 => Source::TrueHd(Box::new(TrueHd::new(layout))),
@@ -105,6 +122,7 @@ pub struct TrueHd {
     lost: Option<(String, usize)>,
     /// Length and channel count of the latest decoded access unit.
     unit: Option<(usize, usize)>,
+    recovery: RecoveryStatistics,
 }
 
 /// The attenuation an AV receiver applies so that dialogue plays at −31 dBFS.
@@ -134,6 +152,7 @@ impl TrueHd {
             level: None,
             lost: None,
             unit: None,
+            recovery: RecoveryStatistics::default(),
         }
     }
     fn push(
@@ -268,7 +287,18 @@ impl TrueHd {
             }
         }
         let (frames, channels) = self.unit.unwrap_or_default();
-        self.emit(vec![vec![0.; frames]; channels], frames, false, output)
+        self.emit(vec![vec![0.; frames]; channels], frames, false, output)?;
+        if let Some((_, count)) = self.lost.as_ref() {
+            self.recovery.concealed_frames += frames as u64;
+            if *count == 1 {
+                self.recovery.concealment_events += 1;
+            }
+            self.recovery.longest_concealment_frames = self
+                .recovery
+                .longest_concealment_frames
+                .max(*count as u64 * frames as u64);
+        }
+        Ok(())
     }
 
     /// Renders one access unit, with the object metadata just decoded if `metadata` is set.
@@ -768,6 +798,36 @@ fn dts_spatial_speaker(channel: dca::SpatialChannel) -> Speaker {
 }
 
 #[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn concealment_counts_spans_and_stops_at_the_recovery_bound() {
+        let mut decoder = TrueHd::new(Layout::SevenOneFour);
+        decoder.unit = Some((40, 12));
+        let mut discard = |_: Pcm| Ok(());
+        decoder.lose(None, "first".into(), &mut discard).unwrap();
+        decoder.conceal(&mut discard).unwrap();
+        assert_eq!(decoder.recovery, RecoveryStatistics {
+            concealed_frames: 80, concealment_events: 1, longest_concealment_frames: 80,
+        });
+        // A separate loss starts a new span without resetting the cumulative snapshot.
+        decoder.lost = None;
+        decoder.lose(None, "second".into(), &mut discard).unwrap();
+        for _ in 1..MAX_SYNC_INTERVAL { decoder.conceal(&mut discard).unwrap(); }
+        let before = decoder.recovery;
+        assert_eq!(before.concealed_frames, (MAX_SYNC_INTERVAL as u64 + 2) * 40);
+        assert_eq!(before.concealment_events, 2);
+        assert_eq!(before.longest_concealment_frames, MAX_SYNC_INTERVAL as u64 * 40);
+        assert!(decoder.conceal(&mut discard).is_err());
+        assert_eq!(decoder.recovery, before, "rejected concealment is not counted");
+        for codec in [1, 2] {
+            assert_eq!(Core::new(codec, Layout::SevenOneFour).unwrap().recovery_statistics(), RecoveryStatistics::default());
+        }
+    }
+}
+
+#[cfg(test)]
 mod metadata_tests {
     use super::*;
     type Control<T> = (&'static str, fn(&mut T));
@@ -1070,6 +1130,28 @@ mod dts_tests {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xcf, 0xc4, 0x08, 0x00, 0x94, 0xa6, 0x80,
         0x00, 0x40, 0x00, 0x00,
     ];
+
+    #[test]
+    fn damaged_spatial_metadata_is_rejected_even_with_an_intact_compatible_bed() {
+        let presentation = XPresentation::ObjectsD0;
+        let metadata = XMetadata::parse(&IMAX_COMPONENT_PAYLOAD, 7).unwrap();
+        let mut frame = frame(presentation, &metadata, &[0.1, 0.2, 0.3, 0., 0., 0., 0.], 8);
+        frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
+        let original_bed = frame.samples.clone();
+        let original_feeds = frame.x_samples.clone();
+        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
+            let mut decoder = Dts::new(layout);
+            assert_eq!(decoder.render(&frame).unwrap().frames, 8);
+            // Remove metadata bytes only; decoded bed/feed samples and presentation stay intact.
+            frame.x_payload.truncate(4);
+            assert_eq!(XPresentation::detect(&frame), Some(presentation));
+            let error = decoder.render(&frame).err().expect("damaged metadata must fail");
+            assert!(error.starts_with("DTS:X spatial metadata:"), "{error}");
+            assert_eq!(frame.samples, original_bed);
+            assert_eq!(frame.x_samples, original_feeds);
+            frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
+        }
+    }
 
     #[test]
     fn imax_marker_and_parsed_components_route_to_centre_left_right() {
