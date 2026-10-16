@@ -23,13 +23,24 @@ gh run download RUN_ID --repo kristofferR/SpatialAudioBridge \
   --name StreamPlayer-unsigned-tvOS --dir "/path/to/artifact"
 security find-identity -v -p codesigning
 xcrun devicectl list devices
+xcrun devicectl device info details --device "DEVICE_IDENTIFIER" \
+  --json-output "/tmp/stream-player-device.json"
+APPLE_TV_UDID="$(plutil -extract result.properties.hardware.udid raw \
+  "/tmp/stream-player-device.json" 2>/dev/null || \
+  plutil -extract result.hardwareProperties.udid raw "/tmp/stream-player-device.json")"
 ./Examples/StreamPlayer/sign-and-install.sh \
   "/path/to/artifact/StreamPlayer-unsigned-tvOS.zip" \
-  "/path/to/development.mobileprovision" "SIGNING_IDENTITY_SHA1" "APPLE_TV_UDID"
+  "/path/to/development.mobileprovision" "SIGNING_IDENTITY_SHA1" "$APPLE_TV_UDID"
 ```
 
+Use the `Identifier` from `list devices` as `DEVICE_IDENTIFIER` to query the hardware UDID.
+The displayed identifier may be a CoreDevice UUID; the helper needs the hardware UDID in the profile's
+`ProvisionedDevices`. The extraction above supports both current and older device JSON layouts.
+
 Use an existing, unexpired tvOS development profile that includes the Apple TV UDID and permits
-`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or the team's wildcard).
+`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or the profile prefix's wildcard).
+The helper uses the profile's App ID prefix for application/keychain identifiers and keeps its
+team identifier separate; older developer accounts may have different values.
 The signing identity must have its private key in the local keychain and be included in the
 profile. The helper checks the profile's platform, development flag, device and app ID, embeds it,
 signs embedded code and the app with concrete development entitlements, verifies the signature,
