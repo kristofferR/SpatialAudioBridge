@@ -98,6 +98,29 @@ The first frame uses its declared position immediately. Later position changes i
 
 Before recombination, `dca::FoldPlan` removes every known spatial contribution from the compatible bed. `dca::FoldRenderer` resolves folds explicitly marked as rendered from object metadata using its own bed reconstruction law and timing; this is independent of the output panner. It cannot reconstruct such folds for a 5.1 reference bed, so that case remains rejected. Explicit 5.1 fold coefficients are supported. Any unresolved fold, unknown presentation, malformed metadata, PCM/metadata count mismatch or inconsistent source role fails explicitly. A presentation change requires a new session. Only lossless DTS-HD carriers at 48 kHz are supported. All eight DTS:X films in the [library census](validation.md#library-census) used the standard four-height presentation in every frame, with every fold stated, so the alternate profiles and object panning above did not apply to any of them.
 
+### Damaged spatial metadata
+
+SAB keeps DTS:X metadata errors terminal, even when a decoded compatible bed is available.
+The host should select its existing fallback and start a new session. This differs from
+[LibDTSX's authored-bed fallback](https://github.com/superuser404notfound/LibDTSX/blob/7d8e962040a82e1782b234705a84c72cc7c65f91/src/engine.rs#L435-L465):
+that path copies the original bed and silences the spatial feeds whenever its spatial setup fails.
+Its checks include extension errors, metadata parsing, source-role mismatch and unresolved folds;
+it is not a classifier limited to isolated metadata damage, nor does that path bound consecutive
+fallback frames. Copying it would broaden SAB's supported behavior beyond a damage-recovery option.
+
+A controlled check truncates only the metadata of the existing public D0 test vector after a valid
+frame, leaving the known presentation and decoded bed/feed samples intact. Both output layouts
+reject it as a spatial-metadata error. This establishes the renderer boundary, not recovery from a
+damaged compressed access unit or the integrity of an arbitrary decoded bed.
+
+The current decision is to retain strict rejection. A future opt-in recovery mode would first need
+evidence that the compatible bed is valid independently of the damaged metadata, a narrow error
+classification excluding unsupported profiles/roles/folds and damaged audio, an explicit maximum
+source-frame span, and reporting that distinguishes authored-bed output from spatial reconstruction.
+Return to spatial output would need validated metadata and reset fold/object-ramp state, with tests
+for transitions, chunk independence and exact sample counts. No recovery bound or return rule is
+currently validated; the presence of bed PCM alone is insufficient to add this mode.
+
 ## Levels
 
 Rendering is linear, and without dialogue normalisation unless `normalizesDialogue` is set. Objects panned into the same speaker add up, so a channel can exceed full scale where the mix's own speaker feeds would not. Before the limiter below, the [library census](validation.md#library-census) found 135 of 265 Atmos tracks above full scale in 7.1.4, the highest at +8.9 dBFS and 39 above +3 dBFS; the centre exceeded it most often, then front left and the front heights. Two of 29 DTS:X films exceeded it, the IMAX presentation by 1.2 dB. Dolby's own 7.1 presentation of the loudest, *Looper*, peaks at −0.02 dBFS. APAC keeps such peaks (tones encoded at +12 dBFS decoded at +12.1 dBFS through Apple's float decoder), but integer PCM on the way to HDMI cannot.
