@@ -116,8 +116,10 @@ fuzz_target!(|input: &[u8]| {
     let calls = output.calls;
     // Success at EOF and every failure are terminal: neither later input nor another flush
     // may produce more output, clear the error or resume a cancelled consumer.
-    assert_eq!(push(&[0], false), -1);
-    assert_eq!(push(&[], true), -1);
+    // A finished session reports misuse; a failed one repeats its error's kind.
+    let terminal = if status == 0 { -1 } else { status };
+    assert_eq!(push(&[0], false), terminal);
+    assert_eq!(push(&[], true), terminal);
     assert_eq!(error(&session), message);
     assert_eq!(output.calls, calls);
 });
