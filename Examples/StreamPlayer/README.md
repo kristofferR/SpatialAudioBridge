@@ -9,6 +9,13 @@ Both modes attach `AtmosOutputActivator` and configure the audio session as in t
 
 ## Build and install
 
+Core PR CI builds a Release tvOS app against that checkout's core and uploads
+`StreamPlayer-unsigned-tvOS`. Download it from the run for the exact revision being validated.
+It contains no library media or server credentials. Signing and installation happen separately
+on the paired device's host, using its existing development identity and provisioning profile;
+CI does not receive signing credentials or install anything. An unsigned artifact is not proof
+of device playback. This path keeps compilation off a resource-limited development Mac.
+
 Use macOS with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and build the Rust core first with `./scripts/build-core.sh` from the repository root:
 
 ```sh
