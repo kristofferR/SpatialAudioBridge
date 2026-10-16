@@ -110,7 +110,9 @@ public final class AtmosOutputActivator {
             observe(AVPlayerItem.failedToPlayToEndTimeNotification) { $0.settle() }
             // A seek away from the end resumes the item.
             observe(AVPlayerItem.timeJumpedNotification) { activator in
-                activator.itemEnded = false
+                guard let item = activator.host?.currentItem else { return }
+                let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
+                if !end.isNumeric || item.currentTime() < end { activator.itemEnded = false }
                 activator.update()
             }
         }
