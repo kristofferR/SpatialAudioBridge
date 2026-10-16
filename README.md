@@ -159,4 +159,4 @@ Thanks to [Native Player](https://apps.apple.com/app/native-player/id6760623926)
 
 ## License
 
-Apache 2.0. The core's DTS decoder comes from a crate ported from FFmpeg, so the core's binary framework is distributed under the LGPL, version 3 or later; it is dynamic so apps can meet that license. Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); apps can show `SpatialAudioBridgeNotices.text`.
+Apache 2.0. The one exception is the core's DTS decoder, the `dca` crate, which is ported from FFmpeg and usable under the LGPL, version 3 or later; the core is a dynamic framework so apps can meet that license and keep their own. Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); apps can show `SpatialAudioBridgeNotices.text`.

@@ -4,10 +4,10 @@ SpatialAudioBridge is licensed under the Apache License, Version 2.0. Its Rust c
 components below and the Rust standard library, built with rustc 1.99.0. Their notices
 follow; each license text appears once, with the components it applies to.
 
-The DTS decoder in dca is ported from FFmpeg, so the core is distributed under the GNU Lesser
-General Public License, version 3 or later, as a whole. It ships as the dynamic framework
-SpatialAudioCore.framework, which may be replaced by one built from the corresponding source at
-https://github.com/kristofferR/SpatialAudioBridge.
+The DTS decoder in dca is ported from FFmpeg and is used under the GNU Lesser General Public
+License, version 3 or later; the rest keeps the licenses below. The core ships as the dynamic
+framework SpatialAudioCore.framework, which may be replaced by one built, with a modified dca,
+from the corresponding source at https://github.com/kristofferR/SpatialAudioBridge.
 
 Components:
 - anyhow 1.0.104, MIT OR Apache-2.0
