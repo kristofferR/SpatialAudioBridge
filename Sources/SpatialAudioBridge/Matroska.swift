@@ -238,7 +238,7 @@ final class PacketReader {
             started = true
             guard targetIsNumeric else { throw SpatialAudioError.invalidConfiguration("The seek time must be finite") }
             if let unsupported = track.unsupportedEncoding {
-                throw SpatialAudioError.source("Matroska track \(track.number) is \(unsupported)")
+                throw SpatialAudioError.unsupported("Matroska track \(track.number) is \(unsupported)")
             }
             // Audio is interleaved near, not exactly at, video keyframes; start two seconds early.
             let margin = Int64(2e9 / Double(file.timestampScale))

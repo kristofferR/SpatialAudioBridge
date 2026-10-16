@@ -100,9 +100,17 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
     #expect(try unpacker.unpack(Data(burst(type: 0x00, payload: [], period: 64, littleEndian: true) + bursts)) == Data(units.joined()))
     try unpacker.finish()
     // A pause burst marks a gap, and Pc bit 7 marks a damaged payload.
-    for type: UInt16 in [0x03, 0x96] {
-        var rejecting = IEC61937Unpacker()
-        #expect(throws: SpatialAudioError.self) { try rejecting.unpack(Data(burst(type: type, payload: [0, 0, 0, 1], period: 64, littleEndian: true))) }
+    var pausing = IEC61937Unpacker()
+    #expect {
+        try pausing.unpack(Data(burst(type: 0x03, payload: [0, 0, 0, 1], period: 64, littleEndian: true)))
+    } throws: { error in
+        if case SpatialAudioError.discontinuity = error { true } else { false }
+    }
+    var damaged = IEC61937Unpacker()
+    #expect {
+        try damaged.unpack(Data(burst(type: 0x96, payload: [0, 0, 0, 1], period: 64, littleEndian: true)))
+    } throws: { error in
+        if case SpatialAudioError.decoding = error { true } else { false }
     }
     for prefix in [30_000, bursts.count + 2] {
         var truncated = IEC61937Unpacker()
@@ -122,7 +130,11 @@ private func unpackInChunks(_ bytes: [UInt8]) throws -> (Data, IEC61937Unpacker)
 @Test func otherBurstTypesAreRejected() {
     var unpacker = IEC61937Unpacker()
     // An AC-3 burst.
-    #expect(throws: SpatialAudioError.self) { try unpacker.unpack(Data(burst(type: 0x01, payload: [0x0B, 0x77], period: 6_144, littleEndian: true))) }
+    #expect {
+        try unpacker.unpack(Data(burst(type: 0x01, payload: [0x0B, 0x77], period: 6_144, littleEndian: true)))
+    } throws: { error in
+        if case SpatialAudioError.unsupported = error { true } else { false }
+    }
 }
 
 /// FFmpeg's spdif muxer produced these bursts in mpv; unpacking must return the original stream.

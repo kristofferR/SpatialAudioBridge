@@ -44,10 +44,10 @@ public struct IEC61937Unpacker: Sendable {
             let length = Self.word(pending, at: start + 6, littleEndian)
             guard info & 0x80 == 0 else { throw SpatialAudioError.decoding("An IEC 61937 burst is marked as containing errors") }
             guard type != Self.pause else {
-                throw SpatialAudioError.decoding("An IEC 61937 pause burst marks a gap in the audio; start a new timeline")
+                throw SpatialAudioError.discontinuity("An IEC 61937 pause burst marks a gap in the audio; start a new timeline")
             }
             guard type == Self.mat || type == Self.dtsTypeIV || type == Self.null else {
-                throw SpatialAudioError.decoding("Unsupported IEC 61937 burst type \(type); only TrueHD (MAT) and DTS-HD (type IV) can be unpacked")
+                throw SpatialAudioError.unsupported("Unsupported IEC 61937 burst type \(type); only TrueHD (MAT) and DTS-HD (type IV) can be unpacked")
             }
             guard pending.count >= start + 8 + length else { break }
             var payload = Array(pending[(start + 8)..<(start + 8 + length)])

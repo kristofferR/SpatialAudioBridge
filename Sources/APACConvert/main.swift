@@ -93,7 +93,7 @@ import AVFoundation
             }
             return track
         } ?? file.audioTracks.first { $0.codec != nil && $0.isDefault } ?? file.audioTracks.first { $0.codec != nil }
-        guard let track, let codec = track.codec else { throw SpatialAudioError.source("No TrueHD or DTS track") }
+        guard let track, let codec = track.codec else { throw SpatialAudioError.unsupported("No TrueHD or DTS track") }
         print("opened in \(String(format: "%.2f", Date().timeIntervalSince(opened)))s, \(source.bytes / 1024) KiB read")
         let target = CMTime(seconds: try option("--start") ?? 0, preferredTimescale: 48000)
         let end = try option("--duration").map { target.seconds + $0 }

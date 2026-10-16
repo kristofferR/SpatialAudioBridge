@@ -216,8 +216,8 @@ public actor SpatialAudioTranscoder {
     private func follow(_ time: CMTime) throws {
         if let previous = packetTime, time != previous {
             guard Self.continues(from: previous, to: time, frames: laced, codec: codec) else {
-                throw SpatialAudioError.source(String(format: "The audio timestamps jump from %.3f to %.3f s",
-                                                      previous.seconds, time.seconds))
+                throw SpatialAudioError.discontinuity(String(format: "The audio timestamps jump from %.3f to %.3f s",
+                                                             previous.seconds, time.seconds))
             }
             laced = 0
         }
@@ -253,7 +253,7 @@ public actor SpatialAudioTranscoder {
     func accumulate(_ block: PCMBlock) async throws {
         guard block.channels == configuration.layout.channelCount,
               pendingRate == 0 || pendingRate == block.sampleRate else {
-            throw SpatialAudioError.encoding("Audio format changed; begin a new session at a discontinuity")
+            throw SpatialAudioError.discontinuity("Audio format changed; begin a new session")
         }
         pendingRate = block.sampleRate
         var samples = block.samples[...]
@@ -360,7 +360,7 @@ public actor SpatialAudioTranscoder {
         try checkActive()
         if writer == nil { try prepare(rate: rate) }
         guard rate == sampleRate else {
-            throw SpatialAudioError.encoding("Audio format changed; begin a new session at a discontinuity")
+            throw SpatialAudioError.discontinuity("Audio format changed; begin a new session")
         }
         guard let writer, let input, let format else { throw SpatialAudioError.encoding("APAC writer was not initialized") }
         let count = samples.count / configuration.layout.channelCount

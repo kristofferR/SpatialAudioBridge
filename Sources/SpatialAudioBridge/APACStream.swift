@@ -62,7 +62,7 @@ public final class APACStream: Sendable {
                              options: Options = Options()) async throws -> APACStream {
         guard let track = track ?? file.audioTracks.first(where: { $0.codec != nil && $0.isDefault })
                 ?? file.audioTracks.first(where: { $0.codec != nil }), let codec = track.codec else {
-            throw SpatialAudioError.source("The file has no TrueHD or DTS track")
+            throw SpatialAudioError.unsupported("The file has no TrueHD or DTS track")
         }
         // A malformed duration may be infinite or too long to count in frames.
         guard let duration = file.duration, duration.seconds > 0, duration.seconds < 1e9 else {
