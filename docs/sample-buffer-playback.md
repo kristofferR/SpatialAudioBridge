@@ -31,6 +31,8 @@ try await audio.endOfStream()
 
 `enqueue` suspends while the audio renderer is full, so the loop runs only as far ahead as the renderer buffers. Feed it from a task the host can cancel. `file` is a `MatroskaFile` here; a host demuxer's packets work the same way, with their container times.
 
+Capacity is checked before each output packet, including final encoder output and route-change replay. New audio waits behind a pending replay. Cancellation or failure ends the timeline; delayed flush completions cannot restart it. Call `begin(at:)` to reset it before feeding again.
+
 With Xcode 26, whose SDK does not mark `AVSampleBufferRenderSynchronizer` as `Sendable`, Swift 6 rejects handing the synchronizer to the renderer while the host keeps using it. Import AVFoundation with `@preconcurrency` in that file; with Xcode 27 the import makes no difference.
 
 ## Timing
