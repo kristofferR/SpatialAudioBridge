@@ -116,6 +116,8 @@ public actor SpatialAudioTranscoder {
     private var laced = 0
     /// Whether the decoder holds input to flush.
     private var hasInput = false
+    /// Time spent inside `append`, for `conversionSpeed`.
+    private var working = Duration.zero
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
@@ -141,7 +143,11 @@ public actor SpatialAudioTranscoder {
     /// because decoded samples alone cannot span it. Frames laced into one block may share a time.
     public func append(_ data: Data, time: CMTime? = nil) async throws {
         try beginOperation()
-        defer { busy = false }
+        let began = ContinuousClock.now
+        defer {
+            busy = false
+            working += ContinuousClock.now - began
+        }
         hasInput = true
         do {
             if let time { try follow(time) }
@@ -156,6 +162,14 @@ public actor SpatialAudioTranscoder {
                 offset += count
             }
         } catch { fail(); throw error }
+    }
+
+    /// Audio converted per second spent in ``append(_:time:)``, as a multiple of real time; nil
+    /// before the first converted audio. Time between calls does not count, so this measures
+    /// conversion, not the host's feeding. Below about 1.2, real-time playback will stall.
+    public var conversionSpeed: Double? {
+        guard frames > 0, working > .zero, sampleRate > 0 else { return nil }
+        return Double(frames) / Double(sampleRate) / (working / .seconds(1))
     }
 
     /// Flushes the decoder and encoder and completes the file or final segment. Output that would

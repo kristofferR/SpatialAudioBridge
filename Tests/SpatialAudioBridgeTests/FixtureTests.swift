@@ -96,7 +96,9 @@ struct FixtureTests {
             let converter = try SpatialAudioTranscoder(codec: .trueHDAtmos,
                 destination: .segments(onSegment: { collector.append($0) }),
                 configuration: configuration)
+            #expect(await converter.conversionSpeed == nil)
             while let data = try source.read(upToCount: 64 * 1024), !data.isEmpty { try await converter.append(data) }
+            #expect((await converter.conversionSpeed ?? 0) > 1)
             let report = try await converter.finish()
             let segments = collector.snapshot()
             #expect(segments.first?.kind == .initialization)

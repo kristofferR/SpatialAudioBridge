@@ -111,6 +111,13 @@ public actor SpatialAudioRenderer {
     /// Whether the renderer is playing APAC, or failed to decode it.
     public var renderingStatus: AVQueuedSampleBufferRenderingStatus { audioRenderer.status }
 
+    /// How much enqueued APAC lies ahead of the synchronizer's time: zero when the queue has run dry,
+    /// as when conversion falls behind playback.
+    public var queuedAhead: CMTime {
+        guard let end = queued.last?.end else { return .zero }
+        return CMTimeMaximum(.zero, CMTimeSubtract(end, synchronizer.currentTime()))
+    }
+
     /// Whether the output is muted. A passthrough host's own mute and volume never reach APAC.
     public var isMuted: Bool { audioRenderer.isMuted }
 
