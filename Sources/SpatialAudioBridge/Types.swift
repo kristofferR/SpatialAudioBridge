@@ -142,6 +142,16 @@ public enum APACDestination: Sendable {
     case segments(syncPeriodsPerSegment: Int = 2, onSegment: @Sendable (APACSegment) throws -> Void)
 }
 
+/// Decoder concealment since this session began. Counts source sample frames across all channels,
+/// including seek pre-roll, excluding encoder priming and end padding. DTS:X reports zero.
+@available(macOS 26, iOS 26, tvOS 26, *)
+public struct SpatialAudioRecoveryStatistics: Sendable, Equatable {
+    public let concealedFrames: UInt64
+    /// Contiguous spans of accepted concealment, not a count of completed recoveries.
+    public let concealmentEvents: UInt64
+    public let longestConcealmentFrames: UInt64
+}
+
 /// What a finished session converted.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACConversionReport: Sendable {
@@ -151,6 +161,7 @@ public struct APACConversionReport: Sendable {
     public let layout: SpatialAudioLayout
     /// The largest absolute sample before encoding; above 1 exceeds full scale.
     public let peakPCM: Float
+    public let recovery: SpatialAudioRecoveryStatistics
     public var duration: TimeInterval { Double(sampleFrames) / Double(sampleRate) }
 }
 

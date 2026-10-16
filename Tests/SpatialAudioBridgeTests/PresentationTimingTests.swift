@@ -104,6 +104,9 @@ struct PresentationTimingTests {
         }
         let report = try await transcoder.finish()
         #expect(report.sampleFrames == Int64(frames))
+        #expect(report.recovery.concealedFrames == 0)
+        let recovery = await transcoder.recoveryStatistics
+        #expect(report.recovery == recovery)
 
         if fragmented {
             let segments = collector.snapshot()

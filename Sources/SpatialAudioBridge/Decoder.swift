@@ -27,6 +27,15 @@ final class Decoder: @unchecked Sendable {
     }
     deinit { sab_destroy(handle) }
 
+    var recoveryStatistics: SpatialAudioRecoveryStatistics {
+        var snapshot = SABRecoveryStatistics()
+        // The owned handle and stack output are always valid.
+        precondition(sab_recovery_statistics(handle, &snapshot) == 0)
+        return SpatialAudioRecoveryStatistics(concealedFrames: snapshot.concealed_frames,
+            concealmentEvents: snapshot.concealment_events,
+            longestConcealmentFrames: snapshot.longest_concealment_frames)
+    }
+
     func decode(_ bytes: UnsafeRawBufferPointer, end: Bool) throws -> [PCMBlock] {
         let collector = PCMCollector()
         let context = Unmanaged.passUnretained(collector).toOpaque()
