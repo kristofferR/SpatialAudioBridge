@@ -22,19 +22,21 @@ import Testing
     }
 
     @available(macOS 26, iOS 26, tvOS 26, *)
-    @Test func followsHostPlaybackAndPause() async throws {
+    @Test func startsWithTheHostAndKeepsPlayingThroughPauses() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let host = AVPlayer(url: try silence("apac"))
         host.volume = 0
         activator.attach(to: host)
+        try await Task.sleep(for: .milliseconds(300))
         #expect(!activator.isActive)
         host.play()
         #expect(await eventually { activator.isActive })
         #expect(activator.error == nil)
         host.pause()
-        #expect(await eventually { !activator.isActive })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(activator.isActive)
         host.play()
-        #expect(await eventually { activator.isActive })
+        #expect(activator.isActive)
         activator.detach()
         #expect(!activator.isActive)
         host.pause()
@@ -72,8 +74,10 @@ import Testing
         synchronizer.setRate(1, time: .zero)
         #expect(await eventually { activator.isActive })
         synchronizer.rate = 0
-        #expect(await eventually { !activator.isActive })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(activator.isActive)
         activator.detach()
+        #expect(!activator.isActive)
         #expect(activator.player.items().isEmpty)
     }
 

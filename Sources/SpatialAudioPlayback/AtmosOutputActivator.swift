@@ -47,8 +47,9 @@ public final class AtmosOutputActivator {
         return bundle.url(forResource: "silent-atmos", withExtension: "mp4")!
     }
 
-    /// Plays the silent stream whenever `player` is playing, or waiting to play, an item for which
-    /// `playsAPAC` returns true. Pauses with the host and re-evaluates on item and audio selection changes.
+    /// Plays the silent stream once `player` plays, or waits to play, an item for which `playsAPAC`
+    /// returns true, and keeps it playing while the host pauses, so the route stays in Atmos for the
+    /// resume. Re-evaluates on item and audio selection changes and unloads the stream for other items.
     /// Pass a predicate when an item offers APAC and other audio renditions.
     public func attach(to player: AVPlayer, playsAPAC: @escaping @MainActor (AVPlayerItem) -> Bool = { _ in true }) {
         detach()
@@ -66,8 +67,8 @@ public final class AtmosOutputActivator {
         ]
     }
 
-    /// Plays the silent stream while `synchronizer` runs, for hosts that render APAC with
-    /// `SpatialAudioRenderer` instead of AVPlayer.
+    /// Plays the silent stream once `synchronizer` runs, and through its pauses, for hosts that render
+    /// APAC with `SpatialAudioRenderer` instead of AVPlayer.
     public func attach(to synchronizer: AVSampleBufferRenderSynchronizer) {
         detach()
         self.synchronizer = synchronizer
@@ -102,8 +103,10 @@ public final class AtmosOutputActivator {
     }
 
     private func update() {
+        // Pausing the stream with the host let the route leave Atmos on every pause, and on an
+        // AirPlay route the programme's audio did not return until a seek. Once loaded, it keeps playing.
         if let synchronizer {
-            if synchronizer.rate != 0 { play() } else { player.pause() }
+            if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
         guard let host, let item = host.currentItem, playsAPAC(item) else {
@@ -111,11 +114,7 @@ public final class AtmosOutputActivator {
             release()
             return
         }
-        guard host.timeControlStatus != .paused else {
-            player.pause()
-            return
-        }
-        play()
+        if host.timeControlStatus != .paused || looper != nil { play() }
     }
 
     private func play() {
