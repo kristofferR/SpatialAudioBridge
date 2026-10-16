@@ -16,6 +16,27 @@ on the paired device's host, using its existing development identity and provisi
 CI does not receive signing credentials or install anything. An unsigned artifact is not proof
 of device playback. This path keeps compilation off a resource-limited development Mac.
 
+On the paired Mac, download and install that artifact without invoking Xcode's build system:
+
+```sh
+gh run download RUN_ID --repo kristofferR/SpatialAudioBridge \
+  --name StreamPlayer-unsigned-tvOS --dir "/path/to/artifact"
+security find-identity -v -p codesigning
+xcrun devicectl list devices
+./Examples/StreamPlayer/sign-and-install.sh \
+  "/path/to/artifact/StreamPlayer-unsigned-tvOS.zip" \
+  "/path/to/development.mobileprovision" "SIGNING_IDENTITY_SHA1" "APPLE_TV_UDID"
+```
+
+Use an existing, unexpired tvOS development profile that includes the Apple TV UDID and permits
+`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or the team's wildcard).
+The signing identity must have its private key in the local keychain and be included in the
+profile. The helper checks the profile's platform, development flag, device and app ID, embeds it,
+signs embedded code and the app with concrete development entitlements, verifies the signature,
+and installs it. It does not create profiles, export keys, rebuild, publish or launch playback.
+
+### Building locally on a suitable Mac
+
 Use macOS with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and build the Rust core first with `./scripts/build-core.sh` from the repository root:
 
 ```sh
