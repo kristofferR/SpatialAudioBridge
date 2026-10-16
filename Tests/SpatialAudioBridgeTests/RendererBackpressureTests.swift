@@ -74,6 +74,13 @@ private final class ControlledRendererOutput: SpatialAudioRendererOutput, Sendab
     }
 }
 
+/// Output/finalization tests supply PCM directly and need a successful decoder EOF, not an invalid
+/// compressed stream. Production uses the real decoder; its empty-stream rejection is tested below.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private final class CompletedRendererDecoder: SpatialAudioRendererDecoding {
+    func decode(_ bytes: UnsafeRawBufferPointer, end: Bool) throws -> [PCMBlock] { [] }
+}
+
 @available(macOS 26, iOS 26, tvOS 26, *)
 private func outputPackets(_ count: Int) -> [APACEncoder.Packet] {
     (0..<count).map { .init(data: Data([UInt8($0)]), isIndependent: $0 == 0) }
@@ -274,7 +281,8 @@ func rendererIgnoresFlushCompletionAfterTimelineFailure(flushed: Bool) async thr
 func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     let output = ControlledRendererOutput()
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
-        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
     if frames > 0 {
         let block = PCMBlock(samples: [Float](repeating: 0, count: frames * 12), frames: frames,
                              sampleRate: 48_000, channels: 12)
@@ -291,7 +299,8 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
 @Test func rendererResetDuringFinalFlushDoesNotEndTheNewTimeline() async throws {
     let output = ControlledRendererOutput()
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
-        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
     let block = PCMBlock(samples: [Float](repeating: 0, count: 317 * 12), frames: 317,
                          sampleRate: 48_000, channels: 12)
     try await renderer.play([block], generation: 0)
@@ -314,7 +323,8 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
 @Test func rendererSerializesInputAndFinalizationBehindAnActiveFlush() async throws {
     let output = ControlledRendererOutput()
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
-        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
     let block = PCMBlock(samples: [Float](repeating: 0, count: 317 * 12), frames: 317,
                          sampleRate: 48_000, channels: 12)
     try await renderer.play([block], generation: 0)
@@ -343,7 +353,8 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
 @Test func rendererCancellationWhileWaitingForInputOwnershipIsTerminal() async throws {
     let output = ControlledRendererOutput()
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
-        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
     let block = PCMBlock(samples: [Float](repeating: 0, count: 317 * 12), frames: 317,
                          sampleRate: 48_000, channels: 12)
     try await renderer.play([block], generation: 0)
@@ -359,6 +370,18 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     output.setCapacity(100)
     await #expect(throws: SpatialAudioError.self) { try await first.value }
     #expect(output.records.count == 1)
+    try await renderer.begin(at: .zero)
+    try await renderer.enqueue(Data(), time: .zero)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererKeepsEmptyCompressedInputRejectionTerminal() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+    await #expect(throws: SpatialAudioError.self) { try await renderer.endOfStream() }
+    await #expect(throws: SpatialAudioError.self) { try await renderer.enqueue(Data(), time: .zero) }
+    #expect(output.records.isEmpty)
     try await renderer.begin(at: .zero)
     try await renderer.enqueue(Data(), time: .zero)
 }

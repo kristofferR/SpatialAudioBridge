@@ -18,6 +18,14 @@ protocol SpatialAudioRendererOutput: AnyObject {
 @available(macOS 26, iOS 26, tvOS 26, *)
 extension AVSampleBufferAudioRenderer: SpatialAudioRendererOutput {}
 
+@available(macOS 26, iOS 26, tvOS 26, *)
+protocol SpatialAudioRendererDecoding: AnyObject {
+    func decode(_ bytes: UnsafeRawBufferPointer, end: Bool) throws -> [PCMBlock]
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+extension Decoder: SpatialAudioRendererDecoding {}
+
 /// Plays TrueHD Atmos or DTS:X as APAC through `AVSampleBufferAudioRenderer`, for players that
 /// render video themselves with an `AVSampleBufferRenderSynchronizer`. No HLS or server is involved.
 ///
@@ -38,10 +46,10 @@ public actor SpatialAudioRenderer {
     /// Joins the host's synchronizer, which controls its rate and time.
     private let audioRenderer: any SpatialAudioRendererOutput
     private let synchronizer: AVSampleBufferRenderSynchronizer
-    private let codec: SpatialAudioCodec
     private let configuration: APACConfiguration
     private let gain: Float
-    private var decoder: Decoder
+    private var decoder: any SpatialAudioRendererDecoding
+    private let makeDecoder: @Sendable () throws -> any SpatialAudioRendererDecoding
     private var encoder: APACEncoder
     private var timeline = CMTime.zero
     private var inputStart: CMTime?
@@ -98,17 +106,22 @@ public actor SpatialAudioRenderer {
     }
 
     init(codec: SpatialAudioCodec, configuration: APACConfiguration = .init(),
-         synchronizer: AVSampleBufferRenderSynchronizer, output: sending any SpatialAudioRendererOutput) throws {
+         synchronizer: AVSampleBufferRenderSynchronizer, output: sending any SpatialAudioRendererOutput,
+         makeDecoder: (@Sendable () throws -> any SpatialAudioRendererDecoding)? = nil) throws {
         guard configuration.hasValidEncoderSettings else {
             throw SpatialAudioError.invalidConfiguration("Invalid APAC gain, bitrate or sync interval")
         }
         var configuration = configuration
         // Only the live profile streams; the offline profile holds about 20 s before its first packet.
         configuration.liveEncoding = true
-        self.codec = codec
         self.configuration = configuration
         gain = powf(10, configuration.gainDB / 20)
-        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
+        let settings = configuration
+        let factory: @Sendable () throws -> any SpatialAudioRendererDecoding = makeDecoder ?? {
+            try Decoder(codec: codec, layout: settings.layout, normalizesDialogue: settings.normalizesDialogue)
+        }
+        self.makeDecoder = factory
+        decoder = try factory()
         encoder = try APACEncoder(configuration: configuration)
         audioRenderer = output
         self.synchronizer = synchronizer
@@ -142,7 +155,7 @@ public actor SpatialAudioRenderer {
         refilling = false
         refillAgain = false
         state = .failed
-        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
+        decoder = try makeDecoder()
         encoder = try APACEncoder(configuration: configuration)
         timeline = time
         inputStart = nil
