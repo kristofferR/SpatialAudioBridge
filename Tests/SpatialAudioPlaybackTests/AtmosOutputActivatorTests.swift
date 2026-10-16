@@ -56,6 +56,22 @@ import Testing
     }
 
     @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test func keepsPlayingAcrossQueuedItems() async throws {
+        let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
+        let second = AVPlayerItem(url: try silence("second", frames: 4_000))
+        let host = AVQueuePlayer(items: [AVPlayerItem(url: try silence("first", frames: 4_000)), second])
+        host.volume = 0
+        activator.attach(to: host)
+        host.play()
+        #expect(await eventually { activator.isActive })
+        #expect(await eventually { host.currentItem === second })
+        #expect(activator.isActive)
+        // The queue ends with no current item.
+        #expect(await eventually { activator.player.items().isEmpty })
+        activator.detach()
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func bundledStreamIsSignalledAsAtmosAndPlays() async throws {
         let asset = AVURLAsset(url: AtmosOutputActivator.bundledStream)
         let track = try #require(try await asset.loadTracks(withMediaType: .audio).first)

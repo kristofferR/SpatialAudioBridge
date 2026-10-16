@@ -96,16 +96,14 @@ public final class AtmosOutputActivator {
         itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
         itemObservers = []
         if let item {
-            let center = NotificationCenter.default
-            itemObservers = [
-                center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item,
-                                   queue: .main) { [weak self] _ in Self.onMain { self?.update() } },
-                // The host then reports paused, which must not keep the stream playing.
-                center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item,
-                                   queue: .main) { [weak self] _ in Self.onMain { self?.release() } },
-                center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item,
-                                   queue: .main) { [weak self] _ in Self.onMain { self?.release() } },
-            ]
+            // Selection changes, and an end or failure, which can leave the host paused.
+            let names = [AVPlayerItem.mediaSelectionDidChangeNotification, AVPlayerItem.didPlayToEndTimeNotification,
+                         AVPlayerItem.failedToPlayToEndTimeNotification]
+            itemObservers = names.map {
+                NotificationCenter.default.addObserver(forName: $0, object: item, queue: .main) { [weak self] _ in
+                    Self.onMain { self?.update() }
+                }
+            }
         }
         update()
     }
@@ -117,12 +115,23 @@ public final class AtmosOutputActivator {
             if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
-        guard let host, let item = host.currentItem, item.status != .failed, playsAPAC(item) else {
+        guard let host, let item = host.currentItem, playsAPAC(item) else {
             // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
             release()
             return
         }
-        if host.timeControlStatus != .paused || looper != nil { play() }
+        if host.timeControlStatus != .paused {
+            play()
+        } else if looper != nil {
+            // A host paused at the item's end or after a failure has stopped, not paused. A queue or
+            // looper moves on to its next item without pausing, so the stream plays on there.
+            if item.status == .failed || Self.hasEnded(item) { release() } else { play() }
+        }
+    }
+
+    private static func hasEnded(_ item: AVPlayerItem) -> Bool {
+        let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
+        return end.isNumeric && item.currentTime() >= end - CMTime(value: 1, timescale: 10)
     }
 
     private func play() {
