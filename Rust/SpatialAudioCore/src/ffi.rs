@@ -150,6 +150,14 @@ pub unsafe extern "C" fn sab_error(
     bytes.len() + 1
 }
 
+/// Returns 1 once the stream has proven spatial (Atmos objects or DTS:X), otherwise 0.
+/// # Safety
+/// `handle` must be null or live. Serialize with all other calls on this session.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sab_is_spatial(handle: *const Handle) -> i32 {
+    unsafe { handle.as_ref() }.is_some_and(|handle| handle.decoder.is_spatial()) as i32
+}
+
 /// Copies cumulative recovery statistics, including after finishing or an error.
 /// Returns -1 for a null handle or output pointer, otherwise zero.
 /// # Safety
@@ -199,6 +207,8 @@ mod tests {
             );
             assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
             assert_eq!(snapshot, RecoveryStatistics::default());
+            assert_eq!(sab_is_spatial(handle), 0);
+            assert_eq!(sab_is_spatial(ptr::null()), 0);
             sab_destroy(handle);
         }
     }

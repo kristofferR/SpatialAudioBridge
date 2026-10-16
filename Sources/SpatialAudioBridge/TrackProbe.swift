@@ -28,29 +28,26 @@ extension SpatialAudioCodec {
     /// a second of it always decides. Damaged input throws `SpatialAudioError.decoding`.
     public func probe(_ data: Data) throws -> SpatialAudioTrackSupport {
         let decoder = try Decoder(codec: self, layout: .sevenOneFour)
-        var rendered = false
         do {
-            // All of it: DTS entered between lossless sync points first yields silence unchecked.
             try data.withUnsafeBytes { bytes in
                 var offset = 0
-                while offset < bytes.count {
+                while offset < bytes.count, !decoder.isSpatial {
                     let count = min(4096, bytes.count - offset)
-                    let blocks = try decoder.decode(UnsafeRawBufferPointer(rebasing: bytes[offset..<offset + count]), end: false)
-                    rendered = rendered || !blocks.isEmpty
+                    _ = try decoder.decode(UnsafeRawBufferPointer(rebasing: bytes[offset..<offset + count]), end: false)
                     offset += count
                 }
             }
         } catch SpatialAudioError.unsupported(let reason) {
             return .unsupported(reason)
         }
-        return rendered ? .renderable : .undetermined
+        return decoder.isSpatial ? .renderable : .undetermined
     }
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
 extension MatroskaFile {
-    /// Decodes `duration` of `track` from the sync point at or before `time` to tell whether it
-    /// renders, without encoding; see ``SpatialAudioCodec/probe(_:)``.
+    /// Decodes `duration` of `track` from the sync point at or before `time`, and at most 8 MiB of
+    /// it, to tell whether it renders, without encoding; see ``SpatialAudioCodec/probe(_:)``.
     public func probe(_ track: MatroskaAudioTrack, from time: CMTime = .zero,
                       duration: CMTime = CMTime(value: 1, timescale: 1)) async throws -> SpatialAudioTrackSupport {
         guard let codec = track.codec else {
@@ -61,7 +58,8 @@ extension MatroskaFile {
             for try await packet in packets(of: track, from: time) {
                 let start = first ?? packet.time
                 first = start
-                if CMTimeSubtract(packet.time, start) >= duration { break }
+                // Bytes bound it too, should the container's times stop advancing.
+                if CMTimeSubtract(packet.time, start) >= duration || data.count >= 8 << 20 { break }
                 data += packet.data
             }
         } catch SpatialAudioError.unsupported(let reason) {

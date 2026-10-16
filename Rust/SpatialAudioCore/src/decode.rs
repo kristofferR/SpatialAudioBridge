@@ -77,6 +77,14 @@ impl Core {
             Source::Dts(_) => RecoveryStatistics::default(),
         }
     }
+    /// Whether the stream has proven spatial: TrueHD with its first object metadata, or a DTS:X
+    /// frame rendered with its presentation. Silence before that does not count.
+    pub fn is_spatial(&self) -> bool {
+        match &self.source {
+            Source::TrueHd(decoder) => decoder.spatial,
+            Source::Dts(decoder) => decoder.seen,
+        }
+    }
     pub fn new(codec: u32, layout: Layout) -> Result<Self, Error> {
         let source = match codec {
             1 => Source::TrueHd(Box::new(TrueHd::new(layout))),
