@@ -65,6 +65,9 @@ import Testing
         host.play()
         #expect(await eventually { activator.isActive })
         #expect(await eventually { activator.player.items().isEmpty })
+        // Seeking back resumes the item, and the stream with it.
+        await host.seek(to: .zero)
+        #expect(await eventually { activator.isActive })
         activator.detach()
         host.pause()
     }

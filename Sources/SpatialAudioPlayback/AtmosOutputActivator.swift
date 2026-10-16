@@ -17,6 +17,8 @@ public final class AtmosOutputActivator {
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
     private var observations: [NSKeyValueObservation] = []
     private var itemObservers: [NSObjectProtocol] = []
+    /// Whether the current item reached its end or failed, since it became current or last seeked.
+    private var itemEnded = false
 
     /// Whether the silent Atmos stream is currently playing.
     public var isActive: Bool { player.timeControlStatus == .playing }
@@ -95,16 +97,21 @@ public final class AtmosOutputActivator {
     private func follow(_ item: AVPlayerItem?) {
         itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
         itemObservers = []
+        itemEnded = false
         if let item {
             let center = NotificationCenter.default
-            itemObservers = [center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
-                                                object: item, queue: .main) { [weak self] _ in
-                Self.onMain { self?.update() }
-            }]
-            itemObservers += [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification].map {
-                center.addObserver(forName: $0, object: item, queue: .main) { [weak self] _ in
-                    Self.onMain { self?.settle() }
-                }
+            func observe(_ name: Notification.Name, _ body: @escaping @MainActor @Sendable (AtmosOutputActivator) -> Void) {
+                itemObservers.append(center.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
+                    Self.onMain { if let self { body(self) } }
+                })
+            }
+            observe(AVPlayerItem.mediaSelectionDidChangeNotification) { $0.update() }
+            observe(AVPlayerItem.didPlayToEndTimeNotification) { $0.settle() }
+            observe(AVPlayerItem.failedToPlayToEndTimeNotification) { $0.settle() }
+            // A seek away from the end resumes the item.
+            observe(AVPlayerItem.timeJumpedNotification) { activator in
+                activator.itemEnded = false
+                activator.update()
             }
         }
         update()
@@ -124,30 +131,24 @@ public final class AtmosOutputActivator {
         }
         if host.timeControlStatus != .paused {
             // A host that takes no action at the item's end keeps playing there; see settle().
-            if looper != nil || !Self.hasEnded(item) { play() }
+            if looper != nil || !itemEnded { play() }
         } else if looper != nil {
-            // A host paused at the item's end or after a failure has stopped, not paused. A queue or
-            // looper moves on to its next item without pausing, so the stream plays on there.
-            if item.status == .failed || Self.hasEnded(item) { release() } else { play() }
+            // A host paused at the item's end or after a failure has stopped, not paused.
+            if itemEnded || item.status == .failed { release() } else { play() }
         }
     }
 
-    /// Releases the stream once the current item has ended or failed, unless the host moved on. A
-    /// queue or looper continues with its next item, and a host whose `actionAtItemEnd` is `.none`
-    /// stays playing at the end, so neither pauses.
+    /// Marks the current item ended or failed and releases the stream unless the host moves on. A
+    /// queue or looper continues with its next item without pausing, and a host whose
+    /// `actionAtItemEnd` is `.none` keeps playing at the end, so give the host a moment.
     private func settle() {
+        itemEnded = true
         let ended = host?.currentItem.map(ObjectIdentifier.init)
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard let self, let item = host?.currentItem, ObjectIdentifier(item) == ended,
-                  item.status == .failed || Self.hasEnded(item) else { return }
+            guard let self, itemEnded, let item = host?.currentItem, ObjectIdentifier(item) == ended else { return }
             release()
         }
-    }
-
-    private static func hasEnded(_ item: AVPlayerItem) -> Bool {
-        let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
-        return end.isNumeric && item.currentTime() >= end - CMTime(value: 1, timescale: 10)
     }
 
     private func play() {
