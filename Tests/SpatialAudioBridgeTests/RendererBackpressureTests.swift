@@ -80,9 +80,9 @@ private func outputPackets(_ count: Int) -> [APACEncoder.Packet] {
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func waitForOutput(_ condition: @Sendable () -> Bool) async throws {
+private func waitForOutput(_ condition: @Sendable () async -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(3)
-    while !condition() {
+    while !(await condition()) {
         guard ContinuousClock.now < deadline else {
             throw SpatialAudioError.invalidState("Timed out waiting for the controlled renderer")
         }
@@ -299,9 +299,66 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     let task = Task { try await renderer.endOfStream() }
     defer { task.cancel() }
     try await waitForOutput { output.blockedChecks > 0 }
+    let waiting = Task { try await renderer.enqueue(Data(), time: .zero) }
+    defer { waiting.cancel() }
+    try await waitForOutput { await renderer.waitingInputCount == 1 }
     try await renderer.begin(at: CMTime(seconds: 10, preferredTimescale: 1))
     output.setCapacity(10)
     await #expect(throws: CancellationError.self) { try await task.value }
+    await #expect(throws: CancellationError.self) { try await waiting.value }
     #expect(output.records.isEmpty)
     try await renderer.enqueue(Data(), time: CMTime(seconds: 10, preferredTimescale: 1))
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererSerializesInputAndFinalizationBehindAnActiveFlush() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+    let block = PCMBlock(samples: [Float](repeating: 0, count: 317 * 12), frames: 317,
+                         sampleRate: 48_000, channels: 12)
+    try await renderer.play([block], generation: 0)
+    output.setCapacity(1)
+    let first = Task { try await renderer.endOfStream() }
+    defer { first.cancel() }
+    try await waitForOutput { output.blockedChecks > 0 }
+    #expect(output.records.count == 1)
+    let laterInput = Task { try await renderer.enqueue(Data(), time: .zero) }
+    let laterEnd = Task { try await renderer.endOfStream() }
+    defer { laterInput.cancel(); laterEnd.cancel() }
+    try await waitForOutput { await renderer.waitingInputCount == 2 }
+    #expect(output.records.count == 1)
+    output.setCapacity(100)
+    try await first.value
+    await #expect(throws: SpatialAudioError.self) { try await laterInput.value }
+    await #expect(throws: SpatialAudioError.self) { try await laterEnd.value }
+    #expect(output.records.count > 1)
+    // Rejecting the queued calls must leave the successfully ended timeline available for replay.
+    let count = output.records.count
+    await renderer.refill(from: nil)
+    try await waitForOutput { output.records.count == count * 2 }
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererCancellationWhileWaitingForInputOwnershipIsTerminal() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+    let block = PCMBlock(samples: [Float](repeating: 0, count: 317 * 12), frames: 317,
+                         sampleRate: 48_000, channels: 12)
+    try await renderer.play([block], generation: 0)
+    output.setCapacity(1)
+    let first = Task { try await renderer.endOfStream() }
+    defer { first.cancel() }
+    try await waitForOutput { output.blockedChecks > 0 }
+    let waiting = Task { try await renderer.enqueue(Data(), time: .zero) }
+    defer { waiting.cancel() }
+    try await waitForOutput { await renderer.waitingInputCount == 1 }
+    waiting.cancel()
+    await #expect(throws: CancellationError.self) { try await waiting.value }
+    output.setCapacity(100)
+    await #expect(throws: SpatialAudioError.self) { try await first.value }
+    #expect(output.records.count == 1)
+    try await renderer.begin(at: .zero)
+    try await renderer.enqueue(Data(), time: .zero)
 }

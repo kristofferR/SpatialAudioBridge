@@ -33,6 +33,8 @@ try await audio.endOfStream()
 
 Capacity is checked before each output packet, including final encoder output and route-change replay. New audio waits behind a pending replay. Cancellation or failure ends the timeline; delayed flush completions cannot restart it. Call `begin(at:)` to reset it before feeding again.
 
+Overlapping `enqueue` and `endOfStream` calls are serialized in arrival order before decoding. Prefer one feeding task that awaits each call to keep pending input bounded. `begin(at:)` invalidates both the active call and calls waiting behind it; cancellation of either an active or waiting input call fails that timeline.
+
 With Xcode 26, whose SDK does not mark `AVSampleBufferRenderSynchronizer` as `Sendable`, Swift 6 rejects handing the synchronizer to the renderer while the host keeps using it. Import AVFoundation with `@preconcurrency` in that file; with Xcode 27 the import makes no difference.
 
 ## Timing

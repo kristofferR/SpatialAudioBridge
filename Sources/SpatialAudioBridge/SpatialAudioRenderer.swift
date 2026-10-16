@@ -49,6 +49,9 @@ public actor SpatialAudioRenderer {
     private var packets: Int64 = 0
     /// Counts timelines, so a call suspended across ``begin(at:)`` drops its stale output.
     private var generation = 0
+    private var nextInput = 0
+    private var activeInput = 0
+    var waitingInputCount: Int { max(0, nextInput - activeInput - 1) }
     private var state = State.accepting
     private enum State { case accepting, ended, failed }
     /// Enqueued APAC packets that may not have played yet, from the latest sync packet before the
@@ -128,6 +131,8 @@ public actor SpatialAudioRenderer {
         guard time.isNumeric else { throw SpatialAudioError.invalidConfiguration("The timeline must start at a finite time") }
         if observers.isEmpty { observeOutput() }
         generation += 1
+        nextInput = 0
+        activeInput = 0
         refillTask?.cancel()
         refillTask = nil
         replay = []
@@ -153,7 +158,9 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
-            try Task.checkCancellation()
+            let input = try await acquireInput(generation: current)
+            defer { releaseInput(input, generation: current) }
+            try checkSubmission(generation: current)
             if inputStart == nil {
                 // Within the transcoder's bound, so a misplaced packet cannot demand minutes of silence.
                 guard time.isNumeric, abs(CMTimeSubtract(timeline, time).seconds) <= 60 else {
@@ -169,7 +176,7 @@ public actor SpatialAudioRenderer {
             }
             try await play(blocks, generation: current)
         } catch {
-            fail(generation: current)
+            if state != .ended { fail(generation: current) }
             throw error
         }
     }
@@ -179,15 +186,34 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
-            try Task.checkCancellation()
+            let input = try await acquireInput(generation: current)
+            defer { releaseInput(input, generation: current) }
+            try checkSubmission(generation: current)
             let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
             try await play(blocks, final: true, generation: current)
             try checkSubmission(generation: current)
             state = .ended
         } catch {
-            fail(generation: current)
+            if state != .ended { fail(generation: current) }
             throw error
         }
+    }
+
+    /// Actor reentrancy during capacity waits must not let later input advance the codecs first.
+    private func acquireInput(generation current: Int) async throws -> Int {
+        try checkSubmission(generation: current)
+        let input = nextInput
+        nextInput += 1
+        while true {
+            try checkSubmission(generation: current)
+            if input == activeInput { return input }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func releaseInput(_ input: Int, generation current: Int) {
+        guard generation == current else { return }
+        activeInput = input + 1
     }
 
     private func fail(generation current: Int) {
