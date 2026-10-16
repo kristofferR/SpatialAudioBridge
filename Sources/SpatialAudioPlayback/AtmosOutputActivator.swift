@@ -96,12 +96,14 @@ public final class AtmosOutputActivator {
         itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
         itemObservers = []
         if let item {
-            // Selection changes, and an end or failure, which can leave the host paused.
-            let names = [AVPlayerItem.mediaSelectionDidChangeNotification, AVPlayerItem.didPlayToEndTimeNotification,
-                         AVPlayerItem.failedToPlayToEndTimeNotification]
-            itemObservers = names.map {
-                NotificationCenter.default.addObserver(forName: $0, object: item, queue: .main) { [weak self] _ in
-                    Self.onMain { self?.update() }
+            let center = NotificationCenter.default
+            itemObservers = [center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
+                                                object: item, queue: .main) { [weak self] _ in
+                Self.onMain { self?.update() }
+            }]
+            itemObservers += [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification].map {
+                center.addObserver(forName: $0, object: item, queue: .main) { [weak self] _ in
+                    Self.onMain { self?.settle() }
                 }
             }
         }
@@ -121,11 +123,25 @@ public final class AtmosOutputActivator {
             return
         }
         if host.timeControlStatus != .paused {
-            play()
+            // A host that takes no action at the item's end keeps playing there; see settle().
+            if looper != nil || !Self.hasEnded(item) { play() }
         } else if looper != nil {
             // A host paused at the item's end or after a failure has stopped, not paused. A queue or
             // looper moves on to its next item without pausing, so the stream plays on there.
             if item.status == .failed || Self.hasEnded(item) { release() } else { play() }
+        }
+    }
+
+    /// Releases the stream once the current item has ended or failed, unless the host moved on. A
+    /// queue or looper continues with its next item, and a host whose `actionAtItemEnd` is `.none`
+    /// stays playing at the end, so neither pauses.
+    private func settle() {
+        let ended = host?.currentItem.map(ObjectIdentifier.init)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, let item = host?.currentItem, ObjectIdentifier(item) == ended,
+                  item.status == .failed || Self.hasEnded(item) else { return }
+            release()
         }
     }
 

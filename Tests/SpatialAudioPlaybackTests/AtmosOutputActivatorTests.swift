@@ -56,6 +56,20 @@ import Testing
     }
 
     @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test func stopsAtTheEndOfAHostThatTakesNoAction() async throws {
+        let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
+        let host = AVPlayer(url: try silence("apac", frames: 4_000))
+        host.volume = 0
+        host.actionAtItemEnd = .none
+        activator.attach(to: host)
+        host.play()
+        #expect(await eventually { activator.isActive })
+        #expect(await eventually { activator.player.items().isEmpty })
+        activator.detach()
+        host.pause()
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func keepsPlayingAcrossQueuedItems() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
         let second = AVPlayerItem(url: try silence("second", frames: 4_000))
