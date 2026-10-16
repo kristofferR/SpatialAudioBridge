@@ -57,9 +57,8 @@ public actor SpatialAudioRenderer {
     private var packets: Int64 = 0
     /// Counts timelines, so a call suspended across ``begin(at:)`` drops its stale output.
     private var generation = 0
-    private var nextInput = 0
-    private var activeInput = 0
-    var waitingInputCount: Int { max(0, nextInput - activeInput - 1) }
+    /// The timeline with an `enqueue` or `endOfStream` call in progress, so an overlapping call is refused.
+    private var busyGeneration: Int?
     private var state = State.accepting
     private enum State { case accepting, ended, failed }
     /// Enqueued APAC packets that may not have played yet, from the latest sync packet before the
@@ -144,8 +143,6 @@ public actor SpatialAudioRenderer {
         guard time.isNumeric else { throw SpatialAudioError.invalidConfiguration("The timeline must start at a finite time") }
         if observers.isEmpty { observeOutput() }
         generation += 1
-        nextInput = 0
-        activeInput = 0
         refillTask?.cancel()
         refillTask = nil
         replay = []
@@ -168,11 +165,9 @@ public actor SpatialAudioRenderer {
     /// `time` is the packet's container time; only the first packet after ``begin(at:)`` uses it.
     /// A failure, including cancellation, ends the timeline until the next ``begin(at:)``.
     public func enqueue(_ packet: Data, time: CMTime) async throws {
-        try checkAccepting()
-        let current = generation
+        let current = try acquireInput()
+        defer { releaseInput(generation: current) }
         do {
-            let input = try await acquireInput(generation: current)
-            defer { releaseInput(input, generation: current) }
             try checkSubmission(generation: current)
             if inputStart == nil {
                 // Within the transcoder's bound, so a misplaced packet cannot demand minutes of silence.
@@ -196,15 +191,14 @@ public actor SpatialAudioRenderer {
 
     /// Flushes the decoder and encoder. Call ``begin(at:)`` to play again.
     public func endOfStream() async throws {
-        try checkAccepting()
-        let current = generation
+        let current = try acquireInput()
+        defer { releaseInput(generation: current) }
         do {
-            let input = try await acquireInput(generation: current)
-            defer { releaseInput(input, generation: current) }
             try checkSubmission(generation: current)
             let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
             try await play(blocks, final: true, generation: current)
-            try checkSubmission(generation: current)
+            // All output is queued; only a newer timeline, not a late cancellation, voids the ending.
+            guard generation == current else { throw CancellationError() }
             state = .ended
         } catch {
             if state != .ended { fail(generation: current) }
@@ -212,21 +206,19 @@ public actor SpatialAudioRenderer {
         }
     }
 
-    /// Actor reentrancy during capacity waits must not let later input advance the codecs first.
-    private func acquireInput(generation current: Int) async throws -> Int {
-        try checkSubmission(generation: current)
-        let input = nextInput
-        nextInput += 1
-        while true {
-            try checkSubmission(generation: current)
-            if input == activeInput { return input }
-            try await Task.sleep(for: .milliseconds(5))
+    /// Feeding is sequential: actor reentrancy during a capacity wait must not let a second call
+    /// advance the codecs. Refusing it leaves the active call and its timeline untouched.
+    private func acquireInput() throws -> Int {
+        try checkAccepting()
+        guard busyGeneration != generation else {
+            throw SpatialAudioError.invalidState("Await each enqueue(_:time:) before the next call or endOfStream()")
         }
+        busyGeneration = generation
+        return generation
     }
 
-    private func releaseInput(_ input: Int, generation current: Int) {
-        guard generation == current else { return }
-        activeInput = input + 1
+    private func releaseInput(generation current: Int) {
+        if busyGeneration == current { busyGeneration = nil }
     }
 
     private func fail(generation current: Int) {
