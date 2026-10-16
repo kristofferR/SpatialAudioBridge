@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 import Testing
 @testable import SpatialAudioBridge
@@ -46,4 +47,42 @@ private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
     #expect(Array(trimmed.suffix(payload.count)) == payload)
     #expect(Int(read32(trimmed, 0)) == trimmed.count - payload.count - 8)
     #expect(trimmingLastSample(of: data, by: 1024) == nil)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func segmentDelegateDropsARepeatedFinalFragmentAndStillTrimsIt() throws {
+    let collector = SegmentCollector()
+    let delegate = SegmentDelegate { collector.append($0) }
+    func media(_ data: Data, start: Int64, packets: Int64) -> APACSegment {
+        APACSegment(kind: .media, data: data, startTime: CMTime(value: start, timescale: 48_000),
+                    duration: CMTime(value: packets * 1024, timescale: 48_000))
+    }
+    let (last, _) = fragment(sizes: [[10, 11, 12], [13, 14]])
+    delegate.receive(APACSegment(kind: .initialization, data: Data([0]), startTime: nil, duration: nil))
+    delegate.receive(media(Data([1]), start: 0, packets: 75))
+    delegate.holdLastSegment()
+    delegate.receive(media(last, start: 76_800, packets: 5))
+    delegate.receive(media(last, start: 76_800, packets: 5))
+    // 80 packets minus 2048 priming frames and 640 frames of final padding.
+    delegate.deliverLastSegment(sourceFrames: 80 * 1024 - 2048 - 640, priming: 2048)
+    delegate.receive(media(last, start: 76_800, packets: 5))
+    let segments = collector.snapshot()
+    let trimmed = try #require(trimmingLastSample(of: last, by: 640))
+    #expect(segments.map(\.data) == [Data([0]), Data([1]), trimmed])
+    #expect(segments.last?.duration == CMTime(value: 5 * 1024 - 640, timescale: 48_000))
+    #expect(delegate.error != nil, "A fragment after the last one is reported")
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func segmentDelegateRejectsOverlappingFragmentsWithDifferentContent() {
+    let delegate = SegmentDelegate { _ in }
+    let duration = CMTime(value: 1024, timescale: 48_000)
+    delegate.receive(APACSegment(kind: .media, data: Data([1]), startTime: .zero, duration: duration))
+    // A boundary rounded by one frame is not an overlap.
+    delegate.receive(APACSegment(kind: .media, data: Data([2]), startTime: CMTime(value: 1023, timescale: 48_000),
+                                 duration: duration))
+    #expect(delegate.error == nil)
+    delegate.receive(APACSegment(kind: .media, data: Data([3]), startTime: CMTime(value: 1024, timescale: 48_000),
+                                 duration: duration))
+    #expect(delegate.error != nil)
 }

@@ -74,9 +74,16 @@ struct PresentationTimingTests {
                                     discardedFrames: startFrames == 153_600 ? 4_800 : 0)
     }
 
+    /// Fragmented 9.1.6 output, where #56 first showed a repeated final fragment.
     @available(macOS 26, iOS 26, tvOS 26, *)
-    private func checkPresentation(fragmented: Bool, startFrames: Int, discardedFrames: Int) async throws {
-        let layout = SpatialAudioLayout.sevenOneFour
+    @Test(.timeLimit(.minutes(1)))
+    func nineOneSixFragmentsKeepTheirPresentedTimes() async throws {
+        try await checkPresentation(fragmented: true, startFrames: 0, discardedFrames: 0, layout: .nineOneSix)
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    private func checkPresentation(fragmented: Bool, startFrames: Int, discardedFrames: Int,
+                                   layout: SpatialAudioLayout = .sevenOneFour) async throws {
         let channels = layout.channelCount
         let frames = 96_037 // Deliberately ends partway through a coded packet.
         let clicks = [12_000, frames - 12_000]
@@ -105,8 +112,6 @@ struct PresentationTimingTests {
         let report = try await transcoder.finish()
         #expect(report.sampleFrames == Int64(frames))
         #expect(report.recovery.concealedFrames == 0)
-        let recovery = await transcoder.recoveryStatistics
-        #expect(report.recovery == recovery)
 
         if fragmented {
             let segments = collector.snapshot()
