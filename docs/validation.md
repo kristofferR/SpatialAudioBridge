@@ -26,6 +26,25 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 | Peak limiter | Whole 7.1.4 renders of *Looper*, *F9*, *Alita: Battle Angel*, *Edge of Tomorrow* and *The Matrix Reloaded*, the films furthest above full scale, peak at −0.10 dBFS instead of +5.2 to +8.9 dBFS. 0.9–7.0% of each film changed, in 34 to 384 stretches of at most 9.7 s including recovery, with reductions up to 9.0 dB; every other sample is bit-identical. Synthetic tests cover the ceiling, chunk independence, frame count and the return to unchanged output |
 | Rendered peaks, earlier panner | In 7.1.4 and 9.1.6, no sample exceeded full scale in 38 minutes of a TrueHD Atmos film (peak −0.2 dBFS), the DTS:X fixture (−0.3 dBFS), the Helicopter fixture or seven excerpts of the film |
 
+### TrueHD parser presentation selection
+
+The pinned decoder can parse only the substreams needed by presentation 3, which SAB already decodes. Its presentation map includes the dependent substreams automatically; dialogue normalization remains in the major-sync metadata. An exploratory Linux release-build comparison on 16 October 2026 used one warm-up and 100 alternating measured passes of each selection:
+
+| Pinned public vector | Access units | All/selected substream masks | Median parser time, all/selected |
+|---|---:|---|---|
+| `fba_atmos_obj.mlp` | 140 | 15 / 8 | 571 / 243 µs |
+| `fba_atmos_cbi.mlp` | 136 | 15 / 8 | 531 / 244 µs |
+| `fba_atmos_dimtrim.mlp` | 400 | 15 / 15 | 1030 / 1030 µs |
+| `fba_spliced.mlp` | 512 | 7 / 7 | 542 / 541 µs |
+
+The parser experiment preserved decoded presentation PCM, sample counts, channel labels, duplicate flags, major-sync fields and object/extra metadata on all four intact vectors. These are tiny vectors and parser-only wall times, excluding extraction, decoding and comparison work; they do not establish a film conversion or playback speedup. The non-Atmos splice vector is a control, not new supported input.
+
+**Retain full parsing.** Corrupting the middle of an access unit five units before the next major sync in the public object vector exposes a behavior difference: full parsing detects the damage and conceals 200 source frames, while selecting only presentation 3 skips the damaged unused substream and reports no concealment. The measured parsing gain does not justify changing this established validation/recovery contract. No production presentation selection was changed.
+
+`scripts/test-presentation-selection.sh` locates the public assets in Cargo's pinned `truehd` checkout and runs the explicit comparison tests. They cover both output layouts, dialogue normalization on/off, 317/4096-byte chunks, truncation, removed access units, payload damage and fresh sessions, including unchanged unsupported-input rejection. No private media or copied media artifact is needed. Core CI runs this helper separately from the private-fixture tests.
+
+To reproduce the parser-only timing/equality experiment on Linux, pass one of those public vector paths to `cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example presentation_selection -- "VECTOR_PATH"`. The program alternates selection order and reports masks, equality and median parser time. The separate core tests establish the corruption difference; the timing example accepts intact vectors.
+
 ### Encoding and packaging
 
 The opt-in [direct encoder profile](encoder-performance.md) records timing, process memory and

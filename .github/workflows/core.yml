@@ -37,6 +37,8 @@ jobs:
         run: cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
       - name: Clippy
         run: cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
+      - name: Compare TrueHD presentation selection on pinned public vectors
+        run: bash scripts/test-presentation-selection.sh
       - name: Generate synthetic limiter probes
         run: cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example peak_probes -- "$RUNNER_TEMP/peak-probes"
       - uses: actions/upload-artifact@v4
