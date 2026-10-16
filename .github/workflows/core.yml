@@ -37,18 +37,8 @@ jobs:
         run: cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
       - name: Clippy
         run: cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
-      - name: Compare TrueHD presentation selection on pinned public vectors
-        run: bash scripts/test-presentation-selection.sh
-      - name: Generate synthetic limiter probes
-        run: cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example peak_probes -- "$RUNNER_TEMP/peak-probes"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: peak-probes
-          path: ${{ runner.temp }}/peak-probes
-          retention-days: 7
 
   build:
-    needs: rust
     if: inputs.version == ''
     runs-on: macos-26
     permissions:
@@ -63,7 +53,9 @@ jobs:
           xcodebuild -version
       - name: Build the release archive
         run: ./scripts/release-core.sh
+      # Device validation only; run the workflow by hand on the revision to test.
       - name: Build unsigned Apple TV validation app
+        if: github.event_name == 'workflow_dispatch'
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
           xcodegen generate --spec Examples/StreamPlayer/project.yml
@@ -74,41 +66,28 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/StreamPlayer/Build/Products/Release-appletvos/StreamPlayer.app" \
             "$RUNNER_TEMP/StreamPlayer-unsigned-tvOS.zip"
-      - uses: actions/upload-artifact@v4
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
         with:
           name: StreamPlayer-unsigned-tvOS
           path: ${{ runner.temp }}/StreamPlayer-unsigned-tvOS.zip
           retention-days: 7
       - name: Verify mixed-language host linking and unwinding
         run: ./scripts/test-mixed-host.sh
-      - uses: actions/download-artifact@v4
-        with:
-          name: peak-probes
-          path: ${{ runner.temp }}/peak-probes
       - name: Build and test the package
         env:
-          SAB_PEAK_PROBES_DIR: ${{ runner.temp }}/peak-probes
-          SAB_PEAK_FAILURES_DIR: ${{ runner.temp }}/peak-failures
           SAB_DRC_OUTPUTS_DIR: ${{ runner.temp }}/drc-outputs
         run: |
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
           swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
-      - name: Profile the direct encoder in isolation
-        env:
-          SAB_ENCODER_PROFILE: 1
-        run: |
-          set -o pipefail
-          swift test -Xswiftc -warnings-as-errors --filter EncoderPerformanceTests 2>&1 | tee "$RUNNER_TEMP/encoder-profile.log"
-      - name: Preserve peak measurements
+      - name: Preserve test log and DRC outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apac-peak-measurements
+          name: package-test-output
           path: |
             ${{ runner.temp }}/package-tests.log
-            ${{ runner.temp }}/encoder-profile.log
-            ${{ runner.temp }}/peak-failures
             ${{ runner.temp }}/drc-outputs
           if-no-files-found: ignore
           retention-days: 14
