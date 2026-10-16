@@ -7,7 +7,7 @@ import Testing
 
 /// Decodes APAC packets with Core Audio into interleaved Float32.
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func decode(_ packets: [Data], format: CMAudioFormatDescription, channels: Int) throws -> [Float] {
+func decode(_ packets: [Data], format: CMAudioFormatDescription, channels: Int) throws -> [Float] {
     var source = CMAudioFormatDescriptionGetStreamBasicDescription(format)!.pointee
     var destination = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
         mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: UInt32(channels * 4),

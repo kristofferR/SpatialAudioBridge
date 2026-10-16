@@ -352,5 +352,7 @@ public actor SpatialAudioTranscoder {
 extension APACConfiguration {
     /// The content source and dynamic-range profile for the chosen encoding mode.
     var contentSource: AVAudioContentSource { liveEncoding ? .appleAV_Spatial_Live : .appleAV_Spatial_Offline }
-    var dynamicRangeConfiguration: AVAudioDynamicRangeControlConfiguration { liveEncoding ? .capture : .movie }
+    var dynamicRangeConfiguration: AVAudioDynamicRangeControlConfiguration {
+        disablesDynamicRangeControl ? .none : (liveEncoding ? .capture : .movie)
+    }
 }
