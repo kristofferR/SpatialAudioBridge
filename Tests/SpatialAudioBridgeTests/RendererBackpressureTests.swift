@@ -87,11 +87,11 @@ private func outputPackets(_ count: Int) -> [APACEncoder.Packet] {
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func waitForOutput(_ condition: @Sendable () async -> Bool) async throws {
+private func waitForOutput(_ description: String = "controlled renderer", _ condition: @Sendable () async -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(3)
     while !(await condition()) {
         guard ContinuousClock.now < deadline else {
-            throw SpatialAudioError.invalidState("Timed out waiting for the controlled renderer")
+            throw SpatialAudioError.invalidState("Timed out waiting for \(description)")
         }
         try await Task.sleep(for: .milliseconds(5))
     }
@@ -336,7 +336,7 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     let laterInput = Task { try await renderer.enqueue(Data(), time: .zero) }
     let laterEnd = Task { try await renderer.endOfStream() }
     defer { laterInput.cancel(); laterEnd.cancel() }
-    try await waitForOutput { await renderer.waitingInputCount == 2 }
+    try await waitForOutput("both later input calls to queue") { await renderer.waitingInputCount == 2 }
     #expect(output.records.count == 1)
     output.setCapacity(100)
     try await first.value
@@ -345,8 +345,14 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     #expect(output.records.count > 1)
     // Rejecting the queued calls must leave the successfully ended timeline available for replay.
     let count = output.records.count
-    await renderer.refill(from: nil)
-    try await waitForOutput { output.records.count == count * 2 }
+    let expected = output.records.filter { $0.time >= 0 }
+    try #require(!expected.isEmpty)
+    await renderer.refill(from: .zero)
+    await renderer.enqueueAgain(from: .zero, flushed: true, generation: 0)
+    try await waitForOutput("presented buffers to replay after finalization") {
+        output.records.count == count + expected.count
+    }
+    #expect(Array(output.records.dropFirst(count)) == expected)
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
