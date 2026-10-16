@@ -38,7 +38,8 @@ The displayed identifier may be a CoreDevice UUID; the helper needs the hardware
 `ProvisionedDevices`. The extraction above supports both current and older device JSON layouts.
 
 Use an existing, unexpired tvOS development profile that includes the Apple TV UDID and permits
-`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or the profile prefix's wildcard).
+`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or a matching wildcard,
+such as `PREFIX.*` or `PREFIX.com.kristofferr.*`).
 The helper uses the profile's App ID prefix for application/keychain identifiers and keeps its
 team identifier separate; older developer accounts may have different values.
 The signing identity must have its private key in the local keychain and be included in the

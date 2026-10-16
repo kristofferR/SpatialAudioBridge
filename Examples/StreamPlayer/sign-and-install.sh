@@ -31,7 +31,9 @@ TEAM="$("$PLIST_BUDDY" -c 'Print :TeamIdentifier:0' "$WORK/profile.plist")"
 APP_PREFIX="$("$PLIST_BUDDY" -c 'Print :ApplicationIdentifierPrefix:0' "$WORK/profile.plist")"
 APP_ID="$APP_PREFIX.$BUNDLE_ID"
 PROFILE_APP_ID="$("$PLIST_BUDDY" -c 'Print :Entitlements:application-identifier' "$WORK/profile.plist")"
-[[ "$PROFILE_APP_ID" == "$APP_ID" || "$PROFILE_APP_ID" == "$APP_PREFIX.*" ]] || {
+# Treat only a trailing component wildcard as a wildcard; match its prefix literally.
+[[ "$PROFILE_APP_ID" == "$APP_ID" ||
+   ( "$PROFILE_APP_ID" == *.\* && "$APP_ID" == "${PROFILE_APP_ID%\*}"* ) ]] || {
   echo 'The profile does not permit the StreamPlayer bundle identifier' >&2; exit 1;
 }
 
