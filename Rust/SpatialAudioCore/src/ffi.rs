@@ -27,7 +27,8 @@ const DISCONTINUITY: i32 = -3;
 pub extern "C" fn sab_create(codec: u32, channels: u32) -> *mut Handle {
     catch_unwind(|| {
         Layout::parse(channels)
-            .and_then(|l| Core::new(codec, l))
+            .ok()
+            .and_then(|l| Core::new(codec, l).ok())
             .map(|decoder| {
                 Box::into_raw(Box::new(Handle {
                     decoder,
@@ -194,7 +195,10 @@ mod tests {
             assert_eq!(sab_recovery_statistics(handle, ptr::null_mut()), -1);
             assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
             assert_eq!(snapshot, RecoveryStatistics::default());
-            assert_eq!(sab_push(handle, ptr::null(), 0, 0, None, ptr::null_mut()), -1);
+            assert_eq!(
+                sab_push(handle, ptr::null(), 0, 0, None, ptr::null_mut()),
+                -1
+            );
             assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
             assert_eq!(snapshot, RecoveryStatistics::default());
             sab_destroy(handle);
