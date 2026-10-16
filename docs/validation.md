@@ -82,6 +82,8 @@ Disabled-DRC fragment callbacks occurred after 151,552–156,672 submitted frame
 
 Normal package tests exercise both DRC settings through the direct encoder and standalone writer, and the current defaults through the fragmented writer. On an authorized Apple test host, `SAB_DRC_WRITER_DIAGNOSTICS=1 swift test --filter DRCMeasurementTests` additionally runs the disabled-DRC fragmented probes. Their native decode assertions remain strict, so this opt-in diagnostic can fail; required PR and release jobs leave the flag unset.
 
+`FragmentInitializationTests` isolates the initialization-entry hypothesis: generate paired disabled-DRC standalone and fragmented files for both layouts and content profiles, replace only the fragmented file's `apac` sample entry with the standalone entry, and update its ancestor box lengths. Every byte after `moov`, including fragment timestamps and compressed payloads, must remain identical. Native reading of the repaired file must reproduce the standalone file's exact PCM and 192,000 presented frames. `SAB_DRC_INITIALIZATION` records the result; the original, repaired and standalone synthetic files are retained when `SAB_DRC_OUTPUTS_DIR` is set. This is a container diagnosis, not a production repair or a change to DRC defaults; cloud results are pending.
+
 ### Sources and streaming
 
 | Check | Result |
