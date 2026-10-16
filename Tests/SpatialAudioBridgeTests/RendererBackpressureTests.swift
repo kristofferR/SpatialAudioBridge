@@ -209,6 +209,49 @@ func rendererIgnoresFlushCompletionAfterTimelineFailure(flushed: Bool) async thr
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererRestartsReplayAfterAnotherAutomaticFlush() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+    try await renderer.submit(outputPackets(4), generation: 0)
+    let original = output.records
+    output.setCapacity(1)
+    await renderer.refill(from: nil)
+    try await waitForOutput { output.blockedChecks > 0 }
+    #expect(output.records.count == 5)
+    // The second native flush loses that first replayed primer. It must be replayed again,
+    // rather than continuing at replayIndex 1 and losing the sync packet.
+    await renderer.refill(from: .zero)
+    output.setCapacity(4)
+    try await waitForOutput { output.records.count == 9 }
+    let restarted = Array(output.records[5..<9])
+    #expect(restarted.map(\.time) == original.map(\.time))
+    #expect(restarted.map(\.data) == original.map(\.data))
+    #expect(restarted.map(\.trimmed) == [true, true, false, false])
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererCoalescesNotificationsDuringAPendingNativeFlush() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output)
+    try await renderer.submit(outputPackets(4), generation: 0)
+    let original = output.records
+    await renderer.refill(from: .zero)
+    await renderer.refill(from: nil)
+    await renderer.refill(from: CMTime(value: 1024, timescale: 48_000))
+    #expect(output.records.count == 4)
+    // A full refill is needed even if the original partial flush succeeded, because the newer
+    // notifications may have dropped the sync/priming packets before that partial flush time.
+    await renderer.enqueueAgain(from: .zero, flushed: true, generation: 0)
+    try await waitForOutput { output.records.count == 8 }
+    let restarted = Array(output.records[4..<8])
+    #expect(restarted.map(\.time) == original.map(\.time))
+    #expect(restarted.map(\.data) == original.map(\.data))
+    #expect(restarted.map(\.trimmed) == [true, true, false, false])
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
 @Test func rendererFailureDuringBlockedReplayStaysTerminal() async throws {
     let output = ControlledRendererOutput()
     let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,

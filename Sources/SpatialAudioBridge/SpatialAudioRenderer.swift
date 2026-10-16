@@ -56,6 +56,8 @@ public actor SpatialAudioRenderer {
     private var queued: [(buffer: CMSampleBuffer, start: CMTime, end: CMTime, isIndependent: Bool)] = []
     /// Set while a refill is pending, so new audio waits behind it and stays in order.
     private var refilling = false
+    /// A second notification while a native partial flush is still awaiting its completion.
+    private var refillAgain = false
     private var replay: [CMSampleBuffer] = []
     private var replayIndex = 0
     private var refillTask: Task<Void, Never>?
@@ -133,6 +135,7 @@ public actor SpatialAudioRenderer {
         audioRenderer.flush()
         queued = []
         refilling = false
+        refillAgain = false
         state = .failed
         decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
         encoder = try APACEncoder(configuration: configuration)
@@ -194,6 +197,7 @@ public actor SpatialAudioRenderer {
         refillTask = nil
         replay = []
         refilling = false
+        refillAgain = false
     }
 
     private func checkSubmission(generation current: Int) throws {
@@ -301,8 +305,20 @@ public actor SpatialAudioRenderer {
     /// everything yet to play. Audio enqueued while the notification was on its way may have survived
     /// the flush, so flush from that time first.
     func refill(from time: CMTime?) {
-        guard state != .failed, !refilling, !queued.isEmpty else { return }
+        guard state != .failed, !queued.isEmpty else { return }
         guard audioRenderer.status != .failed else { return fail(generation: generation) }
+        if refilling {
+            if refillTask == nil {
+                // Let the native flush finish before replaying; otherwise its late completion
+                // could drop the replacement packets. Multiple notifications need one full refill.
+                refillAgain = true
+            } else {
+                // A second flush may have dropped packets already replayed. Rewind from the sync
+                // packet and let the existing capacity poll continue with the replacement replay.
+                requeue()
+            }
+            return
+        }
         guard let time, time.isNumeric else { return requeue() }
         let current = generation
         refilling = true
@@ -315,6 +331,10 @@ public actor SpatialAudioRenderer {
         // A newer timeline has reset the refill, and may have started its own.
         guard generation == current, state != .failed else { return }
         guard audioRenderer.status != .failed else { return fail(generation: current) }
+        if refillAgain {
+            refillAgain = false
+            return requeue()
+        }
         // Too close to the playhead to flush part of the queue: start over from what has yet to play.
         guard flushed else { return requeue() }
         startReplay(queued.filter { $0.start >= time }.map(\.buffer))
@@ -329,8 +349,7 @@ public actor SpatialAudioRenderer {
         audioRenderer.flush()
         let now = synchronizer.currentTime()
         guard let unplayed = queued.firstIndex(where: { $0.end > now }) else {
-            refilling = false
-            return
+            return startReplay([])
         }
         let sync = queued[...unplayed].lastIndex(where: \.isIndependent) ?? unplayed
         var buffers: [CMSampleBuffer] = []
@@ -348,6 +367,7 @@ public actor SpatialAudioRenderer {
         refilling = true
         replay = buffers
         replayIndex = 0
+        guard refillTask == nil else { return }
         let current = generation
         // Release the actor between polls, so a blocked replay does not keep the renderer alive.
         refillTask = Task.detached { [weak self] in
