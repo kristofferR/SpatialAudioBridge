@@ -1,6 +1,31 @@
 import Accelerate
 import AVFoundation
 
+/// The native output boundary, also used by deterministic capacity/flush tests.
+@available(macOS 26, iOS 26, tvOS 26, *)
+protocol SpatialAudioRendererOutput: AnyObject {
+    var isReadyForMoreMediaData: Bool { get }
+    var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
+    var status: AVQueuedSampleBufferRenderingStatus { get }
+    var error: (any Error)? { get }
+    var isMuted: Bool { get set }
+    var volume: Float { get set }
+    func enqueue(_ buffer: CMSampleBuffer)
+    func flush()
+    func flush(fromSourceTime time: CMTime, completionHandler: @escaping @Sendable (Bool) -> Void)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+extension AVSampleBufferAudioRenderer: SpatialAudioRendererOutput {}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+protocol SpatialAudioRendererDecoding: AnyObject {
+    func decode(_ bytes: UnsafeRawBufferPointer, end: Bool) throws -> [PCMBlock]
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+extension Decoder: SpatialAudioRendererDecoding {}
+
 /// Plays TrueHD Atmos or DTS:X as APAC through `AVSampleBufferAudioRenderer`, for players that
 /// render video themselves with an `AVSampleBufferRenderSynchronizer`. No HLS or server is involved.
 ///
@@ -19,12 +44,12 @@ import AVFoundation
 @available(macOS 26, iOS 26, tvOS 26, *)
 public actor SpatialAudioRenderer {
     /// Joins the host's synchronizer, which controls its rate and time.
-    private let audioRenderer = AVSampleBufferAudioRenderer()
+    private let audioRenderer: any SpatialAudioRendererOutput
     private let synchronizer: AVSampleBufferRenderSynchronizer
-    private let codec: SpatialAudioCodec
     private let configuration: APACConfiguration
     private let gain: Float
-    private var decoder: Decoder
+    private var decoder: any SpatialAudioRendererDecoding
+    private let makeDecoder: @Sendable () throws -> any SpatialAudioRendererDecoding
     private var encoder: APACEncoder
     private var timeline = CMTime.zero
     private var inputStart: CMTime?
@@ -32,6 +57,9 @@ public actor SpatialAudioRenderer {
     private var packets: Int64 = 0
     /// Counts timelines, so a call suspended across ``begin(at:)`` drops its stale output.
     private var generation = 0
+    private var nextInput = 0
+    private var activeInput = 0
+    var waitingInputCount: Int { max(0, nextInput - activeInput - 1) }
     private var state = State.accepting
     private enum State { case accepting, ended, failed }
     /// Enqueued APAC packets that may not have played yet, from the latest sync packet before the
@@ -39,6 +67,11 @@ public actor SpatialAudioRenderer {
     private var queued: [(buffer: CMSampleBuffer, start: CMTime, end: CMTime, isIndependent: Bool)] = []
     /// Set while a refill is pending, so new audio waits behind it and stays in order.
     private var refilling = false
+    /// A second notification while a native partial flush is still awaiting its completion.
+    private var refillAgain = false
+    private var replay: [CMSampleBuffer] = []
+    private var replayIndex = 0
+    private var refillTask: Task<Void, Never>?
     private var observers: [any NSObjectProtocol] = []
 
     /// Whether enough APAC is queued to start the synchronizer. The encoder holds 71 packets
@@ -68,25 +101,40 @@ public actor SpatialAudioRenderer {
     /// `configuration`; encoding is always live.
     public init(codec: SpatialAudioCodec, configuration: APACConfiguration = .init(),
                 synchronizer: AVSampleBufferRenderSynchronizer) throws {
+        try self.init(codec: codec, configuration: configuration, synchronizer: synchronizer,
+                      output: AVSampleBufferAudioRenderer())
+    }
+
+    init(codec: SpatialAudioCodec, configuration: APACConfiguration = .init(),
+         synchronizer: AVSampleBufferRenderSynchronizer, output: sending any SpatialAudioRendererOutput,
+         makeDecoder: (@Sendable () throws -> any SpatialAudioRendererDecoding)? = nil) throws {
         guard configuration.hasValidEncoderSettings else {
             throw SpatialAudioError.invalidConfiguration("Invalid APAC gain, bitrate or sync interval")
         }
         var configuration = configuration
         // Only the live profile streams; the offline profile holds about 20 s before its first packet.
         configuration.liveEncoding = true
-        self.codec = codec
         self.configuration = configuration
         gain = powf(10, configuration.gainDB / 20)
-        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
+        let settings = configuration
+        let factory: @Sendable () throws -> any SpatialAudioRendererDecoding = makeDecoder ?? {
+            try Decoder(codec: codec, layout: settings.layout, normalizesDialogue: settings.normalizesDialogue)
+        }
+        self.makeDecoder = factory
+        decoder = try factory()
         encoder = try APACEncoder(configuration: configuration)
+        audioRenderer = output
         self.synchronizer = synchronizer
-        synchronizer.addRenderer(audioRenderer)
+        if let native = output as? AVSampleBufferAudioRenderer { synchronizer.addRenderer(native) }
     }
 
     isolated deinit {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        refillTask?.cancel()
         audioRenderer.flush()
-        synchronizer.removeRenderer(audioRenderer, at: synchronizer.currentTime())
+        if let native = audioRenderer as? AVSampleBufferAudioRenderer {
+            synchronizer.removeRenderer(native, at: synchronizer.currentTime())
+        }
     }
 
     /// Starts a new timeline at `time`: before the first packet, after a seek, at a discontinuity
@@ -96,11 +144,18 @@ public actor SpatialAudioRenderer {
         guard time.isNumeric else { throw SpatialAudioError.invalidConfiguration("The timeline must start at a finite time") }
         if observers.isEmpty { observeOutput() }
         generation += 1
+        nextInput = 0
+        activeInput = 0
+        refillTask?.cancel()
+        refillTask = nil
+        replay = []
+        replayIndex = 0
         audioRenderer.flush()
         queued = []
         refilling = false
+        refillAgain = false
         state = .failed
-        decoder = try Decoder(codec: codec, layout: configuration.layout, normalizesDialogue: configuration.normalizesDialogue)
+        decoder = try makeDecoder()
         encoder = try APACEncoder(configuration: configuration)
         timeline = time
         inputStart = nil
@@ -116,7 +171,9 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
-            try Task.checkCancellation()
+            let input = try await acquireInput(generation: current)
+            defer { releaseInput(input, generation: current) }
+            try checkSubmission(generation: current)
             if inputStart == nil {
                 // Within the transcoder's bound, so a misplaced packet cannot demand minutes of silence.
                 guard time.isNumeric, abs(CMTimeSubtract(timeline, time).seconds) <= 60 else {
@@ -132,7 +189,7 @@ public actor SpatialAudioRenderer {
             }
             try await play(blocks, generation: current)
         } catch {
-            if generation == current { state = .failed }
+            if state != .ended { fail(generation: current) }
             throw error
         }
     }
@@ -142,19 +199,55 @@ public actor SpatialAudioRenderer {
         try checkAccepting()
         let current = generation
         do {
-            try Task.checkCancellation()
+            let input = try await acquireInput(generation: current)
+            defer { releaseInput(input, generation: current) }
+            try checkSubmission(generation: current)
             let blocks = try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true)
             try await play(blocks, final: true, generation: current)
+            try checkSubmission(generation: current)
             state = .ended
         } catch {
-            if generation == current { state = .failed }
+            if state != .ended { fail(generation: current) }
             throw error
         }
     }
 
+    /// Actor reentrancy during capacity waits must not let later input advance the codecs first.
+    private func acquireInput(generation current: Int) async throws -> Int {
+        try checkSubmission(generation: current)
+        let input = nextInput
+        nextInput += 1
+        while true {
+            try checkSubmission(generation: current)
+            if input == activeInput { return input }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func releaseInput(_ input: Int, generation current: Int) {
+        guard generation == current else { return }
+        activeInput = input + 1
+    }
+
+    private func fail(generation current: Int) {
+        guard generation == current else { return }
+        state = .failed
+        refillTask?.cancel()
+        refillTask = nil
+        replay = []
+        refilling = false
+        refillAgain = false
+    }
+
+    private func checkSubmission(generation current: Int) throws {
+        guard generation == current else { throw CancellationError() }
+        try Task.checkCancellation()
+        try checkAccepting()
+    }
+
     private func checkAccepting() throws {
         if state == .accepting, audioRenderer.status == .failed {
-            state = .failed
+            fail(generation: generation)
             throw audioRenderer.error ?? SpatialAudioError.encoding("The audio renderer could not play APAC")
         }
         switch state {
@@ -165,7 +258,8 @@ public actor SpatialAudioRenderer {
     }
 
     /// Encodes and queues decoded audio, first padding a source that starts after the timeline.
-    private func play(_ blocks: [PCMBlock], final: Bool = false, generation current: Int) async throws {
+    func play(_ blocks: [PCMBlock], final: Bool = false, generation current: Int) async throws {
+        try checkSubmission(generation: current)
         if discarding == nil, let inputStart, !blocks.isEmpty {
             discarding = Int((CMTimeSubtract(timeline, inputStart).seconds * 48_000).rounded())
         }
@@ -174,8 +268,10 @@ public actor SpatialAudioRenderer {
             let frames = min(-remaining, 48_000)
             try await submit(encoder.encode([Float](repeating: 0, count: frames * configuration.layout.channelCount)[...]),
                              generation: current)
+            try checkSubmission(generation: current)
             discarding = remaining + frames
         }
+        try checkSubmission(generation: current)
         try await submit(encoder.encode(timed(blocks)[...], final: final), generation: current)
     }
 
@@ -200,32 +296,32 @@ public actor SpatialAudioRenderer {
 
     /// Enqueues packets with timestamps shifted back by the encoder priming, so decoded audio lands
     /// at its presentation time, as the asset-writer path does.
-    private func submit(_ encoded: [APACEncoder.Packet], generation current: Int) async throws {
-        guard !encoded.isEmpty else { return }
-        while refilling || !audioRenderer.isReadyForMoreMediaData {
-            if audioRenderer.status == .failed { break }
-            try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        // begin(at:) started another timeline while this call waited; its audio is stale.
-        guard generation == current else { throw CancellationError() }
-        if audioRenderer.status == .failed {
-            throw audioRenderer.error ?? SpatialAudioError.encoding("The audio renderer could not play APAC")
-        }
-        // One packet per buffer, so a flush always falls between packets.
-        for packet in encoded {
-            let start = CMTimeSubtract(CMTimeAdd(timeline, CMTime(value: packets * 1024, timescale: 48_000)),
-                                       CMTime(value: Int64(encoder.primingFrames), timescale: 48_000))
-            let buffer = try Self.sampleBuffer([packet.data], format: encoder.format, at: start)
-            audioRenderer.enqueue(buffer)
-            packets += 1
-            queued.append((buffer, start, CMTimeAdd(start, CMTime(value: 1024, timescale: 48_000)), packet.isIndependent))
-        }
-        // Keep what has yet to play, from the sync packet it decodes from.
-        let now = synchronizer.currentTime()
-        if let unplayed = queued.firstIndex(where: { $0.end > now }),
-           let sync = queued[...unplayed].lastIndex(where: \.isIndependent), sync > 0 {
-            queued.removeFirst(sync)
+    func submit(_ encoded: [APACEncoder.Packet], generation current: Int) async throws {
+        do {
+            try checkSubmission(generation: current)
+            // Capacity can disappear after any packet, including during a final encoder flush.
+            for packet in encoded {
+                while true {
+                    try checkSubmission(generation: current)
+                    if !refilling, audioRenderer.isReadyForMoreMediaData { break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                let start = CMTimeSubtract(CMTimeAdd(timeline, CMTime(value: packets * 1024, timescale: 48_000)),
+                                           CMTime(value: Int64(encoder.primingFrames), timescale: 48_000))
+                let buffer = try Self.sampleBuffer([packet.data], format: encoder.format, at: start)
+                audioRenderer.enqueue(buffer)
+                packets += 1
+                queued.append((buffer, start, CMTimeAdd(start, CMTime(value: 1024, timescale: 48_000)), packet.isIndependent))
+                // Keep unplayed audio from its preceding sync packet, even during a long batch.
+                let now = synchronizer.currentTime()
+                if let unplayed = queued.firstIndex(where: { $0.end > now }),
+                   let sync = queued[...unplayed].lastIndex(where: \.isIndependent), sync > 0 {
+                    queued.removeFirst(sync)
+                }
+            }
+        } catch {
+            fail(generation: current)
+            throw error
         }
     }
 
@@ -248,7 +344,20 @@ public actor SpatialAudioRenderer {
     /// everything yet to play. Audio enqueued while the notification was on its way may have survived
     /// the flush, so flush from that time first.
     func refill(from time: CMTime?) {
-        guard state != .failed, !refilling, !queued.isEmpty else { return }
+        guard state != .failed, !queued.isEmpty else { return }
+        guard audioRenderer.status != .failed else { return fail(generation: generation) }
+        if refilling {
+            if refillTask == nil {
+                // Let the native flush finish before replaying; otherwise its late completion
+                // could drop the replacement packets. Multiple notifications need one full refill.
+                refillAgain = true
+            } else {
+                // A second flush may have dropped packets already replayed. Rewind from the sync
+                // packet and let the existing capacity poll continue with the replacement replay.
+                requeue()
+            }
+            return
+        }
         guard let time, time.isNumeric else { return requeue() }
         let current = generation
         refilling = true
@@ -257,30 +366,73 @@ public actor SpatialAudioRenderer {
         }
     }
 
-    private func enqueueAgain(from time: CMTime, flushed: Bool, generation current: Int) {
+    func enqueueAgain(from time: CMTime, flushed: Bool, generation current: Int) {
         // A newer timeline has reset the refill, and may have started its own.
-        guard generation == current else { return }
-        refilling = false
+        guard generation == current, state != .failed else { return }
+        guard audioRenderer.status != .failed else { return fail(generation: current) }
+        if refillAgain {
+            refillAgain = false
+            return requeue()
+        }
         // Too close to the playhead to flush part of the queue: start over from what has yet to play.
         guard flushed else { return requeue() }
-        for entry in queued where entry.start >= time { audioRenderer.enqueue(entry.buffer) }
+        startReplay(queued.filter { $0.start >= time }.map(\.buffer))
     }
 
     /// Flushes and enqueues everything yet to play again, which also reconfigures the output for it.
     /// The flush resets the decoder, so it starts at the sync packet before the playhead; the packets
     /// before the playhead only prime the decoder.
     private func requeue() {
+        guard state != .failed else { return }
+        guard audioRenderer.status != .failed else { return fail(generation: generation) }
         audioRenderer.flush()
         let now = synchronizer.currentTime()
-        guard let unplayed = queued.firstIndex(where: { $0.end > now }) else { return }
+        guard let unplayed = queued.firstIndex(where: { $0.end > now }) else {
+            return startReplay([])
+        }
         let sync = queued[...unplayed].lastIndex(where: \.isIndependent) ?? unplayed
+        var buffers: [CMSampleBuffer] = []
         for (index, entry) in queued.enumerated() where index >= sync {
             guard index < unplayed, let primer = Self.trimmed(entry.buffer) else {
-                audioRenderer.enqueue(entry.buffer)
+                buffers.append(entry.buffer)
                 continue
             }
-            audioRenderer.enqueue(primer)
+            buffers.append(primer)
         }
+        startReplay(buffers)
+    }
+
+    private func startReplay(_ buffers: [CMSampleBuffer]) {
+        refilling = true
+        replay = buffers
+        replayIndex = 0
+        guard refillTask == nil else { return }
+        let current = generation
+        // Release the actor between polls, so a blocked replay does not keep the renderer alive.
+        refillTask = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                guard await self?.replayAvailable(generation: current) == true else { return }
+                do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
+            }
+        }
+    }
+
+    /// All replay buffers stay actor-owned; only the need to poll again leaves the actor.
+    private func replayAvailable(generation current: Int) -> Bool {
+        guard generation == current, state != .failed else { return false }
+        while replayIndex < replay.count {
+            if Task.isCancelled || audioRenderer.status == .failed {
+                fail(generation: current)
+                return false
+            }
+            guard audioRenderer.isReadyForMoreMediaData else { return true }
+            audioRenderer.enqueue(replay[replayIndex])
+            replayIndex += 1
+        }
+        replay = []
+        refilling = false
+        refillTask = nil
+        return false
     }
 
     /// A copy of a one-packet buffer that the renderer decodes but does not play.
