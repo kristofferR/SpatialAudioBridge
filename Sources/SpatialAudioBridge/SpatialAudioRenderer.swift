@@ -26,6 +26,20 @@ protocol SpatialAudioRendererDecoding: AnyObject {
 @available(macOS 26, iOS 26, tvOS 26, *)
 extension Decoder: SpatialAudioRendererDecoding {}
 
+/// How far the current timeline's APAC reaches, for a host that drives its clock from submitted audio.
+@available(macOS 26, iOS 26, tvOS 26, *)
+public struct SpatialAudioRendererProgress: Sendable, Equatable {
+    /// The time passed to ``SpatialAudioRenderer/begin(at:)``.
+    public let timelineStart: CMTime
+    /// The presentation end of the audio enqueued with the native renderer so far, from
+    /// `timelineStart` on. It does not count encoder padding, and stays at `timelineStart` until
+    /// the first audio is enqueued.
+    public let submittedEnd: CMTime
+    /// Whether ``SpatialAudioRenderer/endOfStream()`` has enqueued all of the timeline's audio,
+    /// also when there was none.
+    public let isFinal: Bool
+}
+
 /// Plays TrueHD Atmos or DTS:X as APAC through `AVSampleBufferAudioRenderer`, for players that
 /// render video themselves with an `AVSampleBufferRenderSynchronizer`. No HLS or server is involved.
 ///
@@ -55,6 +69,9 @@ public actor SpatialAudioRenderer {
     private var inputStart: CMTime?
     private var discarding: Int?
     private var packets: Int64 = 0
+    /// Frames passed to the encoder on this timeline, from `timeline` on.
+    private var encodedFrames: Int64 = 0
+    private let progressContinuation: AsyncStream<SpatialAudioRendererProgress>.Continuation
     /// Counts timelines, so a call suspended across ``begin(at:)`` drops its stale output.
     private var generation = 0
     /// The timeline with an `enqueue` or `endOfStream` call in progress, so an overlapping call is refused.
@@ -72,6 +89,11 @@ public actor SpatialAudioRenderer {
     private var replayIndex = 0
     private var refillTask: Task<Void, Never>?
     private var observers: [any NSObjectProtocol] = []
+
+    /// Reports each change to the current timeline's ``SpatialAudioRendererProgress``: when it
+    /// begins, as each APAC packet is enqueued and when its stream ends. Only the latest value waits
+    /// for a slow reader. Iterate it from one task.
+    public nonisolated let progress: AsyncStream<SpatialAudioRendererProgress>
 
     /// Whether enough APAC is queued to start the synchronizer. The encoder holds 71 packets
     /// (1.5 s) before its first packet, so start the clock only once this is true.
@@ -120,6 +142,7 @@ public actor SpatialAudioRenderer {
             try Decoder(codec: codec, layout: settings.layout, normalizesDialogue: settings.normalizesDialogue)
         }
         self.makeDecoder = factory
+        (progress, progressContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         decoder = try factory()
         encoder = try APACEncoder(configuration: configuration)
         audioRenderer = output
@@ -128,6 +151,7 @@ public actor SpatialAudioRenderer {
     }
 
     isolated deinit {
+        progressContinuation.finish()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         refillTask?.cancel()
         audioRenderer.flush()
@@ -158,7 +182,9 @@ public actor SpatialAudioRenderer {
         inputStart = nil
         discarding = nil
         packets = 0
+        encodedFrames = 0
         state = .accepting
+        report(final: false)
     }
 
     /// Decodes, renders and encodes one compressed packet, waiting while the renderer is full.
@@ -200,6 +226,7 @@ public actor SpatialAudioRenderer {
             // All output is queued; only a newer timeline, not a late cancellation, voids the ending.
             guard generation == current else { throw CancellationError() }
             state = .ended
+            report(final: true)
         } catch {
             if state != .ended { fail(generation: current) }
             throw error
@@ -258,13 +285,24 @@ public actor SpatialAudioRenderer {
         // Silence keeps later timestamps aligned; a second at a time bounds its memory.
         while let remaining = discarding, remaining < 0 {
             let frames = min(-remaining, 48_000)
+            encodedFrames += Int64(frames)
             try await submit(encoder.encode([Float](repeating: 0, count: frames * configuration.layout.channelCount)[...]),
                              generation: current)
             try checkSubmission(generation: current)
             discarding = remaining + frames
         }
         try checkSubmission(generation: current)
-        try await submit(encoder.encode(timed(blocks)[...], final: final), generation: current)
+        let pcm = try timed(blocks)
+        encodedFrames += Int64(pcm.count / configuration.layout.channelCount)
+        try await submit(encoder.encode(pcm[...], final: final), generation: current)
+    }
+
+    /// Reports how far the enqueued audio reaches: the latest packet's end, without the final padding.
+    private func report(final: Bool) {
+        let end = min(packets * 1024 - Int64(encoder.primingFrames), encodedFrames)
+        progressContinuation.yield(SpatialAudioRendererProgress(
+            timelineStart: timeline, submittedEnd: CMTimeAdd(timeline, CMTime(value: max(end, 0), timescale: 48_000)),
+            isFinal: final))
     }
 
     /// Interleaved PCM aligned to the timeline, with audio before it discarded and the gain applied.
@@ -303,6 +341,8 @@ public actor SpatialAudioRenderer {
                 let buffer = try Self.sampleBuffer([packet.data], format: encoder.format, at: start)
                 audioRenderer.enqueue(buffer)
                 packets += 1
+                // Packets that hold only encoder priming end before the timeline.
+                if packets * 1024 > encoder.primingFrames { report(final: false) }
                 queued.append((buffer, start, CMTimeAdd(start, CMTime(value: 1024, timescale: 48_000)), packet.isIndependent))
                 // Keep unplayed audio from its preceding sync packet, even during a long batch.
                 let now = synchronizer.currentTime()
