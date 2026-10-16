@@ -9,6 +9,46 @@ Both modes attach `AtmosOutputActivator` and configure the audio session as in t
 
 ## Build and install
 
+Core PR CI builds a Release tvOS app against that checkout's core and uploads
+`StreamPlayer-unsigned-tvOS`. Download it from the run for the exact revision being validated.
+It contains no library media or server credentials. Signing and installation happen separately
+on the paired device's host, using its existing development identity and provisioning profile;
+CI does not receive signing credentials or install anything. An unsigned artifact is not proof
+of device playback. This path keeps compilation off a resource-limited development Mac.
+
+On the paired Mac, download and install that artifact without invoking Xcode's build system:
+
+```sh
+gh run download RUN_ID --repo kristofferR/SpatialAudioBridge \
+  --name StreamPlayer-unsigned-tvOS --dir "/path/to/artifact"
+security find-identity -v -p codesigning
+xcrun devicectl list devices
+xcrun devicectl device info details --device "DEVICE_IDENTIFIER" \
+  --json-output "/tmp/stream-player-device.json"
+APPLE_TV_UDID="$(plutil -extract result.properties.hardware.udid raw \
+  "/tmp/stream-player-device.json" 2>/dev/null || \
+  plutil -extract result.hardwareProperties.udid raw "/tmp/stream-player-device.json")"
+./Examples/StreamPlayer/sign-and-install.sh \
+  "/path/to/artifact/StreamPlayer-unsigned-tvOS.zip" \
+  "/path/to/development.mobileprovision" "SIGNING_IDENTITY_SHA1" "$APPLE_TV_UDID"
+```
+
+Use the `Identifier` from `list devices` as `DEVICE_IDENTIFIER` to query the hardware UDID.
+The displayed identifier may be a CoreDevice UUID; the helper needs the hardware UDID in the profile's
+`ProvisionedDevices`. The extraction above supports both current and older device JSON layouts.
+
+Use an existing, unexpired tvOS development profile that includes the Apple TV UDID and permits
+`com.kristofferr.SpatialAudioBridge.StreamPlayer` (an exact app ID or a matching wildcard,
+such as `PREFIX.*` or `PREFIX.com.kristofferr.*`).
+The helper uses the profile's App ID prefix for application/keychain identifiers and keeps its
+team identifier separate; older developer accounts may have different values.
+The signing identity must have its private key in the local keychain and be included in the
+profile. The helper checks the profile's platform, development flag, device and app ID, embeds it,
+signs embedded code and the app with concrete development entitlements, verifies the signature,
+and installs it. It does not create profiles, export keys, rebuild, publish or launch playback.
+
+### Building locally on a suitable Mac
+
 Use macOS with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and build the Rust core first with `./scripts/build-core.sh` from the repository root:
 
 ```sh

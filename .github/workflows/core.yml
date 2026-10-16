@@ -61,6 +61,22 @@ jobs:
           xcodebuild -version
       - name: Build the release archive
         run: ./scripts/release-core.sh
+      - name: Build unsigned Apple TV validation app
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate --spec Examples/StreamPlayer/project.yml
+          xcodebuild -project Examples/StreamPlayer/StreamPlayer.xcodeproj -scheme StreamPlayer \
+            -destination 'generic/platform=tvOS' -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/StreamPlayer" \
+            CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/StreamPlayer/Build/Products/Release-appletvos/StreamPlayer.app" \
+            "$RUNNER_TEMP/StreamPlayer-unsigned-tvOS.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamPlayer-unsigned-tvOS
+          path: ${{ runner.temp }}/StreamPlayer-unsigned-tvOS.zip
+          retention-days: 7
       - name: Verify mixed-language host linking and unwinding
         run: ./scripts/test-mixed-host.sh
       - uses: actions/download-artifact@v4
