@@ -184,7 +184,7 @@ struct PeakMeasurementTests {
                 try #require(packets.first?.isIndependent == true)
                 let raw = try decode(packets.map(\.data), format: encoder.format, channels: channels)
                 try #require(raw.count.isMultiple(of: channels))
-                try #require(raw.allSatisfy(\.isFinite))
+                try #require(raw.allSatisfy { $0.isFinite })
                 try #require(raw.count / channels >= encoder.primingFrames + 96_000)
                 #expect(Int64(encoder.primingFrames) == (try configuration.encoderPrimingDuration().value))
                 // Raw packets include priming and trailing packet padding, unlike AVAssetReader's
