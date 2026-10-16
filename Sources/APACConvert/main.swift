@@ -44,7 +44,7 @@ import AVFoundation
         let audio = try await asset.loadTracks(withMediaType: .audio)
         let descriptions = try await audio.first?.load(.formatDescriptions) ?? []
         let formats = descriptions.map { String(format: "%08x", CMFormatDescriptionGetMediaSubType($0)) }.joined(separator: ",")
-        print("APAC \(report.layout.channelCount) channels, \(report.sampleRate) Hz, \(report.sampleFrames) frames, \(report.duration)s; peak=\(report.peakPCM); elapsed=\(Date().timeIntervalSince(start))s; codec=\(formats)")
+        print("APAC \(report.layout.channelCount) channels, \(report.sampleRate) Hz, \(report.sampleFrames) frames, \(report.duration)s; peak=\(report.peakPCM); concealed=\(report.recovery.concealedFrames) frames in \(report.recovery.concealmentEvents) spans; elapsed=\(Date().timeIntervalSince(start))s; codec=\(formats)")
     }
 
     /// The `--layout` option, or the library's default layout without it.

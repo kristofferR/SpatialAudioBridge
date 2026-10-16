@@ -47,13 +47,12 @@ let report = try await audio.finish()
 
 ### Report concealed input
 
-`report.recovery` contains `concealedFrames`, `concealmentEvents` and `longestConcealmentFrames`.
-The same cumulative snapshot is available as `await audio.recoveryStatistics` during conversion
-and after completion, cancellation or failure. A new session starts at zero.
+`report.recovery` contains `concealedFrames`, `concealmentEvents` and `longestConcealmentFrames`
+for the whole session.
 
 These counters describe accepted TrueHD concealment: one event is a contiguous span of damaged
 access units replaced with silence, whether or not a later major sync successfully resumes decoding.
-Frames are source sample frames across all channels, not a count of individual channel samples.
+Frames are source sample frames, not a count of individual channel samples.
 They include decoded seek pre-roll that the host later discards, but exclude encoder priming,
 end padding and limiter lookahead. At the supported 48 kHz, divide frame counts by 48,000 for seconds.
 DTS:X reports zero; its normal decoder warm-up silence is not damage recovery.

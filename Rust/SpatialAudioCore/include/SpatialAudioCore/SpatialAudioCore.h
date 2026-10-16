@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 typedef struct SABHandle SABHandle;
-/* Source sample frames across all channels, including seek pre-roll, excluding encoder padding.
+/* Source sample frames, not channel samples, including seek pre-roll, excluding encoder padding.
    Events count spans of accepted concealment, not completed recoveries. DTS:X reports zero. */
 typedef struct SABRecoveryStatistics {
     uint64_t concealed_frames;

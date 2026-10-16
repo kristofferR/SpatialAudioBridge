@@ -142,7 +142,7 @@ public enum APACDestination: Sendable {
     case segments(syncPeriodsPerSegment: Int = 2, onSegment: @Sendable (APACSegment) throws -> Void)
 }
 
-/// Decoder concealment since this session began. Counts source sample frames across all channels,
+/// Decoder concealment since this session began. Counts source sample frames (not channel samples),
 /// including seek pre-roll, excluding encoder priming and end padding. DTS:X reports zero.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct SpatialAudioRecoveryStatistics: Sendable, Equatable {

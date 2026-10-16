@@ -203,9 +203,9 @@ impl TrueHd {
             }
             if self.normalise_dialogue
                 && let Some(extra) = au
-                .major_sync_info
-                .as_ref()
-                .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
+                    .major_sync_info
+                    .as_ref()
+                    .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
             {
                 self.dialogue = dialogue_gain(extra.sixteench_dialogue_norm);
             }
@@ -245,9 +245,7 @@ impl TrueHd {
         if self.bytes - self.consumed > 64 * 1024 {
             return Err("TrueHD sync not found within 64 KiB".into());
         }
-        if end && let Some((error, _)) = self.lost.take() {
-            return Err(error);
-        }
+        // A loss in the final access units was already concealed unit by unit, as mid-stream.
         if end && (self.consumed != self.bytes || !self.spatial) {
             return Err("Empty or truncated TrueHD stream".into());
         }
@@ -257,7 +255,8 @@ impl TrueHd {
     /// Conceals an access unit that failed to parse or decode, and those after it up to the
     /// next major sync, with silence of their length. Discs join clips this way: the access
     /// unit before the join is cut short, and those after it lack the restart they follow. A
-    /// failure at that major sync, or none within the longest interval, ends the session.
+    /// failure at that major sync, or none within the longest interval, ends the session; the
+    /// stream ending first does not.
     fn lose(
         &mut self,
         restarting: Option<String>,
@@ -941,21 +940,45 @@ mod recovery_tests {
         let mut discard = |_: Pcm| Ok(());
         decoder.lose(None, "first".into(), &mut discard).unwrap();
         decoder.conceal(&mut discard).unwrap();
-        assert_eq!(decoder.recovery, RecoveryStatistics {
-            concealed_frames: 80, concealment_events: 1, longest_concealment_frames: 80,
-        });
+        assert_eq!(
+            decoder.recovery,
+            RecoveryStatistics {
+                concealed_frames: 80,
+                concealment_events: 1,
+                longest_concealment_frames: 80,
+            }
+        );
         // A separate loss starts a new span without resetting the cumulative snapshot.
         decoder.lost = None;
         decoder.lose(None, "second".into(), &mut discard).unwrap();
-        for _ in 1..MAX_SYNC_INTERVAL { decoder.conceal(&mut discard).unwrap(); }
+        for _ in 1..MAX_SYNC_INTERVAL {
+            decoder.conceal(&mut discard).unwrap();
+        }
         let before = decoder.recovery;
         assert_eq!(before.concealed_frames, (MAX_SYNC_INTERVAL as u64 + 2) * 40);
         assert_eq!(before.concealment_events, 2);
-        assert_eq!(before.longest_concealment_frames, MAX_SYNC_INTERVAL as u64 * 40);
+        assert_eq!(
+            before.longest_concealment_frames,
+            MAX_SYNC_INTERVAL as u64 * 40
+        );
         assert!(decoder.conceal(&mut discard).is_err());
-        assert_eq!(decoder.recovery, before, "rejected concealment is not counted");
+        assert_eq!(
+            decoder.recovery, before,
+            "rejected concealment is not counted"
+        );
+        // A stream that ends inside a concealed span keeps its silence instead of failing.
+        let mut ending = TrueHd::new(Layout::SevenOneFour);
+        ending.unit = Some((40, 12));
+        ending.lose(None, "tail".into(), &mut discard).unwrap();
+        ending.spatial = true;
+        assert!(ending.push(&[], true, &mut discard).is_ok());
         for codec in [1, 2] {
-            assert_eq!(Core::new(codec, Layout::SevenOneFour).unwrap().recovery_statistics(), RecoveryStatistics::default());
+            assert_eq!(
+                Core::new(codec, Layout::SevenOneFour)
+                    .unwrap()
+                    .recovery_statistics(),
+                RecoveryStatistics::default()
+            );
         }
     }
 }
@@ -1278,7 +1301,10 @@ mod dts_tests {
             // Remove metadata bytes only; decoded bed/feed samples and presentation stay intact.
             frame.x_payload.truncate(4);
             assert_eq!(XPresentation::detect(&frame), Some(presentation));
-            let error = decoder.render(&frame).err().expect("damaged metadata must fail");
+            let error = decoder
+                .render(&frame)
+                .err()
+                .expect("damaged metadata must fail");
             assert!(error.starts_with("DTS:X spatial metadata:"), "{error}");
             assert_eq!(frame.samples, original_bed);
             assert_eq!(frame.x_samples, original_feeds);

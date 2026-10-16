@@ -296,15 +296,19 @@ fn truehd_recovery_statistics_are_chunk_independent() {
     use spatial_audio_core::decode::RecoveryStatistics;
     let data = fs::read(env::var("SAB_TRUEHD_FIXTURE").expect("set the fixture path")).unwrap();
     let units = access_units(&data);
-    let sync = (64..units.len()).find(|&i| units[i].2).expect("a later major sync");
+    let sync = (64..units.len())
+        .find(|&i| units[i].2)
+        .expect("a later major sync");
     let damaged_unit = sync - 5;
     let (offset, length, _) = units[damaged_unit];
     let mut prefix = Core::new_unlimited(1, Layout::SevenOneFour).unwrap();
     let mut frames_per_unit = 0;
-    prefix.push(&data[..offset], false, &mut |pcm| {
-        frames_per_unit = pcm.frames as u64;
-        Ok(())
-    }).unwrap();
+    prefix
+        .push(&data[..offset], false, &mut |pcm| {
+            frames_per_unit = pcm.frames as u64;
+            Ok(())
+        })
+        .unwrap();
     assert!(frames_per_unit > 0);
     let mut damaged = data.clone();
     damaged[offset + length / 2] ^= 0xff;
@@ -315,7 +319,9 @@ fn truehd_recovery_statistics_are_chunk_independent() {
             frames += pcm.frames;
             Ok(())
         };
-        for part in bytes.chunks(chunk) { core.push(part, false, &mut collect).unwrap(); }
+        for part in bytes.chunks(chunk) {
+            core.push(part, false, &mut collect).unwrap();
+        }
         core.push(&[], true, &mut collect).unwrap();
         (frames, core.recovery_statistics())
     };
@@ -324,10 +330,17 @@ fn truehd_recovery_statistics_are_chunk_independent() {
     let a = measure(&damaged, 4096);
     assert_eq!(a, measure(&damaged, 317));
     assert_eq!(a.0, intact.0);
-    assert_eq!(a.1, RecoveryStatistics {
-        concealed_frames: 5 * frames_per_unit,
-        concealment_events: 1,
-        longest_concealment_frames: 5 * frames_per_unit,
-    });
-    assert_eq!(measure(&data, 317).1, RecoveryStatistics::default(), "a fresh session resets counts");
+    assert_eq!(
+        a.1,
+        RecoveryStatistics {
+            concealed_frames: 5 * frames_per_unit,
+            concealment_events: 1,
+            longest_concealment_frames: 5 * frames_per_unit,
+        }
+    );
+    assert_eq!(
+        measure(&data, 317).1,
+        RecoveryStatistics::default(),
+        "a fresh session resets counts"
+    );
 }
