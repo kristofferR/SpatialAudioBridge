@@ -138,6 +138,7 @@ struct PeakMeasurementTests {
                 let scaled = limited.map { $0 * powf(10, gainDB / 20) }
                 #expect(abs(report.peakPCM - samplePeak(scaled)) < 0.00001)
                 let measurements: [String: Any] = [
+                    "path": live ? "fragmented-writer" : "file-writer",
                     "signal": signal, "channels": channels, "live": live, "gainDB": gainDB,
                     "sampleRate": 48_000, "bitRate": configuration.bitRate,
                     "syncPacketFrequency": configuration.syncPacketFrequency,
@@ -149,6 +150,61 @@ struct PeakMeasurementTests {
                     "encoderInputReconstructedPeak4x": limitedReconstructed * powf(10, gainDB / 20),
                     "decodedSamplePeak": samplePeak(decoded.samples),
                     "decodedReconstructedPeak4x": reconstructedPeak(decoded.samples, channels: channels),
+                ]
+                let json = try JSONSerialization.data(withJSONObject: measurements, options: [.sortedKeys])
+                print("SAB_PEAK_MEASUREMENT \(String(decoding: json, as: UTF8.self))")
+            }
+        }
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SAB_PEAK_PROBES_DIR"] != nil),
+          .timeLimit(.minutes(5)), arguments: [false, true], [12, 16])
+    func measureDirectAPACPeaks(live: Bool, channels: Int) throws {
+        let directory = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["SAB_PEAK_PROBES_DIR"]))
+        let layout: SpatialAudioLayout = channels == 12 ? .sevenOneFour : .nineOneSix
+        for signal in ["tone1k", "tone8k", "transients", "multichannel"] {
+            let input = try probePCM(directory, signal: signal, channels: channels, stage: "input")
+            let limited = try probePCM(directory, signal: signal, channels: channels, stage: "limited")
+            try #require(samplePeak(input) > 1)
+            try #require(samplePeak(limited) <= 0.988_554)
+            let limitedReconstructed = reconstructedPeak(limited, channels: channels)
+            for gainDB in [Float(0), Float(3)] {
+                let configuration = APACConfiguration(layout: layout, gainDB: gainDB, liveEncoding: live)
+                let gain = powf(10, gainDB / 20)
+                // SpatialAudioRenderer applies gain after the core limiter, before this encoder.
+                let scaled = limited.map { $0 * gain }
+                let encoder = try APACEncoder(configuration: configuration)
+                var packets: [APACEncoder.Packet] = []
+                for offset in stride(from: 0, to: 96_000, by: 317) {
+                    let end = min(offset + 317, 96_000)
+                    packets += try encoder.encode(scaled[offset * channels..<end * channels])
+                }
+                packets += try encoder.encode([], final: true)
+                try #require(packets.first?.isIndependent == true)
+                let raw = try decode(packets.map(\.data), format: encoder.format, channels: channels)
+                try #require(raw.count.isMultiple(of: channels))
+                try #require(raw.allSatisfy(\.isFinite))
+                try #require(raw.count / channels >= encoder.primingFrames + 96_000)
+                #expect(Int64(encoder.primingFrames) == (try configuration.encoderPrimingDuration().value))
+                // Raw packets include priming and trailing packet padding, unlike AVAssetReader's
+                // presented writer output. Compare only the same source-length span.
+                let decoded = Array(raw[encoder.primingFrames * channels..<(encoder.primingFrames + 96_000) * channels])
+                let measurements: [String: Any] = [
+                    "path": "direct", "signal": signal, "channels": channels, "live": live, "gainDB": gainDB,
+                    "sampleRate": 48_000, "bitRate": configuration.bitRate,
+                    "syncPacketFrequency": configuration.syncPacketFrequency,
+                    "contentSource": configuration.contentSource.rawValue,
+                    "drcRawValue": configuration.dynamicRangeConfiguration.rawValue,
+                    "primingFrames": encoder.primingFrames, "rawDecodedFrames": raw.count / channels,
+                    "presentedFrames": decoded.count / channels, "packetCount": packets.count,
+                    "os": ProcessInfo.processInfo.operatingSystemVersionString,
+                    "inputSamplePeak": samplePeak(input), "limitedSamplePeak": samplePeak(limited),
+                    "limitedReconstructedPeak4x": limitedReconstructed,
+                    "encoderInputSamplePeak": samplePeak(scaled),
+                    "encoderInputReconstructedPeak4x": limitedReconstructed * gain,
+                    "decodedSamplePeak": samplePeak(decoded),
+                    "decodedReconstructedPeak4x": reconstructedPeak(decoded, channels: channels),
                 ]
                 let json = try JSONSerialization.data(withJSONObject: measurements, options: [.sortedKeys])
                 print("SAB_PEAK_MEASUREMENT \(String(decoding: json, as: UTF8.self))")
