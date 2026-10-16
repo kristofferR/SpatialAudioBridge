@@ -16,7 +16,7 @@ public final class AtmosOutputActivator {
     private var rateObserver: NSObjectProtocol?
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
     private var observations: [NSKeyValueObservation] = []
-    private var selectionObserver: NSObjectProtocol?
+    private var itemObservers: [NSObjectProtocol] = []
 
     /// Whether the silent Atmos stream is currently playing.
     public var isActive: Bool { player.timeControlStatus == .playing }
@@ -49,7 +49,8 @@ public final class AtmosOutputActivator {
 
     /// Plays the silent stream once `player` plays, or waits to play, an item for which `playsAPAC`
     /// returns true, and keeps it playing while the host pauses, so the route stays in Atmos for the
-    /// resume. Re-evaluates on item and audio selection changes and unloads the stream for other items.
+    /// resume. Re-evaluates on item and audio selection changes, and unloads the stream for other items
+    /// and when the item ends or fails.
     /// Pass a predicate when an item offers APAC and other audio renditions.
     public func attach(to player: AVPlayer, playsAPAC: @escaping @MainActor (AVPlayerItem) -> Bool = { _ in true }) {
         detach()
@@ -92,12 +93,19 @@ public final class AtmosOutputActivator {
     }
 
     private func follow(_ item: AVPlayerItem?) {
-        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
-        selectionObserver = item.map {
-            NotificationCenter.default.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
-                                                   object: $0, queue: .main) { [weak self] _ in
-                Self.onMain { self?.update() }
-            }
+        itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        itemObservers = []
+        if let item {
+            let center = NotificationCenter.default
+            itemObservers = [
+                center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item,
+                                   queue: .main) { [weak self] _ in Self.onMain { self?.update() } },
+                // The host then reports paused, which must not keep the stream playing.
+                center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item,
+                                   queue: .main) { [weak self] _ in Self.onMain { self?.release() } },
+                center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item,
+                                   queue: .main) { [weak self] _ in Self.onMain { self?.release() } },
+            ]
         }
         update()
     }
@@ -109,7 +117,7 @@ public final class AtmosOutputActivator {
             if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
-        guard let host, let item = host.currentItem, playsAPAC(item) else {
+        guard let host, let item = host.currentItem, item.status != .failed, playsAPAC(item) else {
             // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
             release()
             return

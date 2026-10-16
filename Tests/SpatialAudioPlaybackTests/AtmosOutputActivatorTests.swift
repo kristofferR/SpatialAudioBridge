@@ -4,10 +4,10 @@ import Testing
 
 @MainActor @Suite(.serialized) struct AtmosOutputActivatorTests {
     @available(macOS 26, iOS 26, tvOS 26, *)
-    private func silence(_ name: String) throws -> URL {
+    private func silence(_ name: String, frames: AVAudioFrameCount = 80_000) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString).caf")
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 8_000, channels: 1))
-        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 80_000))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
         buffer.frameLength = buffer.frameCapacity
         try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
         return url
@@ -40,6 +40,19 @@ import Testing
         activator.detach()
         #expect(!activator.isActive)
         host.pause()
+    }
+
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test func stopsWhenTheHostItemEnds() async throws {
+        let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
+        let host = AVPlayer(url: try silence("apac", frames: 4_000))
+        host.volume = 0
+        activator.attach(to: host)
+        host.play()
+        #expect(await eventually { activator.isActive })
+        #expect(await eventually { activator.player.items().isEmpty })
+        #expect(!activator.isActive)
+        activator.detach()
     }
 
     @available(macOS 26, iOS 26, tvOS 26, *)
