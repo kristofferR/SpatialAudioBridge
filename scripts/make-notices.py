@@ -11,6 +11,8 @@ import re
 import sys
 
 RULE = "=" * 72
+# Crates whose Cargo license field understates their terms; see THIRD-PARTY-NOTICES.md.
+LICENSES = {"dca": "Apache-2.0 and, ported from FFmpeg, LGPL-2.1-or-later; usable as LGPL-3.0-or-later"}
 
 
 def crates(lines):
@@ -19,7 +21,7 @@ def crates(lines):
         package, _, license = line.strip().removesuffix(" (*)").partition("|")
         match = re.match(r"(\S+) v(\S+)", package)
         if match and match[1] != "spatial-audio-core":
-            found[(match[1], match[2])] = license
+            found[(match[1], match[2])] = LICENSES.get(match[1], license)
     return sorted(found.items())
 
 
@@ -72,6 +74,11 @@ def main():
         "SpatialAudioBridge is licensed under the Apache License, Version 2.0. Its Rust core contains the",
         f"components below and the Rust standard library, built with rustc {rustc_version}. Their notices",
         "follow; each license text appears once, with the components it applies to.",
+        "",
+        "The DTS decoder in dca is ported from FFmpeg, so the core is distributed under the GNU Lesser",
+        "General Public License, version 3 or later, as a whole. It ships as the dynamic framework",
+        "SpatialAudioCore.framework, which may be replaced by one built from the corresponding source at",
+        "https://github.com/kristofferR/SpatialAudioBridge.",
         "",
         "Components:",
         *(f"- {name} {version}, {license}" for (name, version), license in runtime),

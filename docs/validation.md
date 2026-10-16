@@ -190,9 +190,9 @@ The separate [Rust fuzz harness](../Rust/SpatialAudioCore/fuzz/README.md) exerci
 
 ### Mixed-language packaging check
 
-The Apple build and release jobs run `scripts/test-mixed-host.sh` after creating the release ZIP, before uploading the artifact or publishing a release. It extracts the ZIP into a path with spaces and uses its macOS library and headers to build an Objective-C/C++ executable alongside an independent Rust static library. Both archive orders run with companion libraries built by Rust 1.86.0 and 1.99.0; the core is built by Rust 1.99.0.
+The Apple build and release jobs run `scripts/test-mixed-host.sh` after creating the release ZIP, before uploading the artifact or publishing a release. It extracts the ZIP into a path with spaces and links its versioned macOS framework into an Objective-C/C++ executable alongside an independent Rust static library, built by Rust 1.86.0 and by 1.99.0, the core's toolchain.
 
-The executable exercises SAB session creation, configuration, input/error handling and destruction before and after the companion library catches a deliberate Rust panic. It also checks Objective-C catch/finally and C++ catch/destructor behavior. Each language catches its own exception or panic before returning through the C ABI. The negative control links the original, unisolated Cargo archive with the Rust 1.86.0 companion and requires a duplicate `rust_eh_personality` diagnostic; an unrelated build failure does not pass the control.
+The executable exercises SAB session creation, configuration, input/error handling and destruction before and after the companion library catches a deliberate Rust panic. It also checks Objective-C catch/finally and C++ catch/destructor behavior. Each language catches its own exception or panic before returning through the C ABI.
 
 This checks the native macOS architecture of the `macos-26` runner (Apple Silicon), with Xcode/Clang and OS versions recorded in the job log. The script also supports native Intel macOS with a 10.15 deployment target; Apple Silicon uses 11.0. A deployment target is not a runtime test on that older OS. The harness does not deliberately panic inside SAB, decode programme media, run iOS/tvOS slices, or establish receiver/HDMI behavior.
 
@@ -203,7 +203,7 @@ rustup toolchain install 1.86.0 1.99.0 --profile minimal
 ./scripts/test-mixed-host.sh
 ```
 
-An optional argument selects another release ZIP. The matching unisolated Cargo archive must still be present under `Rust/SpatialAudioCore/target/<native-target>/release` for the negative control. No simulator, signing or private fixtures are needed.
+An optional argument selects another release ZIP. No simulator, signing or private fixtures are needed.
 
 ### Package and renderer coverage
 

@@ -1,4 +1,4 @@
-module SpatialAudioCore {
-    header "SpatialAudioCore.h"
+framework module SpatialAudioCore {
+    umbrella header "SpatialAudioCore.h"
     export *
 }

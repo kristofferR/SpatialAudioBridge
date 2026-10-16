@@ -24,7 +24,8 @@ fi
     fail "The build changed Sources/SpatialAudioBridge/Resources/ThirdPartyNotices.txt; commit it first."
 [[ -z "$VERSION" || -z "$(git status --porcelain)" ]] || fail "The build changed tracked files; commit them first."
 
-# Fixed timestamps, permissions and entry order make the archive reproducible.
+# Fixed timestamps, permissions and entry order make the archive reproducible. The macOS framework's
+# symlinks are stored as links.
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 ENTRIES=(SpatialAudioCore.xcframework LICENSE THIRD-PARTY-NOTICES.md licenses)
@@ -33,7 +34,7 @@ find "$STAGE" -name .DS_Store -delete
 chmod -R u=rwX,go=rX "$STAGE"
 TZ=UTC find "$STAGE" -exec touch -h -t 198001010000 {} +
 rm -f "$ARCHIVE"
-(cd "$STAGE" && find "${ENTRIES[@]}" | LC_ALL=C sort | TZ=UTC zip -X -q -@ "$ARCHIVE")
+(cd "$STAGE" && find "${ENTRIES[@]}" | LC_ALL=C sort | TZ=UTC zip -X -y -q -@ "$ARCHIVE")
 CHECKSUM="$(swift package compute-checksum "$ARCHIVE")"
 echo "$ARCHIVE"
 echo "Checksum: $CHECKSUM"
