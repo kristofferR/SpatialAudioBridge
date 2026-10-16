@@ -26,15 +26,11 @@ pub enum Error {
     Malformed(String),
     /// Well-formed content this renderer does not render, such as TrueHD without Atmos.
     Unsupported(String),
-    /// The stream changed format; a new session can continue from here.
-    Discontinuity(String),
 }
 impl Error {
     pub fn message(&self) -> &str {
         match self {
-            Self::Malformed(message)
-            | Self::Unsupported(message)
-            | Self::Discontinuity(message) => message,
+            Self::Malformed(message) | Self::Unsupported(message) => message,
         }
     }
 }
@@ -357,9 +353,8 @@ impl TrueHd {
                 // a few access units in. Hold the audio until then so no samples are lost.
                 self.held_frames += frames;
                 if self.held_frames > MAX_HELD_FRAMES {
-                    return Err(Error::Unsupported(
-                        "Atmos presentation has no object metadata within 0.5 s".into(),
-                    ));
+                    // Damage can hide it, and a later sync point may carry it.
+                    return Err("Atmos presentation has no object metadata within 0.5 s".into());
                 }
                 self.held.push(input);
                 return Ok(());
@@ -646,9 +641,13 @@ impl Dts {
                 break;
             }
             if self.buffer[core_len..core_len + 4] != [0x64, 0x58, 0x20, 0x25] {
-                return Err(Error::Unsupported(
-                    "DTS:X requires the complete DTS-HD extension after each core frame".into(),
-                ));
+                let message = "DTS:X requires the complete DTS-HD extension after each core frame";
+                // Once DTS:X has decoded, a missing extension is damage, not a core-only track.
+                return Err(if self.seen {
+                    message.into()
+                } else {
+                    Error::Unsupported(message.into())
+                });
             }
             let exss = &self.buffer[core_len..];
             let Some(exss_len) = dca::exss_substream_size(exss) else {
@@ -737,9 +736,7 @@ impl Dts {
             .presentation
             .is_some_and(|previous| previous != presentation)
         {
-            return Err(Error::Discontinuity(
-                "DTS:X presentation changed; begin a new session".into(),
-            ));
+            return Err("DTS:X presentation changed mid-stream".into());
         }
         if metadata.source_count() != presentation.feed_count() {
             return Err("DTS:X PCM / metadata feed count mismatch".into());
@@ -1447,6 +1444,9 @@ mod dts_tests {
             )
             .err()
             .unwrap();
-        assert!(matches!(error, Error::Discontinuity(_)), "{error}");
+        assert_eq!(
+            error,
+            Error::Malformed("DTS:X presentation changed mid-stream".into())
+        );
     }
 }

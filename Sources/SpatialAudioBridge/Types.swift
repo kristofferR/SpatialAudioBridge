@@ -177,8 +177,8 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     /// The track is well formed but will never render, such as TrueHD without Atmos, DTS-HD MA
     /// without DTS:X, Atmos ISF or an unknown DTS:X profile. Fall back for this track for good.
     case unsupported(String)
-    /// The timeline or format changed, such as a timestamp jump, an IEC 61937 pause burst or a new
-    /// DTS:X presentation. Start a new session at the next sync point.
+    /// The timeline or format changed, such as a timestamp jump or an IEC 61937 pause burst. Start
+    /// a new session at the next sync point.
     case discontinuity(String)
     case encoding(String)
     /// The media source could not be read or is not a supported container.

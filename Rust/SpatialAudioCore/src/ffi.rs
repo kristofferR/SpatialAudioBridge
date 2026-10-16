@@ -17,10 +17,9 @@ pub struct Handle {
     ended: bool,
 }
 
-/// `sab_push` results: malformed input or misuse, unsupported content, a format change.
+/// `sab_push` results: malformed input or misuse, and unsupported content.
 const MALFORMED: i32 = -1;
 const UNSUPPORTED: i32 = -2;
-const DISCONTINUITY: i32 = -3;
 
 /// Creates a single-threaded session: codec 1=TrueHD Atmos, 2=DTS:X; layout 12=7.1.4, 16=9.1.6.
 #[unsafe(no_mangle)]
@@ -116,7 +115,6 @@ pub unsafe extern "C" fn sab_push(
             handle.code = match e {
                 Error::Malformed(_) => MALFORMED,
                 Error::Unsupported(_) => UNSUPPORTED,
-                Error::Discontinuity(_) => DISCONTINUITY,
             };
             handle.error = e.message().into();
             handle.code

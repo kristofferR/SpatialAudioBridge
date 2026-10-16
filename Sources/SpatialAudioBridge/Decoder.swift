@@ -51,11 +51,8 @@ final class Decoder: @unchecked Sendable {
             var bytes = [CChar](repeating: 0, count: sab_error(handle, nil, 0))
             _ = sab_error(handle, &bytes, bytes.count)
             let message = String(decoding: bytes.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            switch Int(result) {
-            case SAB_UNSUPPORTED: throw SpatialAudioError.unsupported(message)
-            case SAB_DISCONTINUITY: throw SpatialAudioError.discontinuity(message)
-            default: throw SpatialAudioError.decoding(message)
-            }
+            if Int(result) == SAB_UNSUPPORTED { throw SpatialAudioError.unsupported(message) }
+            throw SpatialAudioError.decoding(message)
         }
         return collector.blocks
     }

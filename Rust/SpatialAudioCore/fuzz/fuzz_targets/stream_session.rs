@@ -103,12 +103,12 @@ fuzz_target!(|input: &[u8]| {
     'stream: for _ in 0..repeats {
         for chunk in payload.chunks(chunk_size) {
             status = push(chunk, false);
-            assert!((-3..=0).contains(&status));
+            assert!((-2..=0).contains(&status));
             if status != 0 { break 'stream; }
         }
     }
     if status == 0 { status = push(&[], true); }
-    assert!((-3..=0).contains(&status));
+    assert!((-2..=0).contains(&status));
     assert!(output.valid, "Invalid PCM callback");
     if cancel { assert!(output.calls <= 1, "Output continued after cancellation"); }
     let message = error(&session);

@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 typedef struct SABHandle SABHandle;
-enum { SAB_MALFORMED = -1, SAB_UNSUPPORTED = -2, SAB_DISCONTINUITY = -3 };
+enum { SAB_MALFORMED = -1, SAB_UNSUPPORTED = -2 };
 /* Source sample frames, not channel samples, including seek pre-roll, excluding encoder padding.
    Events count spans of accepted concealment, not completed recoveries. DTS:X reports zero. */
 typedef struct SABRecoveryStatistics {
@@ -21,8 +21,7 @@ void sab_set_dialogue_normalisation(SABHandle *handle, int32_t enabled);
 /* All calls on a session must be serialized. PCM is borrowed until callback returns.
    Return zero from callback to continue, nonzero to cancel. Input chunks <=65536 bytes.
    end=1 flushes and checks truncation; any error makes the session terminal. Returns zero, or
-   SAB_MALFORMED for damaged input or misuse, SAB_UNSUPPORTED for content the core does not render,
-   SAB_DISCONTINUITY when the stream changed format and a new session can continue. */
+   SAB_MALFORMED for damaged input or misuse and SAB_UNSUPPORTED for content the core does not render. */
 int32_t sab_push(SABHandle *handle, const uint8_t *data, size_t length, int32_t end, SABPCMCallback callback, void *context);
 size_t sab_error(const SABHandle *handle, char *buffer, size_t capacity);
 /* Copies a cumulative snapshot, also after end/error; a new session resets it. Returns -1 on

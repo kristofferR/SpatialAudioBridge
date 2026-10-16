@@ -16,12 +16,12 @@
 |---|---|
 | `.unsupported("… is not yet supported")`, naming objects outside the room, bed distribution, bed downmix, ISF or multiple beds, or `.unsupported("Reserved Atmos zone constraint")` or `"Reserved Atmos warp mode"` | The track uses metadata this renderer does not support. |
 | `.unsupported("This TrueHD stream has no Atmos presentation")` | Plain TrueHD without Atmos. |
-| `.unsupported("Atmos presentation has no object metadata within 0.5 s")` | The stream started without object metadata; possibly damaged or not a standard Atmos stream. |
+| `.decoding("Atmos presentation has no object metadata within 0.5 s")` | The stream started without object metadata; possibly damaged or not a standard Atmos stream. |
 | `.unsupported("The initial Atmos renderer supports 48 kHz tracks")` | A 96 kHz or other non-48 kHz track. |
 | `.unsupported("This stream is not lossless DTS:X")` or `"DTS:X requires the complete DTS-HD extension…"` | DTS core, DTS-HD High Resolution or DTS-HD MA without DTS:X. |
 | `.unsupported("Unknown DTS:X presentation")`, `"…source role does not match its presentation"` or `"…unknown bed fold…"` | A DTS:X presentation this renderer does not recognize, or metadata that does not match it. |
 | `.unsupported("The file has no TrueHD or DTS track")` | No convertible track; check `file.audioTracks`. |
-| `.discontinuity(…)` | The timestamps jumped, an IEC 61937 pause burst marked a gap, or the format changed, such as a new DTS:X presentation. |
+| `.discontinuity(…)` | The timestamps jumped, an IEC 61937 pause burst marked a gap, or the decoded format changed. |
 | `.decoding(…)` | Damaged, truncated or misframed input, such as a TrueHD stream that does not start at a major sync. |
 | `.source("The file does not declare its duration")` | `APACStream` needs the duration for its VOD playlist. |
 | `.source("Could not load the video playlist")` | The video master URL failed or did not return a playlist; check its authorization. |
@@ -30,7 +30,7 @@
 Each kind calls for a different response:
 
 - `.unsupported` describes the track, so every later attempt fails the same way. Remember it and play that track through the usual path from now on.
-- `.discontinuity` is a property of this point in the stream. Start a new session at the next sync point, with its time as `inputStartTime`.
+- `.discontinuity` is a property of this point in the stream. Start a new session at the next sync point, with its time as `inputStartTime`. `APACStream` cannot resume past one, so it ends there like at any other error.
 - `.decoding`, `.source`, `.encoding`, `.coreMedia` and `URLError` can come from damage, the network or the encoder. Fall back for this playback only.
 
 Jellyfin 12.2 returns 401 for the older `api_key` query parameter; use `ApiKey` or a header.
