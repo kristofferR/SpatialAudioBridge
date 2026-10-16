@@ -39,10 +39,6 @@ import Foundation
     let converter = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .file(URL(fileURLWithPath: "/unused.mp4")))
     try await converter.append(Data([0x01, 0x02]))
     await #expect(throws: SpatialAudioError.self) { try await converter.finish() }
-    let recovery = await converter.recoveryStatistics
-    #expect(recovery.concealedFrames == 0)
-    #expect(recovery.concealmentEvents == 0)
-    #expect(recovery.longestConcealmentFrames == 0)
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)

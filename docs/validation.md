@@ -28,27 +28,11 @@ Validated on 2026-10-10 with Xcode 27.1, Swift 6.4, macOS 27.0.1 and Rust 1.99.0
 
 ### TrueHD parser presentation selection
 
-The pinned decoder can parse only the substreams needed by presentation 3, which SAB already decodes. Its presentation map includes the dependent substreams automatically; dialogue normalization remains in the major-sync metadata. An exploratory Linux release-build comparison on 16 October 2026 used one warm-up and 100 alternating measured passes of each selection:
-
-| Pinned public vector | Access units | All/selected substream masks | Median parser time, all/selected |
-|---|---:|---|---|
-| `fba_atmos_obj.mlp` | 140 | 15 / 8 | 571 / 243 µs |
-| `fba_atmos_cbi.mlp` | 136 | 15 / 8 | 531 / 244 µs |
-| `fba_atmos_dimtrim.mlp` | 400 | 15 / 15 | 1030 / 1030 µs |
-| `fba_spliced.mlp` | 512 | 7 / 7 | 542 / 541 µs |
-
-The parser experiment preserved decoded presentation PCM, sample counts, channel labels, duplicate flags, major-sync fields and object/extra metadata on all four intact vectors. These are tiny vectors and parser-only wall times, excluding extraction, decoding and comparison work; they do not establish a film conversion or playback speedup. The non-Atmos splice vector is a control, not new supported input.
-
-**Retain full parsing.** Corrupting the middle of an access unit five units before the next major sync in the public object vector exposes a behavior difference: full parsing detects the damage and conceals 200 source frames, while selecting only presentation 3 skips the damaged unused substream and reports no concealment. The measured parsing gain does not justify changing this established validation/recovery contract. No production presentation selection was changed.
-
-`scripts/test-presentation-selection.sh` locates the public assets in Cargo's pinned `truehd` checkout and runs the explicit comparison tests. They cover both output layouts, dialogue normalization on/off, 317/4096-byte chunks, truncation, removed access units, payload damage and fresh sessions, including unchanged unsupported-input rejection. No private media or copied media artifact is needed. Core CI runs this helper separately from the private-fixture tests.
-
-To reproduce the parser-only timing/equality experiment on Linux, pass one of those public vector paths to `cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" --example presentation_selection -- "VECTOR_PATH"`. The program alternates selection order and reports masks, equality and median parser time. The separate core tests establish the corruption difference; the timing example accepts intact vectors.
+Parsing only presentation 3's substreams roughly halved parser time on the pinned decoder's public vectors (16 October 2026) and left intact output unchanged, but it skipped damage in unused substreams that full parsing detects and conceals. Full parsing stays.
 
 ### Encoding and packaging
 
-The opt-in [direct encoder profile](encoder-performance.md) records timing, process memory and
-packet hashes in a separate cloud test process before evaluating buffer reuse.
+Reusing the direct encoder's output buffers (16 October 2026) produced identical packets and no measured speed or memory benefit, so the encoder still allocates per call.
 
 | Check | Result |
 |---|---|
@@ -78,28 +62,9 @@ On 2026-10-15, [Core run 38806510480](https://github.com/kristofferR/SpatialAudi
 
 All values are dB relative to full scale; reconstructed values are the four-times estimates described below. File and live profiles produced identical peak measurements for each matching case in this short run. The multichannel decoded sample peak was 0.555 dB above the encoder-input sample peak and exceeded full scale. The 8 kHz reconstruction peak already exceeded full scale before encoding and changed little after decoding, so it is not evidence of APAC adding that overshoot. Adding +3 dB after the limiter raised decoded peaks by approximately 3 dB, as expected.
 
-The −0.1 dBFS limiter ceiling therefore applies to its output samples, not post-APAC samples or reconstructed peaks. Keep that ceiling unchanged for now: these short probes establish the limitation but do not establish a universally sufficient replacement margin. That original experiment did not measure the direct encoder; its separate matrix is described below. Broader signal/configuration coverage and receiver behavior remain outside these synthetic checks.
+Reconstructed values use a four-times, 33-tap windowed-sinc estimate, not a certified true-peak meter. A later run fed the same probes straight through `APACEncoder`; all 32 direct and asset-writer peaks matched. The −0.1 dBFS ceiling therefore applies to the limiter's output samples, not to decoded APAC or reconstructed peaks, and these short probes do not justify a different margin. The measurement harness was removed once the decision was made.
 
-#### Reproduction
-
-The Core workflow generates two-second synthetic 1 kHz and 8 kHz tones, isolated transients and multichannel tones on Linux with `examples/peak_probes.rs`. It runs the production limiter source on each signal in 7.1.4 and 9.1.6, preserving the input and limited PCM as temporary little-endian Float32 artifacts. No private media is used or committed.
-
-On the Apple runner, `PeakMeasurementTests` feeds that limited PCM into the transcoder's existing accumulator, encodes file and live fragmented output, and reads it back through `AVAssetReader`. It checks finite PCM, exact presented duration and the reported encoder-input peak. Cases use both 0 dB and +3 dB `gainDB`: that gain is applied **after** the limiter, so it can intentionally exceed the limiter ceiling. Bitrate and sync frequency stay at the layout's defaults; the JSON records those settings, queried priming and the runner's OS.
-
-`measureDirectAPACPeaks` feeds the same probes and post-limiter gains through `APACEncoder` in uneven 317-frame chunks, covering both layouts and live/offline content profiles with the default DRC settings. Core Audio decodes the raw packets; measurements use exactly 96,000 frames after the queried priming, excluding trailing packet padding. The log retains raw decoded frames and packet count separately from that source-length span. Each JSON record identifies `direct`, `file-writer` or `fragmented-writer`, so matching cases can be compared without attributing padding or priming to source peaks. The direct path does not involve a sample-buffer renderer or establish receiver output.
-
-Each `SAB_PEAK_MEASUREMENT` JSON line reports sample peaks before limiting, after limiting, after gain and after decoding, plus reconstructed-peak estimates after limiting, gain and decoding. The `apac-peak-measurements` artifact retains the test log. These are measurements, not assertions that APAC preserves a ceiling. The reconstruction estimate evaluates four phases with a 33-tap Blackman-windowed sinc filter, calibrated with a known intersample-peak tone; it is not a certified true-peak meter or a bound over every continuous-time peak. Separate input and decoded estimates avoid attributing pre-existing intersample peaks to APAC.
-
-To regenerate the inputs on Linux:
-
-```sh
-cargo run --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" \
-  --example peak_probes -- "/tmp/sab-peak-probes"
-```
-
-The Apple test enables the experiment only when `SAB_PEAK_PROBES_DIR` names that artifact directory. It measures the asset-writer file/fragment paths and the direct packet encoder, not receiver output or HDMI behavior. Aggregate limiter/recovery diagnostics remain separate work; this experiment does not change the limiter or public API.
-
-A later [Apple run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38808096964) returned 117,760 decoded frames instead of 96,000 for the live 9.1.6 multichannel case. The duration mismatch remains unexplained. The test retains a failing synthetic MP4 when `SAB_PEAK_FAILURES_DIR` is set and logs container timings and a second read; a successful second read does not erase the original failure. For a deliberate diagnostic run on an Apple build host, `SAB_PEAK_STRESS=1` repeats that case 32 times per gain. Required PR CI leaves this flag unset and runs the normal 32-case matrix, with the exact-duration assertion intact.
+The same harness exposed an intermittent duration error in fragmented output ([#56](https://github.com/kristofferR/SpatialAudioBridge/issues/56)): `AVAssetWriter` sometimes repeats its final fragment while finishing, occasionally before the original. The segment delegate now delivers fragments in order, drops a repeated fragment and trims the last one once.
 
 ### APAC dynamic-range-control buffering
 
@@ -107,7 +72,7 @@ A later [Apple run](https://github.com/kristofferR/SpatialAudioBridge/actions/ru
 
 Each `SAB_DRC_MEASUREMENT` JSON line records submitted frames at the first pre-flush output, output count before flushing, queried priming, decoded frame count, sample peak, RMS and OS/configuration. A null first-output value means no output was observed before flushing the four-second input, not infinite latency. Writer callback scheduling makes its submitted-frame observation an upper bound; it is not a precise count of frames consumed by the native codec. Standalone files have no segment callbacks, so their first-output and pre-flush counts are not measurements of buffering.
 
-The direct decoder's raw frame count includes priming and trailing packet padding; its peak/RMS measurements use the source-length span after priming. The native file reader checks presented duration and contiguous timestamps. Core CI retains these lines in the package-test log within `apac-peak-measurements`, together with synthetic writer output when `SAB_DRC_OUTPUTS_DIR` is set. Writer callback observations are also logged before decoding so a rejected file does not lose them. This experiment does not measure player seek recovery, receiver behavior or device latency, and its four-second input cannot determine longer lookahead exactly.
+The direct decoder's raw frame count includes priming and trailing packet padding; its peak/RMS measurements use the source-length span after priming. The native file reader checks presented duration and contiguous timestamps. Core CI retains these lines in the package-test log within the `package-test-output` artifact, together with synthetic writer output when `SAB_DRC_OUTPUTS_DIR` is set. Writer callback observations are also logged before decoding so a rejected file does not lose them. This experiment does not measure player seek recovery, receiver behavior or device latency, and its four-second input cannot determine longer lookahead exactly.
 
 The [first measurement run](https://github.com/kristofferR/SpatialAudioBridge/actions/runs/38821687971) on macOS 26.6.2 showed first direct output after 73,728 submitted frames with live Capture DRC and 1,024 with DRC disabled, for both layouts. Offline Movie DRC produced no packet before flushing four seconds; disabling it also gave first output at 1,024 frames. Direct decoded duration, peak and RMS matched between settings. However, all four fragmented-writer outputs with DRC disabled failed native decoding with `Cannot Decode` / `bada`; the corresponding default-DRC cases passed. This is unresolved and does not support changing writer defaults.
 
@@ -242,7 +207,7 @@ An optional argument selects another release ZIP. The matching unisolated Cargo 
 
 ### Package and renderer coverage
 
-`RendererBackpressureTests` drives the production renderer with a controlled internal output. It changes capacity mid-batch and during replay, cancels or resets suspended submissions, delivers flush completions after failure/reset, and covers empty/short final output. Finalization cases supply synthetic PCM with controlled decoder completion; a separate real-decoder case preserves terminal rejection of an empty compressed stream. It checks packet ordering, timestamps, retained priming trims and terminal state without private media. These deterministic output-boundary checks do not prove native route-change/refill continuity or receiver behavior.
+`RendererBackpressureTests` drives the production renderer with a controlled internal output. It changes capacity mid-batch and during replay, cancels or resets suspended submissions, delivers flush completions after failure/reset, refuses overlapping input calls, and covers empty/short final output. Finalization cases supply synthetic PCM with controlled decoder completion; a separate real-decoder case preserves terminal rejection of an empty compressed stream. It checks packet ordering, timestamps, retained priming trims and terminal state without private media. These deterministic output-boundary checks do not prove native route-change/refill continuity or receiver behavior.
 
 `PresentationTimingTests` feeds synthetic clicks into the transcoder's existing PCM accumulator, then reads MP4 and concatenated fragmented MP4 through `AVAssetReader`. It checks decoded timestamps and duration, click placement within 1 ms, fragment continuity and final-packet trimming at zero and nonzero source starts. The native reader presents both forms from movie time zero, including the concatenated fragments, so the tests separately inspect each fragment's stored `tfdt` to verify its original media timestamp. This reader behavior does not establish HLS playback timing. A fresh seek session includes a click in discarded pre-roll to detect leakage into the new timeline. Priming is queried; the click detector uses the main impulse peak and excludes a 50 ms ringing window from silence checks. These tests use the offline profile for files and the live profile for fragments, with 7.1.4 output and uneven PCM blocks.
 

@@ -61,7 +61,7 @@ The decoder rejects objects outside the room (distance metadata, which TS 103 44
 
 ### Damaged access units
 
-Discs can join two clips partway through a track. The access unit before the join is cut short, and those after it cannot be decoded until the next major sync, because they follow a restart the join removed. The decoder replaces an access unit that fails to parse or decode with silence of its length, and every one after it up to the next major sync, then resumes there. Every sample is kept, so timing is unchanged. Two of 265 Atmos films in the [library census](validation.md#library-census) have such a join, concealing 42.5 ms and 22.5 ms. A failure at that major sync, no major sync within 128 access units, a stream that ends before it, or a failure before any audio has decoded is rejected.
+Discs can join two clips partway through a track. The access unit before the join is cut short, and those after it cannot be decoded until the next major sync, because they follow a restart the join removed. The decoder replaces an access unit that fails to parse or decode with silence of its length, and every one after it up to the next major sync, then resumes there. Every sample is kept, so timing is unchanged. Two of 265 Atmos films in the [library census](validation.md#library-census) have such a join, concealing 42.5 ms and 22.5 ms. A failure at that major sync, no major sync within 128 access units, or a failure before any audio has decoded is rejected. A stream that ends before the next major sync keeps its concealed silence.
 
 ## DTS:X
 

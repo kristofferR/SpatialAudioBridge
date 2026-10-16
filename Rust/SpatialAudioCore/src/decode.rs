@@ -203,9 +203,9 @@ impl TrueHd {
             }
             if self.normalise_dialogue
                 && let Some(extra) = au
-                .major_sync_info
-                .as_ref()
-                .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
+                    .major_sync_info
+                    .as_ref()
+                    .and_then(|sync| sync.channel_meaning.extra_channel_meaning())
             {
                 self.dialogue = dialogue_gain(extra.sixteench_dialogue_norm);
             }
@@ -245,9 +245,7 @@ impl TrueHd {
         if self.bytes - self.consumed > 64 * 1024 {
             return Err("TrueHD sync not found within 64 KiB".into());
         }
-        if end && let Some((error, _)) = self.lost.take() {
-            return Err(error);
-        }
+        // A loss in the final access units was already concealed unit by unit, as mid-stream.
         if end && (self.consumed != self.bytes || !self.spatial) {
             return Err("Empty or truncated TrueHD stream".into());
         }
@@ -257,7 +255,8 @@ impl TrueHd {
     /// Conceals an access unit that failed to parse or decode, and those after it up to the
     /// next major sync, with silence of their length. Discs join clips this way: the access
     /// unit before the join is cut short, and those after it lack the restart they follow. A
-    /// failure at that major sync, or none within the longest interval, ends the session.
+    /// failure at that major sync, or none within the longest interval, ends the session; the
+    /// stream ending first does not.
     fn lose(
         &mut self,
         restarting: Option<String>,
@@ -799,138 +798,6 @@ fn dts_spatial_speaker(channel: dca::SpatialChannel) -> Speaker {
 }
 
 #[cfg(test)]
-mod presentation_selection_tests {
-    use super::*;
-
-    #[derive(PartialEq)]
-    struct Snapshot {
-        pcm: Vec<f32>,
-        blocks: Vec<(usize, u32, usize)>,
-        recovery: RecoveryStatistics,
-        result: Result<(), String>,
-    }
-
-    fn run(data: &[u8], chunk: usize, layout: Layout, normalise: bool, narrow: bool) -> Snapshot {
-        let mut core = Core::new(1, layout).unwrap();
-        core.set_dialogue_normalisation(normalise);
-        if narrow && let Source::TrueHd(decoder) = &mut core.source {
-            decoder
-                .parser
-                .set_required_presentations(&[false, false, false, true]);
-        }
-        let mut pcm = Vec::new();
-        let mut blocks = Vec::new();
-        let mut collect = |block: Pcm| {
-            blocks.push((block.frames, block.rate, block.channels));
-            pcm.extend(block.data);
-            Ok(())
-        };
-        let result = (|| {
-            for bytes in data.chunks(chunk) {
-                core.push(bytes, false, &mut collect)?;
-            }
-            core.push(&[], true, &mut collect)
-        })();
-        Snapshot {
-            pcm,
-            blocks,
-            recovery: core.recovery_statistics(),
-            result,
-        }
-    }
-
-    #[test]
-    #[ignore = "uses pinned upstream public vectors; run scripts/test-presentation-selection.sh"]
-    fn public_vectors_keep_pcm_timing_normalisation_and_errors() {
-        let directory =
-            std::path::PathBuf::from(std::env::var("SAB_TRUEHD_PUBLIC_FIXTURES_DIR").unwrap());
-        for name in [
-            "fba_atmos_obj.mlp",
-            "fba_atmos_cbi.mlp",
-            "fba_atmos_dimtrim.mlp",
-            "fba_spliced.mlp",
-        ] {
-            let data = std::fs::read(directory.join(name)).unwrap();
-            for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
-                for normalise in [false, true] {
-                    for bytes in [&data[..], &data[..data.len() - 1]] {
-                        let baseline = run(bytes, 4096, layout, normalise, false);
-                        if name == "fba_atmos_obj.mlp" && bytes.len() == data.len() {
-                            assert!(baseline.result.is_ok() && !baseline.pcm.is_empty());
-                        }
-                        for chunk in [317, 4096] {
-                            let selected = run(bytes, chunk, layout, normalise, true);
-                            assert!(
-                                selected == baseline,
-                                "{name}, chunk={chunk}, normalise={normalise}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    #[ignore = "uses pinned upstream public vectors; run scripts/test-presentation-selection.sh"]
-    fn full_parsing_preserves_damage_detection_that_narrowing_skips() {
-        let directory =
-            std::path::PathBuf::from(std::env::var("SAB_TRUEHD_PUBLIC_FIXTURES_DIR").unwrap());
-        let data = std::fs::read(directory.join("fba_atmos_obj.mlp")).unwrap();
-        let mut extractor = Extractor::default();
-        extractor.push_bytes(&data);
-        let mut frames = Vec::new();
-        while let Some(Ok(frame)) = extractor.next() {
-            frames.push(frame);
-        }
-        let sync = frames
-            .iter()
-            .enumerate()
-            .find(|(i, frame)| *i > 5 && frame.is_major_sync())
-            .unwrap()
-            .0;
-        let (start, end) = (
-            frames[sync - 5].offset as usize,
-            frames[sync].offset as usize,
-        );
-        let spliced: Vec<_> = data[..start].iter().chain(&data[end..]).copied().collect();
-        let mut damaged = data.clone();
-        // Match the existing fixture recovery probe: damage the access unit's payload.
-        damaged[start + frames[sync - 5].as_ref().len() / 2] ^= 0xff;
-        for layout in [Layout::SevenOneFour, Layout::NineOneSix] {
-            for normalise in [false, true] {
-                for bytes in [&damaged[..], &spliced[..]] {
-                    let baseline = run(bytes, 4096, layout, normalise, false);
-                    if bytes.len() == data.len() {
-                        assert!(
-                            baseline.result.is_ok() && baseline.recovery.concealment_events > 0,
-                            "result={:?}, recovery={:?}",
-                            baseline.result,
-                            baseline.recovery
-                        );
-                    }
-                    for chunk in [317, 4096] {
-                        assert!(run(bytes, chunk, layout, normalise, false) == baseline);
-                        let narrow = run(bytes, chunk, layout, normalise, true);
-                        if bytes.len() == data.len() {
-                            assert_eq!(baseline.recovery.concealed_frames, 200);
-                            assert_eq!(narrow.recovery, RecoveryStatistics::default());
-                            assert!(narrow.result.is_ok());
-                        } else {
-                            assert!(narrow == baseline);
-                        }
-                        assert!(
-                            run(&data, chunk, layout, normalise, false)
-                                == run(&data, 4096, layout, normalise, true)
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
 mod recovery_tests {
     use super::*;
 
@@ -941,21 +808,45 @@ mod recovery_tests {
         let mut discard = |_: Pcm| Ok(());
         decoder.lose(None, "first".into(), &mut discard).unwrap();
         decoder.conceal(&mut discard).unwrap();
-        assert_eq!(decoder.recovery, RecoveryStatistics {
-            concealed_frames: 80, concealment_events: 1, longest_concealment_frames: 80,
-        });
+        assert_eq!(
+            decoder.recovery,
+            RecoveryStatistics {
+                concealed_frames: 80,
+                concealment_events: 1,
+                longest_concealment_frames: 80,
+            }
+        );
         // A separate loss starts a new span without resetting the cumulative snapshot.
         decoder.lost = None;
         decoder.lose(None, "second".into(), &mut discard).unwrap();
-        for _ in 1..MAX_SYNC_INTERVAL { decoder.conceal(&mut discard).unwrap(); }
+        for _ in 1..MAX_SYNC_INTERVAL {
+            decoder.conceal(&mut discard).unwrap();
+        }
         let before = decoder.recovery;
         assert_eq!(before.concealed_frames, (MAX_SYNC_INTERVAL as u64 + 2) * 40);
         assert_eq!(before.concealment_events, 2);
-        assert_eq!(before.longest_concealment_frames, MAX_SYNC_INTERVAL as u64 * 40);
+        assert_eq!(
+            before.longest_concealment_frames,
+            MAX_SYNC_INTERVAL as u64 * 40
+        );
         assert!(decoder.conceal(&mut discard).is_err());
-        assert_eq!(decoder.recovery, before, "rejected concealment is not counted");
+        assert_eq!(
+            decoder.recovery, before,
+            "rejected concealment is not counted"
+        );
+        // A stream that ends inside a concealed span keeps its silence instead of failing.
+        let mut ending = TrueHd::new(Layout::SevenOneFour);
+        ending.unit = Some((40, 12));
+        ending.lose(None, "tail".into(), &mut discard).unwrap();
+        ending.spatial = true;
+        assert!(ending.push(&[], true, &mut discard).is_ok());
         for codec in [1, 2] {
-            assert_eq!(Core::new(codec, Layout::SevenOneFour).unwrap().recovery_statistics(), RecoveryStatistics::default());
+            assert_eq!(
+                Core::new(codec, Layout::SevenOneFour)
+                    .unwrap()
+                    .recovery_statistics(),
+                RecoveryStatistics::default()
+            );
         }
     }
 }
@@ -1278,7 +1169,10 @@ mod dts_tests {
             // Remove metadata bytes only; decoded bed/feed samples and presentation stay intact.
             frame.x_payload.truncate(4);
             assert_eq!(XPresentation::detect(&frame), Some(presentation));
-            let error = decoder.render(&frame).err().expect("damaged metadata must fail");
+            let error = decoder
+                .render(&frame)
+                .err()
+                .expect("damaged metadata must fail");
             assert!(error.starts_with("DTS:X spatial metadata:"), "{error}");
             assert_eq!(frame.samples, original_bed);
             assert_eq!(frame.x_samples, original_feeds);

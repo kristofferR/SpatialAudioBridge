@@ -12,32 +12,51 @@ private final class WriterCancellation: @unchecked Sendable {
     func cancel() { writer.cancelWriting() }
 }
 
+/// Delivers fragments in order, under one lock, so the last can be held and trimmed.
 @available(macOS 26, iOS 26, tvOS 26, *)
-private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
+final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
     let handler: @Sendable (APACSegment) throws -> Void
     private let lock = NSLock()
     private var failure: String?
     private var holding = false
+    private var closed = false
     private var held: APACSegment?
     private var coded = CMTime.zero
+    /// The end of the latest accepted fragment and its bytes, to recognize a repeated fragment.
+    private var acceptedEnd = CMTime.negativeInfinity
+    private var accepted: Data?
     var error: String? { lock.withLock { failure } }
     init(_ handler: @escaping @Sendable (APACSegment) throws -> Void) { self.handler = handler }
 
     func assetWriter(_ writer: AVAssetWriter, didOutputSegmentData data: Data,
                      segmentType: AVAssetSegmentType, segmentReport: AVAssetSegmentReport?) {
         let track = segmentReport?.trackReports.first
-        let segment = APACSegment(kind: segmentType == .initialization ? .initialization : .media,
-                                  data: Data(data), startTime: track?.earliestPresentationTimeStamp,
-                                  duration: track?.duration)
-        let ready: APACSegment? = lock.withLock {
-            guard segment.kind == .media else { return segment }
+        receive(APACSegment(kind: segmentType == .initialization ? .initialization : .media,
+                            data: Data(data), startTime: track?.earliestPresentationTimeStamp,
+                            duration: track?.duration))
+    }
+
+    func receive(_ segment: APACSegment) {
+        lock.withLock {
+            guard segment.kind == .media else { return deliver(segment) }
+            guard !closed else { return record("APAC fragment arrived after the last one") }
+            if let start = segment.startTime, let duration = segment.duration {
+                // AVAssetWriter can repeat its final fragment while finishing, sometimes before
+                // the original (#56). Keep the first copy; differing content is a real overlap.
+                // Reported boundaries may round by a frame, so overlap means half a packet.
+                if CMTimeAdd(start, CMTime(value: 512, timescale: 48_000)) < acceptedEnd {
+                    if segment.data != accepted { record("APAC fragments overlap") }
+                    return
+                }
+                acceptedEnd = CMTimeAdd(start, duration)
+                accepted = segment.data
+            }
             coded = CMTimeAdd(coded, segment.duration ?? .zero)
-            guard holding else { return segment }
+            guard holding else { return deliver(segment) }
             // While finishing, each fragment waits until the next shows it is not the last.
-            defer { held = segment }
-            return held
+            if let held { deliver(held) }
+            held = segment
         }
-        if let ready { deliver(ready) }
     }
 
     /// Holds back fragments from now on, so the last one can be trimmed once writing completes.
@@ -46,17 +65,27 @@ private final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked
     /// Delivers the held last fragment, ending it at the source's last frame: `sourceFrames` after
     /// the encoder's priming. Fragments otherwise end with the final packet's padding.
     func deliverLastSegment(sourceFrames: Int64, priming: Int64) {
-        guard let (segment, coded) = lock.withLock({ held.map { ($0, coded) } }), let duration = segment.duration else { return }
-        let padding = CMTimeConvertScale(coded, timescale: 48_000, method: .default).value - priming - sourceFrames
-        guard (1..<1024).contains(padding), let trimmed = trimmingLastSample(of: segment.data, by: UInt32(padding)) else {
-            return deliver(segment)
+        lock.withLock {
+            closed = true
+            guard let segment = held else { return }
+            held = nil
+            let padding = CMTimeConvertScale(coded, timescale: 48_000, method: .default).value - priming - sourceFrames
+            guard let duration = segment.duration, (1..<1024).contains(padding), let trimmed = trimmingLastSample(of: segment.data, by: UInt32(padding)) else {
+                return deliver(segment)
+            }
+            deliver(APACSegment(kind: .media, data: trimmed, startTime: segment.startTime,
+                                duration: CMTimeSubtract(duration, CMTime(value: padding, timescale: 48_000))))
         }
-        deliver(APACSegment(kind: .media, data: trimmed, startTime: segment.startTime,
-                            duration: CMTimeSubtract(duration, CMTime(value: padding, timescale: 48_000))))
     }
 
+    /// Call with the lock held.
     private func deliver(_ segment: APACSegment) {
-        do { try handler(segment) } catch { lock.withLock { if failure == nil { failure = String(describing: error) } } }
+        do { try handler(segment) } catch { record(String(describing: error)) }
+    }
+
+    /// Call with the lock held.
+    private func record(_ error: String) {
+        if failure == nil { failure = error }
     }
 }
 
@@ -86,10 +115,6 @@ public actor SpatialAudioTranscoder {
     private var laced = 0
     /// Whether the decoder holds input to flush.
     private var hasInput = false
-
-    /// Cumulative decoder concealment, readable while accepting input and after completion or
-    /// failure. A fresh session resets it; sample frames include any discarded seek pre-roll.
-    public var recoveryStatistics: SpatialAudioRecoveryStatistics { decoder.recoveryStatistics }
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
