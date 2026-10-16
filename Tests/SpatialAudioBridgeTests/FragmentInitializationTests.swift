@@ -67,18 +67,28 @@ private final class InitializationSegments: @unchecked Sendable {
     var data: Data { lock.withLock { bytes } }
 }
 
-/// Only the ordinary 32-bit boxes in these single-track writer outputs are accepted.
+/// Replaces the ordinary 32-bit initialization boxes, skipping the standalone file's wide mdat.
 @available(macOS 26, iOS 26, tvOS 26, *)
 private func replacingAPACEntry(in fragmented: Data, from standalone: Data) throws -> Data {
     let path = ["moov", "trak", "mdia", "minf", "stbl", "stsd", "apac"]
     func boxes(_ data: Data, path: ArraySlice<String>, range: Range<Int>) throws -> [Range<Int>] {
         var offset = range.lowerBound
         while offset + 8 <= range.upperBound {
-            let size = data[offset..<offset + 4].reduce(0) { ($0 << 8) | Int($1) }
-            try #require(size >= 8 && size <= range.upperBound - offset, "Expected a bounded 32-bit box")
+            var size = data[offset..<offset + 4].reduce(0) { ($0 << 8) | Int($1) }
+            var header = 8
+            if size == 1 {
+                try #require(offset + 16 <= range.upperBound)
+                let wide = data[offset + 8..<offset + 16].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+                size = try #require(Int(exactly: wide))
+                header = 16
+            } else if size == 0 {
+                size = range.upperBound - offset
+            }
+            try #require(size >= header && size <= range.upperBound - offset, "Expected a bounded box")
             let box = offset..<offset + size
             let kind = String(decoding: data[offset + 4..<offset + 8], as: UTF8.self)
             if kind == path.first {
+                try #require(header == 8, "Only 32-bit initialization boxes are rewritten")
                 if path.count == 1 { return [box] }
                 let children = offset + (kind == "stsd" ? 16 : 8)
                 return [box] + (try boxes(data, path: path.dropFirst(), range: children..<box.upperBound))
