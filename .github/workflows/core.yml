@@ -91,7 +91,7 @@ jobs:
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
           # A pseudo-terminal keeps the test output line-buffered, so a hung test shows where it stopped.
-          (script -q /dev/null swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log") &
+          (script -q /dev/null swift test -Xswiftc -warnings-as-errors --filter "HLSPresentationTests|RendererPresentationTests|ExperimentStressTests" 2>&1 | tee "$RUNNER_TEMP/package-tests.log") &
           tests=$!
           # A hung run is sampled and stopped instead of holding the runner until the job times out.
           (

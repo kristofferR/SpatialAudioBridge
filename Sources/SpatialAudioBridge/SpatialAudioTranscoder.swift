@@ -51,6 +51,7 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
                 // Reported boundaries may round by a frame, so overlap means half a packet.
                 let content = fragmentContent(segment.data)
                 if CMTimeAdd(start, CMTime(value: 512, timescale: 48_000)) < acceptedEnd {
+                    print("SAB_FRAGMENT_REPEAT start=\(start.seconds) duration=\(duration.seconds) acceptedEnd=\(acceptedEnd.seconds) same=\(content == accepted) holding=\(holding) coded=\(coded.seconds)")
                     if content != accepted { record("APAC fragments overlap") }
                     return
                 }
