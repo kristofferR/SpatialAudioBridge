@@ -45,3 +45,17 @@ private func burst(type: UInt8) -> Data {
     #expect(sink.failure == nil)
     #expect(sink.write(Data(count: 4)) == 4)
 }
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func passthroughSinkFailsATimelineThatEndsInsideABurst() async throws {
+    let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
+    defer { sink.close() }
+    sink.begin(at: .zero)
+    #expect(sink.write(burst(type: 0x16).prefix(12)) == 12)
+    sink.end()
+    let deadline = ContinuousClock.now + .seconds(3)
+    while sink.failure == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(sink.failure != nil)
+    #expect(!sink.isReady)
+    #expect(await sink.queuedAhead == .zero)
+}
