@@ -119,7 +119,7 @@ Symbol documentation is available in Xcode through DocC.
 Add the package from a release, in Xcode or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.6.2")
+.package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "2.0.0")
 ```
 
 Release tags download the Rust core as a checksummed XCFramework for Macs, Apple TV, iPhone and iPad, and their simulators (universal for Macs and the iOS simulator), so the host needs no Rust toolchain. It is a dynamic framework that exports only the core's C functions, which SwiftPM and Xcode embed in the app, so it links beside other Rust libraries, such as LibDovi. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
