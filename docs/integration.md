@@ -52,6 +52,22 @@ For engines that remux on the device and lack spatial conversion, replacing the 
 
 For players that switch engines per item, routing TrueHD Atmos and DTS:X items to an `AVPlayer` with `APACStream` is the least invasive option. Route by the server's Atmos or DTS:X label there: sending every lossless track would move plain TrueHD and DTS-HD MA from the other engine's lossless decode to the server's lossy fallback whenever the library refuses them. The cost is that alternate DTS:X presentations labelled plain `DTS-HD MA` stay on the other engine. React Native apps can wrap either path in their native playback module; the public API exchanges only URLs, data, times and configuration.
 
+## Authentication
+
+`AVURLAssetHTTPHeaderFieldsKey` is not public API. The tvOS 27.0 and macOS 27.0 SDK headers do not declare it, although AVFoundation exports the symbol, and Apple documents no behavior for it. Whether its headers reach HLS variant playlists, segments and keys is therefore not established, and SpatialAudioBridge has not tested it. The public alternative is `AVURLAssetHTTPCookiesKey`: its [documentation](https://developer.apple.com/documentation/avfoundation/avurlassethttpcookieskey) in `AVAsset.h` says HLS issues variant index, media and key requests to other paths and hosts, and that cookies passed with the key are available to those requests, subject to the standard cross-site policy.
+
+With `APACStream`, the library makes some requests and `AVPlayer` makes the rest:
+
+| Request | Made by | Authentication |
+|---|---|---|
+| Video master | `APACStream.start`, through `options.session` | `videoHeaders` |
+| MKV byte ranges | `HTTPByteSource` | Its `headers` |
+| Upstream subtitle playlists and WebVTT segments | The stream, through `URLSession.shared` | None; the URLs must authenticate on their own |
+| Loopback master, `audio.m3u8`, APAC segments, served subtitles | `AVPlayer`, to `127.0.0.1` | None needed; served only on the device, under a random path |
+| Variant playlists, video segments, I-frame playlists, keys, other subtitle segments | `AVPlayer`, directly to the server | The URLs must authenticate on their own |
+
+The master's URIs are absolute upstream URLs. If `AVPlayer` honors headers passed with the loopback asset, they reach the loopback server, which ignores them; whether they also reach the server's URLs is the undocumented part. Cookies for the server's domain would follow the documented rule, but neither route has been tested here, and the server must accept that form of authentication. Put the credential in the URLs, as Jellyfin's `ApiKey` parameter does; see [media servers](media-servers.md). Hosts serving their own HLS with `SpatialAudioTranscoder` face the same rule for the URLs their playlists reference.
+
 ## Requirements
 
 - tvOS 26, iOS 26 or macOS 26 for the API. The package builds back to tvOS and iOS 13 and macOS 10.15, so an app that supports older systems can depend on it unconditionally: wrap its use in `if #available(tvOS 26, iOS 26, macOS 26, *)` and keep the existing audio path otherwise.

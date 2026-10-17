@@ -11,8 +11,8 @@ This module does not link the Rust core, so players can adopt it independently o
 ```swift
 try AtmosOutputActivator.configureAudioSession()
 let atmos = AtmosOutputActivator()
-// Every item plays APAC here. When items also offer other audio, pass a predicate that
-// returns true only while the APAC rendition is selected.
+// Every item plays APAC here. When items also offer other audio, name the APAC rendition
+// instead: atmos.attach(to: player, apacRenditions: ["Spatial Audio"])
 atmos.attach(to: player)
 ```
 
