@@ -99,18 +99,22 @@ The console shows the startup time, each change of the player's state, and a sta
 STREAM ready in 2.1953005 seconds: track 2 A_TRUEHD en
 [APACStream] seg1024 after 1253 ms
 STREAM waiting → playing after 4.04 s at t=3274.0
-STREAM t=3275.0 rate=1.0 item=1 silentAtmos=on conversion=2.27x available=2165 MB errors=-12318 541.mp4 Segment exceeds specified bandwidth for variant
+STREAM t=3275.0 rate=1.0 item=1 silentAtmos=on conversion=2.27x footprint=212 MB available=2165 MB errors=-12318 541.mp4 Segment exceeds specified bandwidth for variant
 ```
 
 - `t`, `rate` and `item` are the player's time, rate and item status (1 is ready).
 - `silentAtmos` is `AtmosOutputActivator.isActive`.
 - `conversion` is `APACStream.conversionSpeed`. Below about 1.2, playback will stall.
-- `available` is the memory the app may still allocate, from `os_proc_available_memory()`. A steady value means no growth.
+- `footprint` is the process's physical footprint, the figure the system's memory limit applies to; `available` is what the app may still allocate, from `os_proc_available_memory()`. A steady footprint means no growth.
 - `errors` are the item's last two error log entries. Jellyfin's −12318 is harmless; see [troubleshooting](../../docs/troubleshooting.md).
 - Each state change is logged with how long the previous state lasted, which measures seek recovery.
+
+About ten seconds after startup the app logs `durations:` for the source file, the audio and video playlists and the player item, and `ended at` when the item plays to its end, so an early or late ending can be traced to one of them.
 
 In renderer mode, lines report the synchronizer's time and rate and the renderer's status (1 is rendering).
 
 The app also shows a recovery a host may want. After rapid seeks, `AVPlayer` sometimes waited indefinitely, after Jellyfin aborted a video segment mid-response or after `AVPlayer` dropped a connection. If the player waits for more than 20 s, the app replaces the item at the pending seek target, or at the current position when none is pending, and logs `recovering a stalled item`. It learns the remote's seek targets from `AVPlayerViewControllerDelegate`. The wedge appeared in four of eight scripted runs. On the device, the app recovered one at the pending target, playing 0.25 s after replacing the item.
+
+`AVPlayer` gives up differently when the server is unreachable: it waits, then pauses, or fails the item. The app treats a failed item, or a pause that directly follows a wait while requests are failing, as stopped playback; a viewer's pause during a wait stays. It logs `playback stopped`, reloads the item where it stopped after 5 s, then 10, 20 and 40 s between attempts, and logs `resumed` once it plays again. If `APACStream.failure` reports that conversion itself failed, it logs `stream failed` with that error and stops instead, since a reload cannot recover it.
 
 An Apple TV that goes to sleep suspends the app mid-run, which looks like a hang: the log simply stops. Wake it before testing; `devicectl` then reports "System is asleep" on launch.
