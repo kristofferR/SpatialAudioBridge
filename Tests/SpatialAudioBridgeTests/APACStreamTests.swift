@@ -207,6 +207,28 @@ private func mediaSegment(_ index: Int) -> APACSegment {
     #expect(store.segment(39) == nil)
 }
 
+/// A run kept behind a restart must not bring back its primed first segment, even one it has yet
+/// to emit, and measures its speed from the restart.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func segmentStoreRebasesAKeptRun() {
+    let store = SegmentStore()
+    let early = UUID(), advanced = UUID()
+    store.begin(run: early, first: 10)
+    store.rebase(run: early, from: 11)
+    for index in 10...11 { store.deliver(mediaSegment(index), run: early, segmentFrames: 153_600) }
+    #expect(store.segment(10) == nil, "the kept run's primed segment")
+    #expect(store.segment(11) != nil && store.highest(run: early) == 11)
+    store.begin(run: advanced, first: 20)
+    for index in 20...26 { store.deliver(mediaSegment(index), run: advanced, segmentFrames: 153_600) }
+    store.drop(20)
+    store.rebase(run: advanced, from: 21)
+    #expect(store.highest(run: advanced) == 26, "what it converted still counts for the hand-over")
+    #expect(store.speed(run: advanced, segmentFrames: 153_600) == nil, "no conversion since the restart yet")
+    store.deliver(mediaSegment(27), run: advanced, segmentFrames: 153_600)
+    #expect(store.segment(20) == nil && store.segment(26) != nil && store.segment(27) != nil)
+    #expect(store.speed(run: advanced, segmentFrames: 153_600) != nil)
+}
+
 /// A helper run's first fragment carries encoder priming, and a retired run may still emit one.
 @available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreTakesEachRunFromItsFirstSegmentUntilRetired() {

@@ -283,16 +283,18 @@ actor StreamEngine {
         guard !stopped else { throw StreamError.stopped }
         try checkFailure()
         requested = index
-        keepSegments(around: index)
         if let data = store.segment(index) {
+            keepSegments(around: index)
             log.debug("seg\(index) from cache")
             return data
         }
+        // A restart may keep the run ahead, so the cache window follows it rather than evicting
+        // what that run has already converted.
         if !waitsForRun(index) {
             log.info("seg\(index) restarts conversion; run started at \(self.run?.start ?? -1), converted \(self.converted)")
             restart(at: index)
-            keepSegments(around: index)
         }
+        keepSegments(around: index)
         let waited = ContinuousClock.now
         waiting.append(index)
         defer { if let entry = waiting.firstIndex(of: index) { waiting.remove(at: entry) } }
@@ -391,6 +393,7 @@ actor StreamEngine {
         if let ahead {
             // Its first fragment carries the encoder priming in place of audio, so the new run
             // converts that segment too, and playback joins the kept run after it.
+            store.rebase(run: ahead.id, from: ahead.start + 1)
             store.drop(ahead.start)
             helper = Run(id: ahead.id, start: ahead.start + 1, task: ahead.task)
             log.info("seg\(index) restarts behind the run from seg\(ahead.start), which carries on from seg\(ahead.start + 1)")
@@ -639,6 +642,19 @@ final class SegmentStore: @unchecked Sendable {
     func ended(run: UUID) -> Bool { lock.withLock { ends[run] != nil } }
 
     func failure(run: UUID) -> (any Error)? { lock.withLock { ends[run] ?? nil } }
+
+    /// Takes `run`'s fragments only from segment `first` on, or after what it has produced, and
+    /// measures its conversion speed from now, as for a run starting at the latest seek.
+    func rebase(run: UUID, from first: Int) {
+        lock.withLock {
+            guard var progress = runs[run] else { return }
+            var rebased = Progress(first: max(first, progress.produced + 1))
+            rebased.produced = progress.produced
+            if progress.holdStarted != nil { rebased.holdStarted = .now }
+            progress = rebased
+            runs[run] = progress
+        }
+    }
 
     /// Forgets segment `index`, so the next run to deliver it replaces it.
     func drop(_ index: Int) { lock.withLock { _ = segments.removeValue(forKey: index) } }
