@@ -59,14 +59,14 @@ struct ExperimentStressTests {
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.timeLimit(.minutes(20)))
     func liveNineOneSixDuration() async throws {
-        try await stress(layout: .nineOneSix, live: true, frames: 96_000, iterations: 400, concurrency: 4)
+        try await stress(layout: .nineOneSix, live: true, frames: 96_000, iterations: 400, concurrency: 6)
     }
 
     /// The #76 configuration: offline 7.1.4, 192,000 frames.
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test(.timeLimit(.minutes(20)))
     func offlineSevenOneFourDuration() async throws {
-        try await stress(layout: .sevenOneFour, live: false, frames: 192_000, iterations: 100, concurrency: 4)
+        try await stress(layout: .sevenOneFour, live: false, frames: 192_000, iterations: 100, concurrency: 6)
     }
 
     /// Whether the native sample-buffer renderer plays on this runner at all.

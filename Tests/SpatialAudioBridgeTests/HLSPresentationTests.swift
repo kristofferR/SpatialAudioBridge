@@ -142,7 +142,7 @@ private final class TapCapture: @unchecked Sendable {
 @available(macOS 26, iOS 26, tvOS 26, *)
 @MainActor
 private func play(grid: APACSegmentGrid, initialization: Data, segments: [Int: Data],
-                  from start: Double, until end: Double) async throws -> TapCapture {
+                  from start: Double, until end: Double, variant: Int = 0) async throws -> TapCapture {
     let playlist = Data(grid.mediaPlaylist().utf8)
     let server = try await LoopbackServer { path in
         switch path {
@@ -156,11 +156,6 @@ private func play(grid: APACSegmentGrid, initialization: Data, segments: [Int: D
     }
     defer { server.stop() }
     let item = AVPlayerItem(url: try #require(URL(string: "http://127.0.0.1:\(server.port)/audio.m3u8")))
-    let player = AVPlayer(playerItem: item)
-    player.volume = 0
-    for _ in 0..<200 where item.status == .unknown { try await Task.sleep(for: .milliseconds(50)) }
-    try #require(item.status == .readyToPlay, "\(String(describing: item.error))")
-
     let capture = TapCapture()
     var callbacks = MTAudioProcessingTapCallbacks(
         version: kMTAudioProcessingTapCallbacksVersion_0,
@@ -178,7 +173,20 @@ private func play(grid: APACSegmentGrid, initialization: Data, segments: [Int: D
                 .record(range, list, frames: framesOut.pointee)
         })
     var tap: MTAudioProcessingTap?
-    try #require(MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap) == noErr)
+    try #require(MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, variant == 2 ? kMTAudioProcessingTapCreationFlag_PostEffects : kMTAudioProcessingTapCreationFlag_PreEffects, &tap) == noErr)
+    if variant == 3 {
+        let parameters = AVMutableAudioMixInputParameters()
+        parameters.trackID = 1
+        parameters.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        item.audioMix = mix
+    }
+    let player = AVPlayer(playerItem: item)
+    player.volume = variant == 0 ? 0 : 1
+    for _ in 0..<200 where item.status == .unknown { try await Task.sleep(for: .milliseconds(50)) }
+    try #require(item.status == .readyToPlay, "\(String(describing: item.error))")
+    if variant != 3 {
     let track = item.tracks.compactMap(\.assetTrack).first { $0.mediaType == .audio }
     print("HLS presentation: item tracks \(item.tracks.map { $0.assetTrack?.mediaType.rawValue ?? "nil" }), audio track \(track.map { "\($0.trackID)" } ?? "none")")
     let parameters = AVMutableAudioMixInputParameters(track: track)
@@ -186,13 +194,14 @@ private func play(grid: APACSegmentGrid, initialization: Data, segments: [Int: D
     let mix = AVMutableAudioMix()
     mix.inputParameters = [parameters]
     item.audioMix = mix
+    }
 
     await player.seek(to: CMTime(seconds: start, preferredTimescale: 48_000), toleranceBefore: .zero, toleranceAfter: .zero)
     player.play()
     for _ in 0..<300 where player.currentTime().seconds < end { try await Task.sleep(for: .milliseconds(50)) }
     let reached = player.currentTime().seconds
     player.pause()
-    print("HLS presentation: from \(start) reached \(reached) s, tap format \(capture.formatDescription), spans \(capture.spans.count), first \(capture.spans.first?.start ?? -1), last \(capture.spans.last?.start ?? -1), item error \(String(describing: item.error))")
+    print("HLS presentation: variant \(variant) from \(start) reached \(reached) s, tap format \(capture.formatDescription), spans \(capture.spans.count), first \(capture.spans.first?.start ?? -1), last \(capture.spans.last?.start ?? -1), item error \(String(describing: item.error))")
     #expect(item.error == nil)
     #expect(reached >= end, "AVPlayer must play through the checked range")
     return capture
@@ -223,6 +232,17 @@ struct HLSPresentationTests {
             Dictionary(uniqueKeysWithValues: indices.compactMap { index in run.segments[index].map { (index, $0.data) } })
         }
         let first = data(continuous, 0...1)
+        if let directory = ProcessInfo.processInfo.environment["SAB_DRC_OUTPUTS_DIR"] {
+            let output = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            for (name, run) in [("continuous", continuous), ("restarted", restarted), ("helper", helper)] {
+                try run.initialization.write(to: output.appendingPathComponent("init-\(layout)-\(name).mp4"))
+                for (index, segment) in run.segments { try segment.data.write(to: output.appendingPathComponent("seg-\(layout)-\(name)-\(index).m4s")) }
+            }
+        }
+        for variant in 1...3 {
+            _ = try await play(grid: grid, initialization: initialization, segments: data(continuous, 0...3), from: 0, until: 0.6, variant: variant)
+        }
         let seconds = clicks.map { Double($0) / 48_000 }
         let joinTime = Double(join) / 48_000
 
