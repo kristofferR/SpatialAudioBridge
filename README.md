@@ -92,6 +92,7 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; without it, no Atmos |
 | Steady playback | A whole film, 1 h 59 min, without a stall; the app's physical footprint stayed between 34 and 64 MB |
 | Seeks | Every skip, scrub and jump recovered: 1–1.5 s within converted audio, 5.5–12.5 s elsewhere on a title with 10.4-second keyframe intervals |
+| Lip sync | Filmed against video flashes, audio arrived 18 ms later than with the same clip's Dolby Digital Plus Atmos track played natively |
 
 ## Documentation
 
