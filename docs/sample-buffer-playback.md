@@ -65,18 +65,17 @@ if !stream.isEmpty { try await renderer.enqueue(stream, time: firstTime + unpack
 `SpatialAudioPassthroughSink` wraps both for an audio output's thread, which cannot await. Its methods return at once from any thread:
 
 ```swift
-let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: synchronizer) { error in
-    // Report the failure, so the player falls back to its own output.
-}
+let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: synchronizer)
 sink.begin(at: seekTime)          // whenever the player (re)starts the output
 let taken = sink.write(bursts)    // offer the rest again; the buffer holds about 0.3 s
 if sink.isReady { /* start the clock */ }
+if sink.failure != nil { /* let the player fall back to its own output */ }
 let delay = await sink.queuedAhead
 sink.end()                        // drain at the end of the stream
 sink.close()
 ```
 
-`write` takes bytes only up to its buffer limit while the renderer is full, so the player's own buffering provides the backpressure. A failure stops the timeline, calls the handler once and refuses input until the next `begin(at:)`. The host still owns the synchronizer's rate, `AtmosOutputActivator` and the audio session.
+`write` takes bytes only up to its buffer limit while the renderer is full, so the player's own buffering provides the backpressure. A failure stops the timeline, sets `failure` and refuses input until the next `begin(at:)`; poll it as the output polls for its own failure. The host still owns the synchronizer's rate, `AtmosOutputActivator` and the audio session.
 
 After a seek, or when attaching to a running output, the bursts may resume between TrueHD major syncs, where decoding cannot start, or even inside an access unit. The unpacker drops the data up to the first major sync and adds its duration to `skippedDuration`, measured by its share of the 20 ms MAT frames and so accurate to about one access unit (0.8 ms). Adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
 

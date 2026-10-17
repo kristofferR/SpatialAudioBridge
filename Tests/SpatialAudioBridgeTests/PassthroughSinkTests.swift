@@ -1,5 +1,4 @@
 @preconcurrency import AVFoundation
-import Synchronization
 import Testing
 @testable import SpatialAudioBridge
 
@@ -28,10 +27,8 @@ private func burst(type: UInt8) -> Data {
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)
-@Test func passthroughSinkReportsAFailureOnceAndRefusesInputUntilTheNextTimeline() async throws {
-    let failures = Mutex(0)
-    let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer(),
-                                               onFailure: { _ in failures.withLock { $0 += 1 } })
+@Test func passthroughSinkReportsAFailureAndRefusesInputUntilTheNextTimeline() async throws {
+    let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
     defer { sink.close() }
     sink.begin(at: .zero)
     // An AC-3 burst cannot be unpacked to TrueHD.
@@ -39,7 +36,7 @@ private func burst(type: UInt8) -> Data {
     let deadline = ContinuousClock.now + .seconds(3)
     while sink.failure == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
     #expect(sink.failure != nil)
-    #expect(failures.withLock { $0 } == 1)
+    #expect(!sink.isReady)
     #expect(sink.write(burst(type: 0x01)) == 0)
     sink.begin(at: .zero)
     #expect(sink.failure == nil)
