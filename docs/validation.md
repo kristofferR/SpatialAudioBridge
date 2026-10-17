@@ -118,7 +118,7 @@ Normal package tests exercise both DRC settings through the direct encoder and s
 | Sustained `APACStream` playback | At 9.1.6, after the pacing fix, no stalls in 37 minutes of steady playback; before it, playback stopped after 111 s when a dropped segment was requested. Available memory stayed within 2,135–2,171 MB across sessions of up to 16 minutes. At 7.1.4, no stalls or segment errors in 15 minutes of steady playback, then remote pauses and skips; available memory stayed within 2,139–2,174 MB over the 22-minute session |
 | Seeks with `AVPlayer` | Before the restart rule changed, a long scrub failed the item (`-12880`) and skips back waited up to 30 s. Afterwards, a scripted test of eight skips, scrubs and jumps recovered every time; times below |
 | `SpatialAudioRenderer` on device | Renderer mode read the title from Jellyfin, started the synchronizer 1.47 s after launch and reported `.rendering` with the silent Atmos stream playing |
-| Activator lifecycle | The silent stream follows host play/pause, plays only for accepted items, follows a synchronizer, stops on detach and reports an unplayable stream (macOS) |
+| Activator lifecycle | The silent stream starts with the host, plays on through pauses, stops when an item ends or fails but not across queued items, plays only for accepted items, follows a synchronizer, stops on detach and reports an unplayable stream (macOS) |
 
 Scripted seeks from 55:06 into the Jellyfin title, whose stream-copy video segments last 10.4 s. Each seek was issued as a remote does, without waiting for the previous one, and timed until playback moved past the target:
 
