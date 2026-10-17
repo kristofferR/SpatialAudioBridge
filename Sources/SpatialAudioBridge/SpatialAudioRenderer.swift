@@ -65,6 +65,8 @@ public actor SpatialAudioRenderer {
     private var decoder: any SpatialAudioRendererDecoding
     private let makeDecoder: @Sendable () throws -> any SpatialAudioRendererDecoding
     private var encoder: APACEncoder
+    /// Whether the codecs have taken input since they were made, so ``begin(at:)`` needs new ones.
+    private var codecsUsed = false
     private var timeline = CMTime.zero
     private var inputStart: CMTime?
     private var discarding: Int?
@@ -185,7 +187,8 @@ public actor SpatialAudioRenderer {
 
     /// Starts a new timeline at `time`: before the first packet, after a seek, at a discontinuity
     /// or after a failure. Queued audio is dropped. Then enqueue packets from a sync point at or
-    /// before `time`; audio before `time` is discarded so playback starts exactly there.
+    /// before `time`; audio before `time` is discarded so playback starts exactly there. A reset
+    /// before any input since the last one keeps its decoder and encoder, so it costs little.
     public func begin(at time: CMTime) throws {
         guard time.isNumeric else { throw SpatialAudioError.invalidConfiguration("The timeline must start at a finite time") }
         if observers.isEmpty { observeOutput() }
@@ -199,8 +202,12 @@ public actor SpatialAudioRenderer {
         refilling = false
         refillAgain = false
         state = .failed
-        decoder = try makeDecoder()
-        encoder = try APACEncoder(configuration: configuration)
+        // Unused codecs are as good as new, so repeated resets without input allocate nothing.
+        if codecsUsed {
+            decoder = try makeDecoder()
+            encoder = try APACEncoder(configuration: configuration)
+            codecsUsed = false
+        }
         timeline = time
         inputStart = nil
         discarding = nil
@@ -264,6 +271,7 @@ public actor SpatialAudioRenderer {
             throw SpatialAudioError.invalidState("Await each enqueue(_:time:) before the next call or endOfStream()")
         }
         busyGeneration = generation
+        codecsUsed = true
         return generation
     }
 
@@ -302,6 +310,7 @@ public actor SpatialAudioRenderer {
     /// Encodes and queues decoded audio, first padding a source that starts after the timeline.
     func play(_ blocks: [PCMBlock], final: Bool = false, generation current: Int) async throws {
         try checkSubmission(generation: current)
+        codecsUsed = true
         if discarding == nil, let inputStart, !blocks.isEmpty {
             discarding = Int((CMTimeSubtract(timeline, inputStart).seconds * 48_000).rounded())
         }

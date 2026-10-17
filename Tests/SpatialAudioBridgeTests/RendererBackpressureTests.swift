@@ -413,3 +413,20 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     let ahead = await renderer.queuedAhead.seconds
     #expect(ahead >= 1.5 && ahead < 1.5 + 1024.0 / 48_000)
 }
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererMakesNewCodecsOnlyAfterInput() async throws {
+    let made = Mutex(0)
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: ControlledRendererOutput(),
+        makeDecoder: { made.withLock { $0 += 1 }; return CompletedRendererDecoder() })
+    // Resets without input, as a passthrough sink makes for each timeline, keep the codecs.
+    try await renderer.begin(at: .zero)
+    try await renderer.begin(at: CMTime(value: 5, timescale: 1))
+    #expect(made.withLock { $0 } == 1)
+    try await renderer.enqueue(Data([0]), time: CMTime(value: 5, timescale: 1))
+    try await renderer.begin(at: .zero)
+    #expect(made.withLock { $0 } == 2)
+    try await renderer.begin(at: .zero)
+    #expect(made.withLock { $0 } == 2)
+}

@@ -11,15 +11,19 @@ import Synchronization
 /// sink.begin(at: seekTime)                    // at the start and after every seek or discontinuity
 /// let taken = sink.write(bursts)              // offer the rest again later
 /// if sink.isReady { synchronizer.setRate(1, time: seekTime) }
-/// if sink.failure != nil { /* fall back to the player's own output */ }
+/// if let failure = sink.failure {
+///     // A discontinuity: begin(at:) at the next write. Anything else: fall back to the player's own output.
+/// }
+/// let played = sink.progress?.submittedEnd    // for a clock run from submitted audio
 /// sink.end()                                  // at the end of the stream
 /// sink.close()
 /// ```
 ///
 /// Bytes wait in a bounded buffer while the renderer is full, so `write` takes only what fits. A
 /// failure, such as content that is not Atmos or DTS:X, stops the timeline and sets `failure` until
-/// the next ``begin(at:)``; fall back to the host's own output. Native Atmos output also needs
-/// `AtmosOutputActivator` from SpatialAudioPlayback, attached to the same synchronizer.
+/// the next ``begin(at:)``; ``failure`` says when to fall back to the host's own output. Native
+/// Atmos output also needs `AtmosOutputActivator` from SpatialAudioPlayback, attached to the same
+/// synchronizer.
 @available(macOS 26, iOS 26, tvOS 26, *)
 public final class SpatialAudioPassthroughSink: Sendable {
     private enum Event: Sendable {
@@ -42,6 +46,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
         var buffered = 0
         var ended = false
         var failure: (any Error)?
+        var progress: SpatialAudioRendererProgress?
         var closed = false
         var volume: Float = 1
         var muted = false
@@ -71,8 +76,18 @@ public final class SpatialAudioPassthroughSink: Sendable {
     public var isReady: Bool { state.withLock { $0.readyGeneration == $0.generation } }
 
     /// The error that stopped the current timeline, if any. Poll it, as an audio output polls for
-    /// its own failure, and fall back when it is set.
+    /// its own failure. A ``SpatialAudioError/discontinuity(_:)``, such as an IEC 61937 pause
+    /// burst, ends the timeline and drops the rest of that write; resume as after a seek, with
+    /// ``begin(at:)`` at the time of the next audio the player writes. Fall back to the host's own
+    /// output for any other error; after
+    /// ``SpatialAudioError/unsupported(_:)`` the track will never play, so keep it on that output.
     public var failure: (any Error)? { state.withLock { $0.failure } }
+
+    /// How far the current timeline's audio reaches once enqueued with the native renderer, for a
+    /// host that runs its clock from submitted audio; nil until the timeline's renderer reset has
+    /// completed. `isFinal` turns true once ``end()`` has enqueued everything, also when there was
+    /// nothing to play. Bytes still waiting in the buffer are not counted.
+    public var progress: SpatialAudioRendererProgress? { state.withLock { $0.progress } }
 
     /// How much audio is queued ahead of the synchronizer's time, for the host's delay report.
     /// Bytes still waiting in the buffer are not counted.
@@ -97,6 +112,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
             state.buffered = 0
             state.ended = false
             state.failure = nil
+            state.progress = nil
             let previous = state.timeline
             previous?.events.finish()
             previous?.feeder.cancel()
@@ -109,6 +125,13 @@ public final class SpatialAudioPassthroughSink: Sendable {
                 reset: { [weak self] in
                     self?.state.withLock { if $0.generation == generation { $0.resetGeneration = generation } }
                 },
+                progress: { [weak self] progress in
+                    self?.state.withLock { state in
+                        // The reader can deliver its first value after an empty stream has ended.
+                        guard state.generation == generation, state.failure == nil, state.progress?.isFinal != true else { return }
+                        state.progress = progress
+                    }
+                },
                 ready: { [weak self] in
                     self?.state.withLock { if $0.generation == generation, $0.failure == nil { $0.readyGeneration = generation } }
                 },
@@ -117,6 +140,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
                         guard state.generation == generation, state.failure == nil else { return }
                         state.failure = error
                         state.readyGeneration = -1
+                        state.progress = nil
                     }
                 })
             let feeder = Task { [renderer] in
@@ -190,6 +214,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
     private struct Report: Sendable {
         let consumed: @Sendable (Int) -> Void
         let reset: @Sendable () -> Void
+        let progress: @Sendable (SpatialAudioRendererProgress) -> Void
         let ready: @Sendable () -> Void
         let failed: @Sendable (any Error) -> Void
     }
@@ -207,6 +232,11 @@ public final class SpatialAudioPassthroughSink: Sendable {
             try await renderer.begin(at: time)
             report.reset()
             try await withThrowingDiscardingTaskGroup { group in
+                // Each call ends the previous timeline's reader, and starts from this timeline's begin.
+                let progress = await renderer.progress()
+                group.addTask {
+                    for await value in progress { report.progress(value) }
+                }
                 // Reads readiness alongside, because an enqueue or the final flush can wait for
                 // capacity that only the clock started on it frees, and notices a renderer that
                 // fails while no input arrives. It only reads; this feeder handles the failure.
@@ -243,6 +273,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
                             // Filler alone, as when a timeline begins near the end, has nothing to
                             // play; a truncated burst is malformed.
                             try unpacker.finish()
+                            report.progress(SpatialAudioRendererProgress(timelineStart: time, submittedEnd: time, isFinal: true))
                         }
                         report.ready()
                     case .rendererFailed:
