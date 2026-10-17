@@ -85,10 +85,15 @@ private func playThrough(grid: APACSegmentGrid, initialization: Data, segments: 
     try #require(item.status == .readyToPlay, "\(String(describing: item.error))")
     await player.seek(to: CMTime(seconds: start, preferredTimescale: 48_000), toleranceBefore: .zero, toleranceAfter: .zero)
     player.play()
+    // A stall is a return to waiting after playback began; reaching the item's end pauses instead.
     var playing = false, stalls = 0
     for _ in 0..<600 where player.currentTime().seconds < end {
         try await Task.sleep(for: .milliseconds(25))
-        if player.timeControlStatus == .playing { playing = true } else if playing { (playing, stalls) = (false, stalls + 1) }
+        switch player.timeControlStatus {
+        case .playing: playing = true
+        case .waitingToPlayAtSpecifiedRate where playing: (playing, stalls) = (false, stalls + 1)
+        default: break
+        }
     }
     let reached = player.currentTime().seconds
     player.pause()
@@ -125,8 +130,9 @@ struct HLSPresentationTests {
         // What playback presents, read as one file from its first fragment: from the start, on from
         // the first run into the helper's segments, and from a seek to the restarted run. The reader
         // starts at the first fragment's presented audio, after the priming.
-        for (name, fragments, start) in [("continuous", played, priming), ("helper join", helped, priming),
-                                         ("seek", resumed, join + priming)] {
+        let reads: [(String, [Int: Data], Int)] = [("continuous", played, priming), ("helper join", helped, priming),
+                                                   ("seek", resumed, join + priming)]
+        for (name, fragments, start) in reads {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("join-\(UUID().uuidString).mp4")
             defer { try? FileManager.default.removeItem(at: url) }
             // A file reader, unlike HLS, needs fragment sequence numbers to increase across runs.
@@ -147,16 +153,19 @@ struct HLSPresentationTests {
                 #expect(abs(frame - click) <= 48, "\(name): click at \(click) decoded at \(frame)")
             }
             // Detects leaked pre-roll, audio from the wrong run or a click repeated across a join.
-            let quietPeak = (0..<decoded.frames).lazy
-                .filter { frame in !expected.contains { abs($0 - start - frame) < 2_400 } }
-                .map { abs(decoded.samples[$0 * channels]) }.max() ?? 0
+            let ringing = expected.map { ($0 - start - 2_400)..<($0 - start + 2_400) }
+            var quietPeak: Float = 0
+            for frame in 0..<decoded.frames where !ringing.contains(where: { $0.contains(frame) }) {
+                quietPeak = max(quietPeak, abs(decoded.samples[frame * channels]))
+            }
             #expect(quietPeak < 0.01, "\(name): no other clicks")
         }
 
         // AVPlayer plays the joined playlist through each join without failing or waiting.
         let joinTime = Double(join) / 48_000
-        for (name, segments, start, end) in [("helper join", helped, joinTime - 0.5, joinTime + 1),
-                                             ("seek", sought, joinTime, grid.end.seconds - 0.05)] {
+        let playbacks: [(String, [Int: Data], Double, Double)] = [("helper join", helped, joinTime - 0.5, joinTime + 1),
+                                                                  ("seek", sought, joinTime, grid.end.seconds - 0.05)]
+        for (name, segments, start, end) in playbacks {
             let playback = try await playThrough(grid: grid, initialization: initialization, segments: segments,
                                                  from: start, until: end)
             print("HLS playback \(layout), \(name): from \(start) s reached \(playback.reached) s, stalls \(playback.stalls)")
