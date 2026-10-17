@@ -161,3 +161,33 @@ func ffmpegBurstsUnpackToTheOriginalStream() throws {
         #expect(unpacker.skippedDuration == .zero)
     }
 }
+
+/// Mutated MAT and type IV streams, split anywhere, either unpack or throw a `SpatialAudioError`,
+/// never return more than they took, and hold at most a burst and an access unit between calls.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test(.timeLimit(.minutes(2))) func mutatedBurstsUnpackOrFailWithinBounds() throws {
+    let units = (0..<60).map { unit(words: 100 + $0 * 37 % 900, majorSync: $0 % 16 == 0, seed: $0) }
+    let dtsFrame: [UInt8] = [0x7F, 0xFE, 0x80, 0x01] + (0..<508).map { UInt8(truncatingIfNeeded: $0 * 7) }
+    let typeIV = [UInt8]([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFE, 0x02, 0x00]) + dtsFrame
+    let bases = [matBursts(units, littleEndian: true), matBursts(units, littleEndian: false),
+                 (0..<4).flatMap { _ in burst(type: 0x0011, payload: typeIV, period: 2_048, littleEndian: true) }]
+    for seed in Mutation.seeds(base: 0x1EC6_1937) {
+        var random = Mutation(seed: seed)
+        let input = random.mutate(bases[random.below(bases.count)])
+        var unpacker = IEC61937Unpacker()
+        var produced = 0
+        do {
+            for range in random.chunks(input.count) {
+                produced += try unpacker.unpack(Data(input[range])).count
+                // At most filler from two chunks, one burst (Pd counts up to 65535 bytes) and a
+                // TrueHD access unit (up to 8190).
+                #expect(unpacker.bufferedBytes <= 2 * 20_000 + 65_543 + 8_190, "seed \(seed)")
+            }
+            try? unpacker.finish()
+        } catch is SpatialAudioError {
+        } catch {
+            Issue.record("seed \(seed): unexpected \(error)")
+        }
+        #expect(produced <= input.count, "seed \(seed)")
+    }
+}

@@ -281,3 +281,45 @@ func realMatroskaTrackMatchesTheElementaryStream() async throws {
     #expect(first.isSyncPoint)
     #expect(first.time.seconds <= 30 && first.time.seconds > 29.9)
 }
+
+/// An in-memory file that counts the bytes read from it.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private final class MemoryByteSource: MediaByteSource, @unchecked Sendable {
+    private let data: Data
+    private let lock = NSLock()
+    private var total = 0
+    init(_ data: Data) { self.data = data }
+    var bytesRead: Int { lock.withLock { total } }
+    func length() async throws -> Int64 { Int64(data.count) }
+    func read(_ range: Range<Int64>) async throws -> Data {
+        let clamped = Int(max(0, min(range.lowerBound, Int64(data.count))))..<Int(max(0, min(range.upperBound, Int64(data.count))))
+        lock.withLock { total += clamped.count }
+        return data.subdata(in: clamped)
+    }
+}
+
+/// Mutated files, including lengths, lacing, cues and seek heads, open and read their tracks from
+/// several times or throw a `SpatialAudioError`, without hanging or reading far past the file.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test(.timeLimit(.minutes(2))) func mutatedMatroskaFilesReadOrFailWithinBounds() async throws {
+    let bases = try [Fixture.make(), Fixture.make(metadataAfterClusters: true)].map { try [UInt8](Data(contentsOf: $0.url)) }
+    for seed in Mutation.seeds(base: 0x4D4B_5600) {
+        var random = Mutation(seed: seed)
+        let bytes = random.mutate(bases[random.below(bases.count)])
+        let source = MemoryByteSource(Data(bytes))
+        do {
+            let file = try await MatroskaFile.open(source)
+            for track in file.audioTracks {
+                for start in [0.0, 0.5, 1e6] {
+                    let packets = try await collect(file.packets(of: track, from: CMTime(seconds: start, preferredTimescale: 1000)))
+                    #expect(packets.reduce(0) { $0 + $1.data.count } <= bytes.count * 4, "seed \(seed)")
+                }
+            }
+        } catch is SpatialAudioError {
+        } catch {
+            Issue.record("seed \(seed): unexpected \(error)")
+        }
+        // Opening and three reads per track, each in windows of at most a few MiB.
+        #expect(source.bytesRead <= (1 + 3 * 2) * (bytes.count + 4 << 20), "seed \(seed)")
+    }
+}
