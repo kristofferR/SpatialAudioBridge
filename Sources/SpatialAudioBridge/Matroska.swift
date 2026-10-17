@@ -162,7 +162,7 @@ public struct MatroskaFile: Sendable {
             }
         }
         return MatroskaAudioTrack(number: number, codecID: entry.child(EBML.codecID)?.string ?? "",
-                                  channels: Int(audio?.child(EBML.channels)?.uint ?? 1),
+                                  channels: Int(clamping: audio?.child(EBML.channels)?.uint ?? 1),
                                   sampleRate: audio?.child(EBML.samplingFrequency)?.float ?? 8000,
                                   language: entry.child(EBML.languageBCP47)?.string ?? entry.child(EBML.language)?.string,
                                   name: entry.child(EBML.name)?.string,
