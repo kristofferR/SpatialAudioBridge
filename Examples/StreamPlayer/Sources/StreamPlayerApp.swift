@@ -69,6 +69,8 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                 return
             }
             var options = APACStream.Options()
+            options.configuration.disablesDynamicRangeControl = environment["SAB_NO_DRC"] == "1"
+            log("DRC \(options.configuration.disablesDynamicRangeControl ? "disabled" : "default")")
             if let variant = environment["SAB_VIDEO_VARIANT"] {
                 options.includesVideoVariant = { $0.absoluteString.contains(variant) }
             }

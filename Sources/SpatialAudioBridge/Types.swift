@@ -67,7 +67,7 @@ public struct APACConfiguration: Sendable {
     /// `APACStream` and `SpatialAudioRenderer` always use the live profile.
     public var liveEncoding: Bool
     /// Internal comparison setting for encoder experiments; playback defaults are unchanged.
-    var disablesDynamicRangeControl = false
+    public var disablesDynamicRangeControl = false
     /// Attenuates TrueHD by its signalled dialogue level, as an AV receiver does: 4 dB at −27 dB.
     /// Off by default, as in Apple TV's own Atmos playback, so converted tracks play at the level of
     /// native Atmos content. DTS:X exposes no dialogue level.
