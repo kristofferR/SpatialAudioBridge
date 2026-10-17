@@ -139,6 +139,7 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 | Memory | No growth: the app's physical footprint stayed between 34 and 64 MB over a whole 1 h 59 min film, ending lower than it started |
 | Server outage | With the server unreachable for 4 minutes, playback continued from its buffer for 1–1.3 minutes, then stopped; StreamPlayer's reload resumed it at the same position 21–31 s after the server returned |
 | Seeks | Recovered from every skip, scrub and jump in a scripted test; times above |
+| Lip sync | Filmed against video flashes, audio arrived 18 ms later than with the same clip's Dolby Digital Plus Atmos track played natively; see [validation](validation.md#playback-on-apple-tv) |
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; video and audio played together |
 
 ## Limits
