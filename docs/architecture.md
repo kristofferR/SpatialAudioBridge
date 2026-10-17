@@ -32,7 +32,7 @@ The original bitstream and object stream are not preserved: objects are rendered
 | `SpatialAudioPlayback` | `AtmosOutputActivator` | No |
 | `apac-convert` | Command-line converter built on the public API | Yes |
 
-`scripts/build-core.sh` builds the Rust core as an XCFramework for Apple Silicon and Intel Macs, Apple TV, iPhone and iPad devices, and the Apple TV and iOS simulators. Each library is one link-time-optimized object in which only the C API and a weak `rust_eh_personality` are global. Another Rust static library in the same app brings its own copy of the Rust standard library, and the two would otherwise collide; the weak personality merges with that library's, since an image can hold only three personality routines. `scripts/release-core.sh` packages the same build reproducibly for a release; only the release tag's `Package.swift` downloads it, so `main` always links a core built from its own sources.
+`scripts/build-core.sh` builds the Rust core as an XCFramework for Apple Silicon and Intel Macs, Apple TV, iPhone and iPad devices, and the Apple TV and iOS simulators. Each slice is a link-time-optimized dynamic framework that exports only the C API. It is dynamic because the `dca` DTS decoder is ported from FFmpeg, and the LGPL requires that users can replace it; see [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md#dca-and-the-lgpl). As its own image, the core also keeps its copy of the Rust standard library and its panic personality away from other Rust libraries in the app. `scripts/release-core.sh` packages the same build reproducibly for a release; only the release tag's `Package.swift` downloads it, so `main` always links a core built from its own sources.
 
 ## Output paths
 

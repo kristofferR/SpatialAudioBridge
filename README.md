@@ -121,7 +121,7 @@ Add the package from a release, in Xcode or in `Package.swift`:
 .package(url: "https://github.com/kristofferR/SpatialAudioBridge", from: "1.6.2")
 ```
 
-Release tags download the Rust core as a checksummed XCFramework for Macs, Apple TV, iPhone and iPad, and their simulators (universal for Macs and the iOS simulator), so the host needs no Rust toolchain. Its library exports only the core's C functions and a weak `rust_eh_personality`, so it links beside other Rust static libraries, such as LibDovi. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
+Release tags download the Rust core as a checksummed XCFramework for Macs, Apple TV, iPhone and iPad, and their simulators (universal for Macs and the iOS simulator), so the host needs no Rust toolchain. It is a dynamic framework that exports only the core's C functions, which SwiftPM and Xcode embed in the app, so it links beside other Rust libraries, such as LibDovi. Apps show `SpatialAudioBridgeNotices.text` in their acknowledgements: it covers this library, the Rust components in its core and the Rust standard library.
 
 The API requires **tvOS 26+**, **iOS 26+** or **macOS 26+**. The package itself builds back to tvOS and iOS 13 and macOS 10.15, so apps that support older systems can depend on it and check `#available` before using it. iPhone and iPad builds link but are untested. The package offers three products:
 
@@ -143,7 +143,7 @@ swift test -j 1
 
 `./scripts/release-core.sh` builds the release archive and prints its checksum. Each release's notes name the commit and toolchain to rebuild it with and compare.
 
-CI checks the packaged macOS core in a mixed Rust, Objective-C and C++ host before artifact upload or release publication, including both Rust archive orders and caught exceptions. See [packaging coverage](docs/validation.md#mixed-language-packaging-check) for the toolchains and limits.
+CI checks the packaged macOS framework in a mixed Rust, Objective-C and C++ host before artifact upload or release publication, including caught exceptions. See [packaging coverage](docs/validation.md#mixed-language-packaging-check) for the toolchains and limits.
 
 ## Decoder dependencies
 
@@ -159,4 +159,4 @@ Thanks to [Native Player](https://apps.apple.com/app/native-player/id6760623926)
 
 ## License
 
-Apache 2.0. Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); apps can show `SpatialAudioBridgeNotices.text`.
+Apache 2.0. The one exception is the core's DTS decoder, the `dca` crate, which is ported from FFmpeg and usable under the LGPL, version 3 or later; the core is a dynamic framework so apps can meet that license and keep their own. Dependency licenses and distribution requirements are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); apps can show `SpatialAudioBridgeNotices.text`.
