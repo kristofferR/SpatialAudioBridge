@@ -19,6 +19,12 @@ private func burst(type: UInt8) -> Data {
     // Zeros between bursts are skipped, but only what fits is taken at once.
     #expect(sink.write(Data(count: 200)) == 64)
     #expect(!sink.isReady)
+    // An ended timeline takes nothing more, and with no audio it is ready at once.
+    sink.end()
+    #expect(sink.write(Data(count: 4)) == 0)
+    let deadline = ContinuousClock.now + .seconds(3)
+    while !sink.isReady, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(sink.isReady)
 }
 
 @available(macOS 26, iOS 26, tvOS 26, *)

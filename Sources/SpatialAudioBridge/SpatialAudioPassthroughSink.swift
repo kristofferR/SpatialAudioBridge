@@ -31,8 +31,12 @@ public final class SpatialAudioPassthroughSink: Sendable {
         var generation = 0
         var readyGeneration = -1
         var buffered = 0
+        var ended = false
         var failure: (any Error)?
         var closed = false
+        var volume: Float = 1
+        var muted = false
+        var output: Task<Void, Never>?
     }
 
     private let renderer: SpatialAudioRenderer
@@ -77,6 +81,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
             guard !state.closed else { return }
             state.generation += 1
             state.buffered = 0
+            state.ended = false
             state.failure = nil
             let previous = state.timeline
             previous?.input.finish()
@@ -95,11 +100,11 @@ public final class SpatialAudioPassthroughSink: Sendable {
     }
 
     /// Queues passthrough bytes for the current timeline and returns how many it took: none before
-    /// ``begin(at:)``, after a failure or while the buffer is full. Bursts may be split anywhere.
+    /// ``begin(at:)``, after ``end()`` or a failure, or while the buffer is full. Bursts may be split anywhere.
     @discardableResult
     public func write(_ bytes: Data) -> Int {
         state.withLock { state in
-            guard let timeline = state.timeline, state.failure == nil else { return 0 }
+            guard let timeline = state.timeline, state.failure == nil, !state.ended else { return 0 }
             let taken = min(bytes.count, bufferLimit - state.buffered)
             guard taken > 0 else { return 0 }
             state.buffered += taken
@@ -110,13 +115,32 @@ public final class SpatialAudioPassthroughSink: Sendable {
 
     /// Ends the current timeline's stream, so its last audio plays and ``isReady`` turns true even
     /// for a stream too short to fill the renderer.
-    public func end() { state.withLock { $0.timeline }?.input.finish() }
+    public func end() {
+        state.withLock { state in
+            state.ended = true
+            return state.timeline
+        }?.input.finish()
+    }
 
     /// Sets the APAC output volume, from 0 to 1. A passthrough host's own volume never reaches it.
-    public func setVolume(_ volume: Float) { Task { [renderer] in await renderer.setVolume(volume) } }
+    public func setVolume(_ volume: Float) { updateOutput { $0.volume = volume } }
 
     /// Mutes or unmutes the APAC output.
-    public func setMuted(_ muted: Bool) { Task { [renderer] in await renderer.setMuted(muted) } }
+    public func setMuted(_ muted: Bool) { updateOutput { $0.muted = muted } }
+
+    /// Applies the latest volume and mute after any earlier update, so calls land in order.
+    private func updateOutput(_ change: (inout State) -> Void) {
+        state.withLock { state in
+            change(&state)
+            let previous = state.output
+            state.output = Task { [weak self, renderer] in
+                await previous?.value
+                guard let latest = self?.state.withLock({ (volume: $0.volume, muted: $0.muted) }) else { return }
+                await renderer.setVolume(latest.volume)
+                await renderer.setMuted(latest.muted)
+            }
+        }
+    }
 
     /// Stops playback for good. Releasing the sink does the same.
     public func close() {
@@ -156,21 +180,29 @@ public final class SpatialAudioPassthroughSink: Sendable {
             for await chunk in bursts {
                 defer { report.consumed(chunk.count) }
                 let stream = try unpacker.unpack(chunk)
-                guard !stream.isEmpty else { continue }
-                try await renderer.enqueue(stream, time: time + unpacker.skippedDuration)
-                enqueued = true
-                if !ready, await renderer.isReadyToPlay {
-                    ready = true
-                    report.ready()
+                // In small pieces, so readiness shows before the renderer fills and an enqueue waits
+                // for the clock the host starts on it.
+                for start in stride(from: 0, to: stream.count, by: 4096) {
+                    try await renderer.enqueue(stream[start..<min(stream.count, start + 4096)],
+                                               time: time + unpacker.skippedDuration)
+                    enqueued = true
+                    if !ready, await renderer.isReadyToPlay {
+                        ready = true
+                        report.ready()
+                    }
                 }
             }
-            guard !Task.isCancelled, enqueued else { return }
+            guard !Task.isCancelled else { return }
+            // A timeline that ended before any audio, such as one begun near the end, has nothing to play.
+            guard enqueued else { return report.ready() }
             // A partial final burst does not discard audio already decoded.
             try? unpacker.finish()
             try await renderer.endOfStream()
             report.ready()
         } catch is CancellationError {
         } catch {
+            // Drop queued APAC, so it cannot play over the host's fallback.
+            try? await renderer.begin(at: time)
             report.failed(error)
         }
     }
