@@ -80,7 +80,8 @@ jobs:
         run: |
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
-          swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
+          # A pseudo-terminal keeps the test output line-buffered, so a hung test shows where it stopped.
+          script -q /dev/null swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
       - name: Preserve test log and DRC outputs
         if: always()
         uses: actions/upload-artifact@v4
