@@ -110,6 +110,7 @@ var settings = grid.configuration(from: index)
 settings.inputStartTime = firstPacket.time
 let audio = try SpatialAudioTranscoder(codec: codec, destination: .segments(
     syncPeriodsPerSegment: APACSegmentGrid.syncPeriodsPerSegment, onSegment: { segment in
+        if segment.kind == .initialization { return storeInitialization(segment.data) }  // init.mp4
         if let at = grid.index(of: segment), at >= index { store(segment.data, at: at) }
     }), configuration: settings)
 // At the track's end, pad(to:) a segment at a time if the video runs on, then finish(paddingTo: grid.end).

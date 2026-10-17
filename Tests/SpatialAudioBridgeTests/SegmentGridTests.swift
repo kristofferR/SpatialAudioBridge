@@ -14,6 +14,10 @@ import Testing
     #expect(grid.index(at: CMTime(value: 153_599, timescale: 48_000)) == 0)
     #expect(grid.index(at: CMTime(value: 153_600, timescale: 48_000)) == 1)
     #expect(grid.index(at: CMTime(value: 60, timescale: 1)) == 3)
+    #expect(grid.index(at: .indefinite) == 0 && grid.index(at: .positiveInfinity) == 3)
+    // Exact durations keep their frame count.
+    #expect(try APACSegmentGrid(duration: CMTime(value: 7, timescale: 48_000)).totalFrames == 7)
+    #expect(try APACSegmentGrid(duration: CMTime(value: 1, timescale: 96_000)).totalFrames == 1)
     #expect(grid.start(of: 2) == CMTime(value: 307_200, timescale: 48_000))
     // A session's first fragment begins on the grid once the priming is presented.
     let priming = try grid.configuration.encoderPrimingDuration().value

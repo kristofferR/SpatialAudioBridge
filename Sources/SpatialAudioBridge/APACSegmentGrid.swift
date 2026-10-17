@@ -12,8 +12,8 @@ import Foundation
 /// settings.inputStartTime = firstPacket.time   // the sync point at or before grid.start(of: index)
 /// let session = try SpatialAudioTranscoder(codec: codec, destination: .segments(
 ///     syncPeriodsPerSegment: APACSegmentGrid.syncPeriodsPerSegment, onSegment: { segment in
-///         guard let at = grid.index(of: segment), at >= index else { return }  // or the init segment
-///         store(segment, at: at)
+///         if segment.kind == .initialization { return storeInitialization(segment.data) }
+///         if let at = grid.index(of: segment), at >= index { store(segment.data, at: at) }
 ///     }), configuration: settings)
 /// // Append packets; at the track's end, pad and finish at grid.end.
 /// ```
@@ -44,7 +44,7 @@ public struct APACSegmentGrid: Sendable {
         configuration.liveEncoding = true
         self.configuration = configuration
         segmentFrames = Int64(configuration.syncPacketFrequency * 1024 * Self.syncPeriodsPerSegment)
-        totalFrames = Int64((duration.seconds * 48_000).rounded(.up))
+        totalFrames = CMTimeConvertScale(duration, timescale: 48_000, method: .roundTowardPositiveInfinity).value
         primingFrames = try configuration.encoderPrimingDuration().value
     }
 
@@ -55,6 +55,7 @@ public struct APACSegmentGrid: Sendable {
 
     /// The segment that holds `time`, clamped to the grid.
     public func index(at time: CMTime) -> Int {
+        guard time.isNumeric else { return time == .positiveInfinity ? segmentCount - 1 : 0 }
         let seconds = min(max(time.seconds, 0), Double(totalFrames) / 48_000)
         let frame = Int64((seconds * 48_000).rounded(.down))
         return Int(min(frame, totalFrames - 1) / segmentFrames)
