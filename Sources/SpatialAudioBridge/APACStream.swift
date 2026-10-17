@@ -382,9 +382,8 @@ actor StreamEngine {
         let settings = grid.configuration(from: index, early: early)
         let start = settings.startTime
         // The playlist follows the container, which may outlast the track, so a run that reaches the
-        // track's end pads with silence to the playlist's. A run in a last segment shorter than the
-        // priming still needs one frame to write its fragment.
-        let end = max(totalFrames, start.value + 1)
+        // track's end pads with silence to the playlist's.
+        let end = grid.end(from: index, early: early).value
         let (file, track, codec, store, segmentFrames) = (self.file, self.track, self.codec, self.store, self.segmentFrames)
         let id = UUID()
         store.begin(run: id, first: index)

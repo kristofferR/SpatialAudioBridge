@@ -15,7 +15,7 @@ import Foundation
 ///         if segment.kind == .initialization { return storeInitialization(segment.data) }
 ///         if let at = grid.index(of: segment), at >= index { store(segment.data, at: at) }
 ///     }), configuration: settings)
-/// // Append packets; at the track's end, pad and finish at grid.end.
+/// // Append packets; at the track's end, pad and finish at grid.end(from: index).
 /// ```
 @available(macOS 26, iOS 26, tvOS 26, *)
 public struct APACSegmentGrid: Sendable {
@@ -50,15 +50,22 @@ public struct APACSegmentGrid: Sendable {
 
     public var segmentCount: Int { Int((totalFrames + segmentFrames - 1) / segmentFrames) }
 
-    /// Where the presentation ends: pad a session to here with `finish(paddingTo:)`.
+    /// Where the presentation ends.
     public var end: CMTime { CMTime(value: totalFrames, timescale: 48_000) }
+
+    /// Where a session from segment `index` ends: ``end``, or one frame past the session's start
+    /// when a last segment shorter than the priming would otherwise get no audio to write.
+    /// Pad and finish the session here.
+    public func end(from index: Int, early: Bool = false) -> CMTime {
+        CMTime(value: max(totalFrames, configuration(from: index, early: early).startTime.value + 1), timescale: 48_000)
+    }
 
     /// The segment that holds `time`, clamped to the grid.
     public func index(at time: CMTime) -> Int {
         guard time.isNumeric else { return time == .positiveInfinity ? segmentCount - 1 : 0 }
-        let seconds = min(max(time.seconds, 0), Double(totalFrames) / 48_000)
-        let frame = Int64((seconds * 48_000).rounded(.down))
-        return Int(min(frame, totalFrames - 1) / segmentFrames)
+        // Rescaled exactly, so a boundary in another timescale stays in its segment.
+        let frame = CMTimeConvertScale(time, timescale: 48_000, method: .roundTowardNegativeInfinity).value
+        return Int(min(max(frame, 0), totalFrames - 1) / segmentFrames)
     }
 
     /// The presentation time segment `index` starts at.

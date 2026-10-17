@@ -113,7 +113,7 @@ let audio = try SpatialAudioTranscoder(codec: codec, destination: .segments(
         if segment.kind == .initialization { return storeInitialization(segment.data) }  // init.mp4
         if let at = grid.index(of: segment), at >= index { store(segment.data, at: at) }
     }), configuration: settings)
-// At the track's end, pad(to:) a segment at a time if the video runs on, then finish(paddingTo: grid.end).
+// At the track's end, pad(to:) a segment at a time if the video runs on, then finish(paddingTo: grid.end(from: index)).
 ```
 
 A session's first fragment carries the encoder priming in place of 42.7 ms of audio, which is right after a seek. A session that continues another session's segments starts one segment `early` (`grid.configuration(from: index, early: true)`) and drops that fragment, or the join loses those 42.7 ms. A segment past the track's end needs a session with no input that pads from its start with `pad(to:)`. `cancel()` also stops a long padding `finish`.
