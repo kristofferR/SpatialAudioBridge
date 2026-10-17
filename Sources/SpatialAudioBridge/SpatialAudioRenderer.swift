@@ -117,8 +117,10 @@ public actor SpatialAudioRenderer {
         var end = queued.last?.end
         // During a refill after a route change, only what has been enqueued again counts.
         if refilling {
-            end = replayIndex > 0 ? CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(replay[replayIndex - 1]),
-                                              CMTime(value: 1024, timescale: 48_000)) : nil
+            // A refill still awaiting its native flush has replayed nothing yet.
+            end = replay.indices.contains(replayIndex - 1)
+                ? CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(replay[replayIndex - 1]), CMTime(value: 1024, timescale: 48_000))
+                : nil
         }
         guard let end else { return .zero }
         return CMTimeMaximum(.zero, CMTimeSubtract(end, synchronizer.currentTime()))
