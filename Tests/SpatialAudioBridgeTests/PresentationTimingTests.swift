@@ -25,42 +25,67 @@ func readPresentedAudio(_ url: URL, layout: SpatialAudioLayout) async throws -> 
     let track = try #require(try await asset.loadTracks(withMediaType: .audio).first)
     let format = try #require(try await track.load(.formatDescriptions).first)
     #expect(CMFormatDescriptionGetMediaSubType(format) == kAudioFormatAPAC)
-    let reader = try AVAssetReader(asset: asset)
-    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+    // copyNextSampleBuffer blocks, so read on a thread outside Swift's cooperative pool: three
+    // readers blocked there never returned on a three-core runner, stalling every test (#56).
+    let loaded = LoadedTrack(asset: asset, track: track)
+    let (buffers, samples) = try await withCheckedThrowingContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            continuation.resume(with: Result { try copyDecodedBuffers(loaded, layout: layout) })
+        }
+    }
+    let firstTime = try #require(buffers.first?.time)
+    var frames = 0
+    for buffer in buffers {
+        try #require(buffer.time.isNumeric)
+        let expected = CMTimeAdd(firstTime, CMTime(value: Int64(frames), timescale: 48_000))
+        #expect(abs(CMTimeSubtract(buffer.time, expected).seconds) <= 1.0 / 48_000, "Decoded buffers must be contiguous")
+        frames += buffer.frames
+    }
+    #expect(samples.allSatisfy { $0.isFinite })
+    return PresentedAudio(firstTime: firstTime, samples: samples, channels: layout.channelCount)
+}
+
+/// Carries a loaded track to the reading thread; the reader is created and used only there.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private struct LoadedTrack: @unchecked Sendable {
+    let asset: AVURLAsset
+    let track: AVAssetTrack
+}
+
+/// Every decoded buffer's presentation time and frame count, and the interleaved PCM.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private func copyDecodedBuffers(_ loaded: LoadedTrack, layout: SpatialAudioLayout) throws
+    -> (buffers: [(time: CMTime, frames: Int)], samples: [Float]) {
+    let channels = layout.channelCount
+    let reader = try AVAssetReader(asset: loaded.asset)
+    let output = AVAssetReaderTrackOutput(track: loaded.track, outputSettings: [
         AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true,
         AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false,
-        AVNumberOfChannelsKey: layout.channelCount, AVChannelLayoutKey: layoutData(layout),
+        AVNumberOfChannelsKey: channels, AVChannelLayoutKey: layoutData(layout),
     ])
-    try #require(reader.canAdd(output))
+    guard reader.canAdd(output) else { throw SpatialAudioError.decoding("Cannot read the APAC track as PCM") }
     reader.add(output)
-    try #require(reader.startReading())
+    guard reader.startReading() else { throw reader.error ?? SpatialAudioError.decoding("The reader did not start") }
+    var buffers: [(time: CMTime, frames: Int)] = []
     var samples: [Float] = []
-    var firstTime: CMTime?
     while let buffer = output.copyNextSampleBuffer() {
         let count = CMSampleBufferGetNumSamples(buffer)
-        try #require(count > 0)
-        let time = CMSampleBufferGetPresentationTimeStamp(buffer)
-        try #require(time.isNumeric)
-        if let firstTime {
-            let expected = CMTimeAdd(firstTime, CMTime(value: Int64(samples.count / layout.channelCount), timescale: 48_000))
-            #expect(abs(CMTimeSubtract(time, expected).seconds) <= 1.0 / 48_000,
-                    "Decoded buffers must be contiguous")
-        } else {
-            firstTime = time
+        guard count > 0, let block = CMSampleBufferGetDataBuffer(buffer),
+              CMBlockBufferGetDataLength(block) == count * channels * MemoryLayout<Float>.size else {
+            throw SpatialAudioError.decoding("Unexpected decoded buffer layout")
         }
-        let block = try #require(CMSampleBufferGetDataBuffer(buffer))
-        let bytes = CMBlockBufferGetDataLength(block)
-        try #require(bytes == count * layout.channelCount * MemoryLayout<Float>.size)
-        var pcm = [Float](repeating: 0, count: count * layout.channelCount)
+        var pcm = [Float](repeating: 0, count: count * channels)
         let status = pcm.withUnsafeMutableBytes {
-            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: bytes, destination: $0.baseAddress!)
+            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!)
         }
-        try #require(status == noErr)
-        #expect(pcm.allSatisfy { $0.isFinite })
+        guard status == noErr else { throw SpatialAudioError.coreMedia(status) }
+        buffers.append((CMSampleBufferGetPresentationTimeStamp(buffer), count))
         samples.append(contentsOf: pcm)
     }
-    try #require(reader.status == .completed, "\(String(describing: reader.error))")
-    return PresentedAudio(firstTime: try #require(firstTime), samples: samples, channels: layout.channelCount)
+    guard reader.status == .completed else {
+        throw reader.error ?? SpatialAudioError.decoding("The reader stopped with status \(reader.status.rawValue)")
+    }
+    return (buffers, samples)
 }
 
 @Suite(.serialized)
