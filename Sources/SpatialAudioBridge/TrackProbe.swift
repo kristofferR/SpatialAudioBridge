@@ -31,7 +31,8 @@ extension SpatialAudioCodec {
         do {
             try data.withUnsafeBytes { bytes in
                 var offset = 0
-                while offset < bytes.count, !decoder.isSpatial {
+                // All of it: later access units can still carry metadata the renderer refuses.
+                while offset < bytes.count {
                     let count = min(4096, bytes.count - offset)
                     _ = try decoder.decode(UnsafeRawBufferPointer(rebasing: bytes[offset..<offset + count]), end: false)
                     offset += count
