@@ -12,7 +12,7 @@ private func read32(_ bytes: [UInt8], _ index: Int) -> UInt32 { bytes[index..<in
 
 /// A fragment shaped like AVAssetWriter's: default durations in tfhd, sizes in two runs.
 @available(macOS 26, iOS 26, tvOS 26, *)
-private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
+private func fragment(sizes: [[UInt32]], sequence: UInt32 = 1) -> (data: Data, payload: [UInt8]) {
     let payload = sizes.joined().enumerated().flatMap { index, size in [UInt8](repeating: UInt8(index), count: Int(size)) }
     let tfhd = box("tfhd", be32(0x02_0038) + be32(1) + be32(1024) + be32(5) + be32(0x0001_0000))
     let tfdt = box("tfdt", be32(0) + be32(93_952))
@@ -20,7 +20,7 @@ private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
         let runs = zip(sizes, offsets).flatMap { run, offset in
             box("trun", be32(0x201) + be32(UInt32(run.count)) + be32(offset) + run.flatMap(be32))
         }
-        return box("moof", box("mfhd", be32(0) + be32(1)) + box("traf", tfhd + tfdt + runs))
+        return box("moof", box("mfhd", be32(0) + be32(sequence)) + box("traf", tfhd + tfdt + runs))
     }
     // Data offsets count from the moof's start to each run's first byte in the mdat.
     let length = UInt32(moof(offsets: sizes.map { _ in 0 }).count) + 8
@@ -58,11 +58,14 @@ private func fragment(sizes: [[UInt32]]) -> (data: Data, payload: [UInt8]) {
                     duration: CMTime(value: packets * 1024, timescale: 48_000))
     }
     let (last, _) = fragment(sizes: [[10, 11, 12], [13, 14]])
+    // The writer repeats the fragment's samples under the next sequence number.
+    let (repeated, _) = fragment(sizes: [[10, 11, 12], [13, 14]], sequence: 2)
     delegate.receive(APACSegment(kind: .initialization, data: Data([0]), startTime: nil, duration: nil))
     delegate.receive(media(Data([1]), start: 0, packets: 75))
     delegate.holdLastSegment()
     delegate.receive(media(last, start: 76_800, packets: 5))
-    delegate.receive(media(last, start: 76_800, packets: 5))
+    delegate.receive(media(repeated, start: 76_800, packets: 5))
+    #expect(delegate.error == nil)
     // 80 packets minus 2048 priming frames and 640 frames of final padding.
     delegate.deliverLastSegment(sourceFrames: 80 * 1024 - 2048 - 640, priming: 2048)
     delegate.receive(media(last, start: 76_800, packets: 5))
