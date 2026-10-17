@@ -223,7 +223,8 @@ func mutatedPublicAtmosBurstsDecodeOrFailWithinBounds() throws {
             for block in blocks {
                 #expect(block.sampleRate == 48_000 && block.channels == layout.channelCount
                         && block.samples.count == block.frames * block.channels, "seed \(seed)")
-                #expect(block.samples.allSatisfy(\.isFinite), "seed \(seed)")
+                let finite = block.samples.allSatisfy(\.isFinite)
+                #expect(finite, "seed \(seed)")
             }
         }
         var unpacker = IEC61937Unpacker()
