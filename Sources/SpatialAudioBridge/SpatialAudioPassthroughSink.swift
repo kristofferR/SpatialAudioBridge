@@ -12,7 +12,7 @@ import Synchronization
 /// let taken = sink.write(bursts)              // offer the rest again later
 /// if sink.isReady { synchronizer.setRate(1, time: seekTime) }
 /// if let failure = sink.failure {
-///     // A discontinuity: begin(at:) again. Anything else: fall back to the player's own output.
+///     // A discontinuity: begin(at:) at the next write. Anything else: fall back to the player's own output.
 /// }
 /// let played = sink.progress?.submittedEnd    // for a clock run from submitted audio
 /// sink.end()                                  // at the end of the stream
@@ -77,8 +77,9 @@ public final class SpatialAudioPassthroughSink: Sendable {
 
     /// The error that stopped the current timeline, if any. Poll it, as an audio output polls for
     /// its own failure. A ``SpatialAudioError/discontinuity(_:)``, such as an IEC 61937 pause
-    /// burst, needs only a new ``begin(at:)`` at the player's time for the audio that follows. Fall
-    /// back to the host's own output for any other error; after
+    /// burst, ends the timeline and drops the rest of that write; resume as after a seek, with
+    /// ``begin(at:)`` at the time of the next audio the player writes. Fall back to the host's own
+    /// output for any other error; after
     /// ``SpatialAudioError/unsupported(_:)`` the track will never play, so keep it on that output.
     public var failure: (any Error)? { state.withLock { $0.failure } }
 

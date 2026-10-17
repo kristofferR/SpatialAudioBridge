@@ -69,14 +69,14 @@ let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: sy
 sink.begin(at: seekTime)          // whenever the player (re)starts the output
 let taken = sink.write(bursts)    // offer the rest again; the buffer holds about 0.3 s
 if sink.isReady { /* start the clock */ }
-if let failure = sink.failure { /* a discontinuity: begin again; otherwise fall back */ }
+if let failure = sink.failure { /* a discontinuity: begin at the next write; otherwise fall back */ }
 let delay = await sink.queuedAhead
 let played = sink.progress?.submittedEnd  // for a clock run from submitted audio
 sink.end()                        // drain at the end of the stream
 sink.close()
 ```
 
-`write` takes bytes only up to its buffer limit while the renderer is full, so the player's own buffering provides the backpressure. A failure stops the timeline, sets `failure` and refuses input until the next `begin(at:)`; poll it as the output polls for its own failure. A `SpatialAudioError.discontinuity`, such as an IEC 61937 pause burst, needs only a new `begin(at:)` at the player's time. Any other failure means falling back to the player's own output, and after `.unsupported` the track will never play. A host whose clock follows the audio it has handed over, as mpv's does, can read `progress`: how far the enqueued audio reaches, and whether `end()` has enqueued all of it, also when there was nothing to play. The host still owns the synchronizer's rate, `AtmosOutputActivator` and the audio session.
+`write` takes bytes only up to its buffer limit while the renderer is full, so the player's own buffering provides the backpressure. A failure stops the timeline, sets `failure` and refuses input until the next `begin(at:)`; poll it as the output polls for its own failure. A `SpatialAudioError.discontinuity`, such as an IEC 61937 pause burst, ends the timeline and drops the rest of that write; resume as after a seek, with `begin(at:)` at the time of the next audio the player writes. mpv's passthrough sends no pause bursts: paused, it writes zeros, which the sink skips. Any other failure means falling back to the player's own output, and after `.unsupported` the track will never play. A host whose clock follows the audio it has handed over, as mpv's does, can read `progress`: how far the enqueued audio reaches, and whether `end()` has enqueued all of it, also when there was nothing to play. The host still owns the synchronizer's rate, `AtmosOutputActivator` and the audio session.
 
 After a seek, or when attaching to a running output, the bursts may resume between TrueHD major syncs, where decoding cannot start, or even inside an access unit. The unpacker drops the data up to the first major sync and adds its duration to `skippedDuration`, measured by its share of the 20 ms MAT frames and so accurate to about one access unit (0.8 ms). Adding it to the first buffer's time keeps audio on the timeline. DTS-HD frames each start with a core sync and need no adjustment. Other burst types, such as AC-3 or DTS core alone, throw; let the player keep its own output for them.
 
