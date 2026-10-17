@@ -130,6 +130,13 @@ jobs:
           ./scripts/release-core.sh "$VERSION"
       - name: Verify mixed-language host linking and unwinding
         run: ./scripts/test-mixed-host.sh
+      - name: Locate public TrueHD test vectors
+        run: |
+          manifest="$(cargo metadata --format-version 1 --locked --manifest-path Rust/SpatialAudioCore/Cargo.toml \
+            | jq -r '.packages[] | select(.name == "truehd") | .manifest_path')"
+          vectors="$(dirname "$manifest")/tests/assets"
+          test -f "$vectors/fba_atmos_obj.mlp" && test -f "$vectors/fba_atmos_dimtrim.mlp"
+          echo "SAB_TRUEHD_VECTORS=$vectors" >> "$GITHUB_ENV"
       - name: Build and test the package
         run: |
           swift build -Xswiftc -warnings-as-errors
