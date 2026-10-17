@@ -184,6 +184,43 @@ The four Dolby demo fixtures and both DTS:X fixtures pass without a rejection. O
 | Apple's live Atmos render | `AVPlayer` renders DD+ Atmos objects to 7.1.4 when its output device has that layout: BlackHole 16ch set to Apple's Atmos 7.1.4 layout, with an `MTAudioProcessingTap` recording the 12 channels. Against our 7.1.4 render of the TrueHD originals of three Dolby demos and four film excerpts, level-matched and compared in 200 ms windows: median direction error 0.1–2.1° (90th percentile at most 7.7°), ceiling energy share within 0.6 percentage points and mean elevation within ±0.4° on every clip, median per-channel share error at most 0.4 dB. The panner before the TS 103 448 one was 0.1–6.6° off and put up to 4.1 points too much in the ceiling. The reference passes through a lossy JOC encode; that error has not been separated out |
 | Level against Apple's render | Apple's render of DD+ Atmos ignores dialogue normalisation. Without it, the default since 1.3.0, our 7.1.4 renders of the TrueHD originals of natures-fury (dialogue level −27 dB) and amaze (−31 dB) were 0.15 dB and 0.13 dB below Apple's render of the matched DD+ tracks; with it, natures-fury was 4.15 dB below |
 
+### Independent decoder and pipeline comparisons
+
+The fixture tests compare SAB with itself, so an error shared by both runs passes them. These checks compare it with something else. They ran on 2026-10-17 on Linux with FFmpeg n9.0.2, Swift 6.4 and Rust 1.99.0, against the public fixtures and 30-second excerpts of library films. Media and decoded audio stayed outside the repository.
+
+**DTS compatible bed against FFmpeg.** `scripts/compare-dts-bed.sh` gives FFmpeg and the `dts_bed` example the same DTS-HD MA bytes, cut by stream copy at whole frames. The example frames them as the renderer does and keeps the lossless bed from the same `dca::HdDecoder::decode_into` call, before fold subtraction. It aligns both decodes frame by frame from the first sample, requires equal sample counts and compares every sample as an integer. Each bed channel is matched by the speaker its DTS index declares, as the renderer routes it: C, L, R, LFE, side surrounds (Ls/Rs or Lss/Rss) and back surrounds (Lsr/Rsr) to FFmpeg's FC, FL, FR, LFE, SL/SR and BL/BR. A channel that is digital silence, or that also equals another reference channel, is reported as inconclusive rather than matched.
+
+| Source | Result |
+|---|---|
+| *Casino*, *Gladiator* (extended), *How to Train Your Dragon*, *The Big Lebowski*, *Independence Day* (IMAX presentation), *Ex Machina*, *The Bourne Identity* and *Fast Five*, 1.45–1.80 million sample frames each | Zero differing samples in all eight channels after the two warm-up frames |
+| *The Prince of Egypt*, two excerpts | Zero differing samples in six channels; the back surrounds are digital silence in both, so their mapping is unproven |
+| Trinnov Experience (D4) and Object Emulator fixtures, whole | Zero differing samples; the emulator's LFE is silent throughout |
+| Warm-up | The first two frames differ between the decoders in 3,000–4,100 samples when entered mid-stream, and in 0 (Experience) and 292 (Object Emulator) from the start of a stream. SAB plays these frames as silence |
+
+No tolerance was needed. The `dca` decoder is a Rust port of FFmpeg's, so this establishes a faithful port with correct framing, scale and speaker mapping, not agreement between two independent designs. FFmpeg's bed is not a spatial reference, and the comparison does not cover fold subtraction or rendering.
+
+**Raw input against the IEC 61937 path.** `scripts/compare-iec61937.sh` wraps an elementary stream with FFmpeg's `spdif` muxer, MAT for TrueHD and type IV at 768 kHz for DTS-HD, and attaches 0.3 of the way in, mid-burst. The unmodified `IEC61937Unpacker.swift`, built on Linux against small stand-ins for `CMTime` and `SpatialAudioError`, unpacks the rest in uneven chunks. Both streams then render through the C interface in uneven chunks. The unpacked bytes were the raw stream's from a sync point in every case; FFmpeg writes only whole MAT frames, so up to 10 kB of a TrueHD stream's end is not delivered and the raw render stops at the same byte.
+
+| Stream | Content | Placement |
+|---|---|---|
+| DTS:X: Object Emulator, Experience (D4), *Gladiator*, *Independence Day*, *Casino* | Two warm-up frames of silence, as documented, then bit-identical to the raw render from 21–136 ms to the end | Exact against both the carrier and the raw render |
+| TrueHD Atmos: Helicopter at four attach points, *Twisters*, *Black Hawk Down*, *Angels & Demons* | The same samples to the end. *Twisters* was bit-identical throughout and *Black Hawk Down* from 9.7 s. Elsewhere, after up to −40 dBFS in the first 15 ms, where held audio takes the first object state, differences stayed below −91 dBFS | Within 0.5 frames of where the bursts carry the audio. Against the raw render: −20.9 to +7.4 ms |
+
+The comparison fails on unequal aligned sample counts or non-finite PCM. DTS requires at least two core-frame durations of leading silence, calculated from the compressed header. After that, settling differences may be at most −30 dBFS until 150 ms, then the render must stay bit-identical to the end. TrueHD permits differences up to −39 dBFS in the first 15 ms, then up to −90 dBFS to the end. These are explicit bounds around the measured startup and rounding differences above, not codec guarantees; a render too short to check beyond startup fails. DTS unpacking must reach the raw stream's end and `finish()` must succeed; only TrueHD permits the incomplete MAT tail described above. `scripts/compare_mat.py` independently matches raw access units against the complete MAT bursts, requiring the unpacked stream to reach the last fully carried unit before truncating the raw render. Its synthetic checks run with `python3 -m unittest discover -s scripts -p 'test_compare_mat.py'`.
+
+The TrueHD differences that never vanish are float rounding: an object ramp interrupted by the next update starts from its rounded current gain, so with continuous movement the two sessions never share a ramp end again.
+
+The TrueHD placement against the raw render is a gap in `skippedDuration`, not in the unpacker's arithmetic. FFmpeg spaces access units in MAT frames by their input timing, and Helicopter's access units arrive 0–71 ms before they play as the decoder buffer fills and drains. The unpacker times dropped data by its position in the carrier, so after attaching mid-stream the audio is off by the change in that lead since the burst stream began. It is exact for DTS-HD. The documented "about one access unit" holds only while the lead stays unchanged, such as just after the player restarts its output.
+
+**Expected-output baselines.** `Rust/SpatialAudioCore/tests/baselines` holds reviewed text baselines for seven excerpts, each in 7.1.4 and 9.1.6. The TrueHD Atmos excerpts are Helicopter, *Twisters* and *Black Hawk Down* from 11:10, during its warp-mode trims. The standard DTS:X excerpts are the Object Emulator and *Gladiator*, and the alternate excerpts the Experience (D4) and *Independence Day* (IMAX). The `baseline` example renders them through the C interface with peak limiting and uneven chunks. It records the sample rate, frame count and duration, and per speaker feed a hash, peak, RMS, first non-zero frame and the RMS of each second. Each file also records the excerpt's SHA-256, so a different cut reports a changed input instead of a rendering change:
+
+```sh
+SAB_FIXTURE_DIR="/absolute/path/fixtures" scripts/compare-baselines.sh            # compare all
+scripts/compare-baselines.sh --update twisters                                     # after review
+```
+
+For a difference, the script reports each changed feed's old and new peak and RMS and the seconds that moved, and fails. Before running `--update` for an intentional rendering change, record that report and the justification in the pull request. Hashes depend on floating-point results, so baselines are for the x86_64 Linux workstation. They establish regression behavior, not equivalence to a reference renderer, and APAC round trips stay separate with their own lossy-codec tolerances.
+
 ## Coverage
 
 The Core workflow runs Rust tests and Clippy on Linux before the Apple archive and package checks. Clippy treats warnings as errors. Public CI has no private media: Rust's compressed-fixture tests remain ignored, and fixture-dependent Swift tests are skipped. A successful workflow does not establish compressed-media or receiver behavior.
