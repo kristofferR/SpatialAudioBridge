@@ -385,7 +385,7 @@ actor StreamEngine {
     private func restart(at index: Int) {
         let ahead: Run? = run.flatMap { run in
             guard Self.keepsAhead(index, runStart: run.start, lookahead: lookahead, ended: store.ended(run: run.id)),
-                  store.canContinue(run: run.id, from: run.start + 1, lookahead: lookahead) else { return nil }
+                  store.rebase(run: run.id, from: run.start + 1, lookahead: lookahead) else { return nil }
             return run
         }
         for run in [run, helper].compactMap({ $0 }) where run.id != ahead?.id {
@@ -398,7 +398,6 @@ actor StreamEngine {
         if let ahead {
             // Its first fragment carries the encoder priming in place of audio, so the new run
             // converts that segment too, and playback joins the kept run after it.
-            store.rebase(run: ahead.id, from: ahead.start + 1)
             store.drop(ahead.start)
             helper = Run(id: ahead.id, start: ahead.start + 1, task: ahead.task)
             log.info("seg\(index) restarts behind the run from seg\(ahead.start), which carries on from seg\(ahead.start + 1)")
@@ -648,25 +647,18 @@ final class SegmentStore: @unchecked Sendable {
 
     func failure(run: UUID) -> (any Error)? { lock.withLock { ends[run] ?? nil } }
 
-    /// A retained run must still hold every segment it has passed at the join, within the new
-    /// helper's cache window. It cannot regenerate audio that has already been evicted.
-    func canContinue(run: UUID, from first: Int, lookahead: Int) -> Bool {
+    /// Retains `run` only if its converted audio from the join fits in the new helper's cache
+    /// window. Validates and rebases under one lock so callbacks cannot advance it in between.
+    /// Takes future fragments from `first` on, or after what it has produced, and resets its speed.
+    func rebase(run: UUID, from first: Int, lookahead: Int) -> Bool {
         lock.withLock {
-            guard let progress = runs[run], progress.produced < first + lookahead + 3 else { return false }
-            return progress.produced < first || (first...progress.produced).allSatisfy { segments[$0] != nil }
-        }
-    }
-
-    /// Takes `run`'s fragments only from segment `first` on, or after what it has produced, and
-    /// measures its conversion speed from now, as for a run starting at the latest seek.
-    func rebase(run: UUID, from first: Int) {
-        lock.withLock {
-            guard var progress = runs[run] else { return }
+            guard let progress = runs[run], progress.produced < first + lookahead + 3,
+                  progress.produced < first || (first...progress.produced).allSatisfy({ segments[$0] != nil }) else { return false }
             var rebased = Progress(first: max(first, progress.produced + 1))
             rebased.produced = progress.produced
             if progress.holdStarted != nil { rebased.holdStarted = .now }
-            progress = rebased
-            runs[run] = progress
+            runs[run] = rebased
+            return true
         }
     }
 
