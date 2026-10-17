@@ -39,6 +39,10 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
     /// stall recovery resumes there.
     private var pendingSeek: (target: CMTime, since: ContinuousClock.Instant)?
     private var recoveries = 0
+    /// When AVPlayer gave up after a wait, such as during a server outage, the latest reload and how many.
+    private var abandoned: (since: ContinuousClock.Instant, reloaded: ContinuousClock.Instant, attempts: Int)?
+    private var ended = false
+    private var endObserver: (any NSObjectProtocol)?
     /// The last logged audio route.
     private var route = ""
 
@@ -79,6 +83,16 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
             player.play()
             status = stream.renditionName
             monitor = Task { [weak self] in await self?.report() }
+            Task { [weak self] in await self?.logDurations(file: file, stream: stream) }
+            endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
+                                                                 object: nil, queue: .main) { [weak self] notification in
+                // The activator's silent stream loops through its own item; only the film's end counts.
+                let item = (notification.object as AnyObject?).map(ObjectIdentifier.init)
+                MainActor.assumeIsolated {
+                    guard let self, item == self.player.currentItem.map(ObjectIdentifier.init) else { return }
+                    self.noteEnd()
+                }
+            }
             if environment["SAB_SEEK_TEST"] == "1" { await seekTest() }
         } catch {
             status = "\(error)"
@@ -189,9 +203,9 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
             guard let synchronizer else { return }
             logRoute()
             let rendering = await renderer.renderingStatus
-            log(String(format: "t=%.1f rate=%.1f renderer=%d silentAtmos=%@ available=%d MB", synchronizer.currentTime().seconds,
+            log(String(format: "t=%.1f rate=%.1f renderer=%d silentAtmos=%@ footprint=%d MB available=%d MB", synchronizer.currentTime().seconds,
                        synchronizer.rate, rendering.rawValue, atmos?.isActive == true ? "on" : "off",
-                       os_proc_available_memory() / 1_000_000))
+                       Self.footprintMB(), os_proc_available_memory() / 1_000_000))
         }
     }
 
@@ -199,10 +213,12 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
     /// device diagnostics.
     private func report() async {
         var status = player.timeControlStatus
+        var previous = status
         var changed = ContinuousClock.now
         for tick in 1... {
             try? await Task.sleep(for: .milliseconds(250))
             if Task.isCancelled { return }
+            previous = status
             if player.timeControlStatus != status {
                 let now = ContinuousClock.now
                 log(String(format: "%@ → %@ after %.2f s at t=%.1f", Self.name(status), Self.name(player.timeControlStatus),
@@ -217,7 +233,7 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
             // AVPlayer drops a connection, and then stops requesting media. A fresh item recovers:
             // at the seek target if playback never reached it, otherwise where it stopped. Seeks
             // took up to 15 s to resume on a long-GOP title, so 20 s of waiting means a wedge.
-            if status == .waitingToPlayAtSpecifiedRate, ContinuousClock.now - changed > .seconds(20),
+            if abandoned == nil, status == .waitingToPlayAtSpecifiedRate, ContinuousClock.now - changed > .seconds(20),
                let asset = player.currentItem?.asset as? AVURLAsset {
                 let position = pendingSeek?.target ?? player.currentTime()
                 log(String(format: "recovering a stalled item at t=%.1f, resuming at %.1f", player.currentTime().seconds, position.seconds))
@@ -227,6 +243,30 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                 player.play()
                 changed = .now
             }
+            // AVPlayer gives up and pauses after a wait it cannot satisfy, or fails the item, for
+            // example while the server is unreachable. Reload where it stopped, backing off.
+            if !ended, abandoned == nil, player.currentItem?.status == .failed
+                || status == .paused && previous == .waitingToPlayAtSpecifiedRate {
+                abandoned = (.now, .now, 0)
+                log(String(format: "playback stopped at t=%.1f: %@", player.currentTime().seconds,
+                           player.currentItem?.error.map(String.init(describing:)) ?? "gave up waiting"))
+            }
+            if let lost = abandoned {
+                if status == .playing {
+                    log(String(format: "resumed after %.1f s and %d reloads", (ContinuousClock.now - lost.since) / .seconds(1), lost.attempts))
+                    abandoned = nil
+                } else if ContinuousClock.now - lost.reloaded > .seconds(5 * Double(1 << min(lost.attempts, 3))),
+                          let asset = player.currentItem?.asset as? AVURLAsset {
+                    let position = pendingSeek?.target ?? player.currentTime()
+                    abandoned = (lost.since, .now, lost.attempts + 1)
+                    log(String(format: "reloading at %.1f (attempt %d)", position.seconds, lost.attempts + 1))
+                    recoveries += 1
+                    player.replaceCurrentItem(with: AVPlayerItem(url: asset.url))
+                    await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
+                    player.play()
+                    changed = .now
+                }
+            }
             guard tick % 20 == 0 else { continue }
             logRoute()
             let item = player.currentItem
@@ -235,11 +275,51 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                 "\($0.errorStatusCode) \($0.uri.flatMap(URL.init(string:))?.lastPathComponent ?? "-") \($0.errorComment ?? "")"
             } ?? []
             let speed = await stream?.conversionSpeed ?? 0
-            log(String(format: "t=%.1f rate=%.1f item=%d silentAtmos=%@ conversion=%.2fx available=%d MB errors=%@",
+            log(String(format: "t=%.1f rate=%.1f item=%d silentAtmos=%@ conversion=%.2fx footprint=%d MB available=%d MB errors=%@",
                        player.currentTime().seconds, player.rate, item?.status.rawValue ?? -1,
-                       atmos?.isActive == true ? "on" : "off", speed, os_proc_available_memory() / 1_000_000,
+                       atmos?.isActive == true ? "on" : "off", speed, Self.footprintMB(), os_proc_available_memory() / 1_000_000,
                        errors.joined(separator: " | ")))
         }
+    }
+
+    private func noteEnd() {
+        ended = true
+        log(String(format: "ended at t=%.3f, item duration %.3f", player.currentTime().seconds,
+                   player.currentItem?.duration.seconds ?? .nan))
+    }
+
+    /// The process's physical footprint, the figure jetsam limits apply to.
+    private static func footprintMB() -> Int {
+        // Swift 6 rejects the global `mach_task_self_`; the trap returns a reference to release.
+        let task = task_self_trap()
+        defer { mach_port_deallocate(task, task) }
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(task, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? Int(info.phys_footprint / 1_000_000) : -1
+    }
+
+    /// Logs the source's duration beside the audio and video playlists' and the item's, so an
+    /// early or late ending can be traced to one of them.
+    private func logDurations(file: MatroskaFile, stream: APACStream) async {
+        func total(_ url: URL) async -> Double? {
+            guard let (data, _) = try? await URLSession.shared.data(from: url), let text = String(data: data, encoding: .utf8) else { return nil }
+            return text.split(separator: "\n").filter { $0.hasPrefix("#EXTINF:") }
+                .compactMap { Double($0.dropFirst(8).prefix { $0 != "," }) }.reduce(0, +)
+        }
+        var video: Double?
+        if let master = stream.masterPlaylistURL, let (data, _) = try? await URLSession.shared.data(from: master),
+           let text = String(data: data, encoding: .utf8),
+           let variant = text.split(separator: "\n").first(where: { !$0.hasPrefix("#") && !$0.isEmpty }),
+           let url = URL(string: String(variant), relativeTo: master) {
+            video = await total(url)
+        }
+        let audio = await total(stream.audioPlaylistURL)
+        try? await Task.sleep(for: .seconds(10))
+        log(String(format: "durations: source %.3f, audio playlist %.3f, video playlist %.3f, item %.3f",
+                   file.duration?.seconds ?? .nan, audio ?? .nan, video ?? .nan, player.currentItem?.duration.seconds ?? .nan))
     }
 
     private static func name(_ status: AVPlayer.TimeControlStatus) -> String {
