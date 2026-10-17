@@ -56,3 +56,44 @@ private func burst(type: UInt8) -> Data {
     #expect(!sink.isReady)
     #expect(await sink.queuedAhead == .zero)
 }
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func passthroughSinkReportsAPauseBurstAsADiscontinuity() async throws {
+    let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
+    defer { sink.close() }
+    sink.begin(at: .zero)
+    #expect(sink.write(burst(type: 0x03)) > 0)
+    let deadline = ContinuousClock.now + .seconds(3)
+    while sink.failure == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    guard case .discontinuity? = sink.failure as? SpatialAudioError else {
+        Issue.record("Expected a discontinuity, got \(String(describing: sink.failure))")
+        return
+    }
+    #expect(sink.progress == nil)
+    // A new timeline is all it takes.
+    sink.begin(at: CMTime(value: 2, timescale: 1))
+    #expect(sink.failure == nil)
+    #expect(sink.write(Data(count: 4)) == 4)
+}
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func passthroughSinkReportsProgressForItsTimeline() async throws {
+    let sink = try SpatialAudioPassthroughSink(codec: .trueHDAtmos, synchronizer: AVSampleBufferRenderSynchronizer())
+    defer { sink.close() }
+    #expect(sink.progress == nil)
+    let start = CMTime(value: 7, timescale: 1)
+    sink.begin(at: start)
+    var deadline = ContinuousClock.now + .seconds(3)
+    while sink.progress == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(sink.progress == SpatialAudioRendererProgress(timelineStart: start, submittedEnd: start, isFinal: false))
+    // Filler alone has nothing to play, and still reports its stream as final.
+    #expect(sink.write(Data(count: 64)) == 64)
+    sink.end()
+    deadline = ContinuousClock.now + .seconds(3)
+    while sink.progress?.isFinal != true, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(sink.progress == SpatialAudioRendererProgress(timelineStart: start, submittedEnd: start, isFinal: true))
+    #expect(sink.isReady)
+    // The next timeline starts without the previous one's progress.
+    sink.begin(at: .zero)
+    #expect(sink.progress == nil)
+}
