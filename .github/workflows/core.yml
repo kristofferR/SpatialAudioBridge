@@ -35,6 +35,8 @@ jobs:
           echo 'Rust unit tests and Clippy run without private media. The ignored compressed-fixture tests are not run by this workflow; use scripts/test-rust-fixtures.sh with all three fixture paths to run them explicitly.' >> "$GITHUB_STEP_SUMMARY"
       - name: Rust tests
         run: cargo test --release --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml"
+      - name: MAT comparison tests
+        run: python3 -m unittest discover -s scripts -p 'test_compare_mat.py'
       - name: Clippy
         run: cargo clippy --all-targets --locked --manifest-path "Rust/SpatialAudioCore/Cargo.toml" -- -D warnings
 

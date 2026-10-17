@@ -4,7 +4,7 @@
 //! are bit-identical to the end. Fails on unequal lengths or differences beyond the documented
 //! startup and rounding bounds. `scripts/compare-iec61937.sh` drives it.
 //!
-//! usage: pcm_diff <truehd|dtsx> <full.f32le> <later.f32le> <channels> <offset frames>
+//! usage: pcm_diff <truehd|dtsx> <full.f32le> <later.f32le> <channels> <offset frames> <silent frames>
 use std::{env, fs};
 
 fn read(path: &str) -> std::io::Result<Vec<f32>> {
@@ -22,13 +22,14 @@ fn read(path: &str) -> std::io::Result<Vec<f32>> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().collect();
-    let [_, codec, full, later, channels, offset] = args.as_slice() else {
+    let [_, codec, full, later, channels, offset, silence] = args.as_slice() else {
         return Err(
-            "usage: pcm_diff <truehd|dtsx> <full.f32le> <later.f32le> <channels> <offset frames>"
+            "usage: pcm_diff <truehd|dtsx> <full.f32le> <later.f32le> <channels> <offset frames> <silent frames>"
                 .into(),
         );
     };
-    let (channels, offset): (usize, usize) = (channels.parse()?, offset.parse()?);
+    let (channels, offset, silence): (usize, usize, usize) =
+        (channels.parse()?, offset.parse()?, silence.parse()?);
     if channels == 0 || !matches!(codec.as_str(), "truehd" | "dtsx") {
         return Err("expected nonzero channels and codec truehd or dtsx".into());
     }
@@ -92,14 +93,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         db(largest),
         db(settled)
     );
-    check(codec, aligned, later, channels)?;
+    check(codec, aligned, later, channels, silence)?;
     println!("PCM PASS");
     Ok(())
 }
 
-fn check(codec: &str, aligned: &[f32], later: &[f32], channels: usize) -> Result<(), String> {
+fn check(
+    codec: &str,
+    aligned: &[f32],
+    later: &[f32],
+    channels: usize,
+    silence: usize,
+) -> Result<(), String> {
     // Empirical bounds for the comparisons in docs/validation.md, at 48 kHz. DTS must settle
-    // within 150 ms (observed: 21–136 ms, including pending/warm-up frames). TrueHD allows
+    // within 150 ms (observed: 21–136 ms), with silent warm-up and at most −30 dBFS
+    // settling differences afterward, as in the mid-stream fixture tests. TrueHD allows
     // −39 dBFS for the first 15 ms of held-object startup, then only −90 dBFS float rounding.
     let startup = if codec == "dtsx" { 7_200 } else { 720 };
     if later.len() / channels <= startup {
@@ -111,7 +119,13 @@ fn check(codec: &str, aligned: &[f32], later: &[f32], channels: usize) -> Result
             return Err(format!("non-finite PCM at frame {frame}"));
         }
         let matches = if codec == "dtsx" {
-            frame < startup || a.to_bits() == b.to_bits()
+            if frame < silence {
+                b == 0.
+            } else if frame < startup {
+                (a - b).abs() <= 10f32.powf(-30. / 20.)
+            } else {
+                a.to_bits() == b.to_bits()
+            }
         } else {
             let db = if frame < startup { -39. } else { -90. };
             (a - b).abs() <= 10f32.powf(db / 20.)
@@ -135,11 +149,26 @@ mod tests {
         let full = vec![0.5; 7_202];
         let mut later = full.clone();
         later[..7_200].fill(0.);
-        assert!(check("dtsx", &full, &later, 1).is_ok());
+        assert!(check("dtsx", &full, &later, 1, 7_200).is_ok());
         later[7_200] += 1e-6;
-        assert!(check("dtsx", &full, &later, 1).is_err());
+        assert!(check("dtsx", &full, &later, 1, 7_200).is_err());
         later.fill(0.);
-        assert!(check("dtsx", &full, &later, 1).is_err());
+        assert!(check("dtsx", &full, &later, 1, 7_200).is_err());
+    }
+
+    #[test]
+    fn dts_requires_silent_warmup_then_bounds_settling_differences() {
+        let full = vec![0.5; 7_202 * 2];
+        let mut later = full.clone();
+        later[..2_048 * 2].fill(0.);
+        assert!(check("dtsx", &full, &later, 2, 2_048).is_ok());
+        later[100] = 1e-6;
+        assert!(check("dtsx", &full, &later, 2, 2_048).is_err());
+        later[100] = 0.;
+        later[2_048 * 2 + 1] -= 0.01;
+        assert!(check("dtsx", &full, &later, 2, 2_048).is_ok());
+        later[2_048 * 2 + 1] -= 0.1;
+        assert!(check("dtsx", &full, &later, 2, 2_048).is_err());
     }
 
     #[test]
@@ -147,22 +176,22 @@ mod tests {
         let full = vec![0.; 722];
         let mut later = vec![1e-5; 722];
         later[..720].fill(0.01);
-        assert!(check("truehd", &full, &later, 1).is_ok());
+        assert!(check("truehd", &full, &later, 1, 0).is_ok());
         later[720] = 1e-4;
-        assert!(check("truehd", &full, &later, 1).is_err());
+        assert!(check("truehd", &full, &later, 1, 0).is_err());
         later[720] = 0.;
         later[0] = 0.02;
-        assert!(check("truehd", &full, &later, 1).is_err());
+        assert!(check("truehd", &full, &later, 1, 0).is_err());
     }
 
     #[test]
     fn rejects_short_or_non_finite_comparisons() {
-        assert!(check("dtsx", &[0.; 10], &[0.; 10], 1).is_err());
+        assert!(check("dtsx", &[0.; 10], &[0.; 10], 1, 1_024).is_err());
         for codec in ["dtsx", "truehd"] {
             for value in [f32::NAN, f32::INFINITY] {
                 let mut later = vec![0.; 7_201];
                 later[0] = value;
-                assert!(check(codec, &vec![0.; 7_201], &later, 1).is_err());
+                assert!(check(codec, &vec![0.; 7_201], &later, 1, 0).is_err());
             }
         }
     }

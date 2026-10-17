@@ -105,6 +105,9 @@ if [[ "$codec" == dtsx && $((start + unpacked_bytes)) -ne "$raw_bytes" ]]; then
     echo "FAIL: DTS unpacking did not reach the end of the raw stream"
     exit 1
 fi
+if [[ "$codec" == truehd ]]; then
+    python3 -I "$root/scripts/compare_mat.py" "$stream" "$work/bursts.spdif" "$((start + unpacked_bytes))"
+fi
 # Render the raw stream up to the same end, so the renders' frame counts differ only by the start.
 head -c "$((start + unpacked_bytes))" "$stream" > "$work/raw.$format"
 
@@ -115,8 +118,19 @@ baseline() {
 raw_frames="$(baseline "$work/raw.$format" "$work/raw.f32le")"
 unpacked_frames="$(baseline "$work/unpacked.$format" "$work/unpacked.f32le")"
 offset=$((raw_frames - unpacked_frames))
+silence=0
+if [[ "$codec" == dtsx ]]; then
+    # The first two DTS frames must play as silence, independently of PCM convergence.
+    silence="$(python3 -I -c '
+import sys
+with open(sys.argv[1], "rb") as stream:
+    header = stream.read(18)
+assert header[:4] == b"\x7f\xfe\x80\x01", "expected a big-endian DTS core"
+print(2 * (((header[4] & 1) << 6 | header[5] >> 2) + 1) * 32)
+' "$work/unpacked.$format")"
+fi
 cargo run --quiet --release --locked --manifest-path "$root/Rust/SpatialAudioCore/Cargo.toml" \
-    --example pcm_diff -- "$codec" "$work/raw.f32le" "$work/unpacked.f32le" 12 "$offset"
+    --example pcm_diff -- "$codec" "$work/raw.f32le" "$work/unpacked.f32le" 12 "$offset" "$silence"
 # Where the bursts carry the first unpacked frame. Each DTS-HD burst spans its frame. FFmpeg spaces
 # TrueHD access units in MAT frames by their input timing, which runs ahead of their presentation
 # by the decoder buffer's varying delay, so that position is the input timing since the first unit.
