@@ -1,0 +1,10 @@
+# Excerpts with reviewed baselines. source is fixture:<file> (public, see docs/validation.md) or media:<film title>;
+# stream is the ffprobe audio stream index; start and duration are seconds.
+name	codec	source	stream	start	duration
+helicopter	truehd	fixture:helicopter.thd	-	-	-
+twisters	truehd	media:Twisters (2024)	1	2937	20
+black-hawk-down-warp	truehd	media:Black Hawk Down (2001)	1	670	20
+object-emulator	dtsx	fixture:dts-object-emulator.dts	-	-	-
+gladiator	dtsx	media:Gladiator (2000)	1	4102	20
+experience-d4	dtsx	fixture:experience-pro.dts	-	-	-
+independence-day-imax	dtsx	media:Independence Day (1996)	1	3685	20
