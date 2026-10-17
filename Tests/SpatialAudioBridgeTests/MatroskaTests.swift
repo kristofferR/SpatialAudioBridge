@@ -336,7 +336,8 @@ private func trueHDMatroska(_ units: [[UInt8]]) -> Data {
         MKV.element(EBML.audio, [MKV.float(EBML.samplingFrequency, 48000), MKV.uint(EBML.channels, 8)]),
     ])])
     let cluster = MKV.element(EBML.cluster, [MKV.uint(EBML.timestamp, 0)] + blocks)
-    return MKV.element(EBML.header, [MKV.string(EBML.docType, "matroska")]) + MKV.element(EBML.segment, [info, tracks, cluster])
+    // `MKV.id` returns a slice, so rebase the file to start at index zero as a read file does.
+    return Data([UInt8](MKV.element(EBML.header, [MKV.string(EBML.docType, "matroska")]) + MKV.element(EBML.segment, [info, tracks, cluster])))
 }
 
 /// Reads a file's first audio track into a transcoder writing APAC segments, as a host's stream would.
