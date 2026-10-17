@@ -50,9 +50,11 @@ import Foundation
                     playback.pause()
                     let pausedTime = playback.player.currentTime().seconds
                     try await Task.sleep(for: .seconds(1))
+                    // The silent stream plays on through a pause, so the route stays in Atmos.
                     guard playback.autoRunning, playback.autoIndex == 0, playback.player.rate == 0,
-                          !playback.silentAtmosActive, abs(playback.player.currentTime().seconds - pausedTime) < 0.01 else {
-                        throw ProbeFailure(message: "Pause advanced the excerpt or left the silent Atmos stream running.")
+                          playback.silentAtmosActive == (playback.silentAtmosEnabled && playback.version.isAPAC),
+                          abs(playback.player.currentTime().seconds - pausedTime) < 0.01 else {
+                        throw ProbeFailure(message: "Pause advanced the excerpt or changed the silent Atmos stream.")
                     }
                     playback.toggle()
                     print("AUTO PROBE PAUSE/RESUME PASS")

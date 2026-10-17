@@ -108,13 +108,8 @@ public final class AtmosOutputActivator {
             observe(AVPlayerItem.mediaSelectionDidChangeNotification) { $0.update() }
             observe(AVPlayerItem.didPlayToEndTimeNotification) { $0.settle() }
             observe(AVPlayerItem.failedToPlayToEndTimeNotification) { $0.settle() }
-            // A seek away from the end resumes the item.
-            observe(AVPlayerItem.timeJumpedNotification) { activator in
-                guard let item = activator.host?.currentItem else { return }
-                let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
-                if !end.isNumeric || item.currentTime() < end { activator.itemEnded = false }
-                activator.update()
-            }
+            // A seek away from the end resumes a host that took no action there.
+            observe(AVPlayerItem.timeJumpedNotification) { $0.update() }
         }
         update()
     }
@@ -132,7 +127,9 @@ public final class AtmosOutputActivator {
             return
         }
         if host.timeControlStatus != .paused {
-            // A host that takes no action at the item's end keeps playing there; see settle().
+            // Playing short of the end, after a seek back or a later endpoint, resumes the item. A
+            // host that takes no action at the end keeps playing there; see settle().
+            if itemEnded, !Self.isAtEnd(item) { itemEnded = false }
             if looper != nil || !itemEnded { play() }
         } else if looper != nil {
             // A host paused at the item's end or after a failure has stopped, not paused.
@@ -151,6 +148,11 @@ public final class AtmosOutputActivator {
             guard let self, itemEnded, let item = host?.currentItem, ObjectIdentifier(item) == ended else { return }
             release()
         }
+    }
+
+    private static func isAtEnd(_ item: AVPlayerItem) -> Bool {
+        let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
+        return end.isNumeric && item.currentTime() >= end
     }
 
     private func play() {
