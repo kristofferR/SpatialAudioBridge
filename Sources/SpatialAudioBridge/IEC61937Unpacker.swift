@@ -33,6 +33,9 @@ public struct IEC61937Unpacker: Sendable {
 
     public init() {}
 
+    /// Bytes held for an incomplete burst or TrueHD access unit.
+    var bufferedBytes: Int { pending.count + trueHD.count }
+
     /// The compressed stream in `bursts`, from the first point where decoding can start. Throws for
     /// bursts of other formats, such as AC-3 or DTS core alone.
     public mutating func unpack(_ bursts: Data) throws -> Data {
