@@ -16,7 +16,9 @@ public final class AtmosOutputActivator {
     private var rateObserver: NSObjectProtocol?
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
     private var observations: [NSKeyValueObservation] = []
-    private var selectionObserver: NSObjectProtocol?
+    private var itemObservers: [NSObjectProtocol] = []
+    /// Whether the current item reached its end or failed, since it became current or last seeked.
+    private var itemEnded = false
 
     /// Whether the silent Atmos stream is currently playing.
     public var isActive: Bool { player.timeControlStatus == .playing }
@@ -47,8 +49,10 @@ public final class AtmosOutputActivator {
         return bundle.url(forResource: "silent-atmos", withExtension: "mp4")!
     }
 
-    /// Plays the silent stream whenever `player` is playing, or waiting to play, an item for which
-    /// `playsAPAC` returns true. Pauses with the host and re-evaluates on item and audio selection changes.
+    /// Plays the silent stream once `player` plays, or waits to play, an item for which `playsAPAC`
+    /// returns true, and keeps it playing while the host pauses, so the route stays in Atmos for the
+    /// resume. Re-evaluates on item and audio selection changes, and unloads the stream for other items
+    /// and when the item ends or fails.
     /// Pass a predicate when an item offers APAC and other audio renditions.
     public func attach(to player: AVPlayer, playsAPAC: @escaping @MainActor (AVPlayerItem) -> Bool = { _ in true }) {
         detach()
@@ -66,8 +70,8 @@ public final class AtmosOutputActivator {
         ]
     }
 
-    /// Plays the silent stream while `synchronizer` runs, for hosts that render APAC with
-    /// `SpatialAudioRenderer` instead of AVPlayer.
+    /// Plays the silent stream once `synchronizer` runs, and through its pauses, for hosts that render
+    /// APAC with `SpatialAudioRenderer` instead of AVPlayer.
     public func attach(to synchronizer: AVSampleBufferRenderSynchronizer) {
         detach()
         self.synchronizer = synchronizer
@@ -91,19 +95,30 @@ public final class AtmosOutputActivator {
     }
 
     private func follow(_ item: AVPlayerItem?) {
-        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
-        selectionObserver = item.map {
-            NotificationCenter.default.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
-                                                   object: $0, queue: .main) { [weak self] _ in
-                Self.onMain { self?.update() }
+        itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        itemObservers = []
+        itemEnded = false
+        if let item {
+            let center = NotificationCenter.default
+            func observe(_ name: Notification.Name, _ body: @escaping @MainActor @Sendable (AtmosOutputActivator) -> Void) {
+                itemObservers.append(center.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
+                    Self.onMain { if let self { body(self) } }
+                })
             }
+            observe(AVPlayerItem.mediaSelectionDidChangeNotification) { $0.update() }
+            observe(AVPlayerItem.didPlayToEndTimeNotification) { $0.settle() }
+            observe(AVPlayerItem.failedToPlayToEndTimeNotification) { $0.settle() }
+            // A seek away from the end resumes a host that took no action there.
+            observe(AVPlayerItem.timeJumpedNotification) { $0.update() }
         }
         update()
     }
 
     private func update() {
+        // Pausing the stream with the host let the route leave Atmos on every pause, and on an
+        // AirPlay route the programme's audio did not return until a seek. Once loaded, it keeps playing.
         if let synchronizer {
-            if synchronizer.rate != 0 { play() } else { player.pause() }
+            if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
         guard let host, let item = host.currentItem, playsAPAC(item) else {
@@ -111,11 +126,33 @@ public final class AtmosOutputActivator {
             release()
             return
         }
-        guard host.timeControlStatus != .paused else {
-            player.pause()
-            return
+        if host.timeControlStatus != .paused {
+            // Playing short of the end, after a seek back or a later endpoint, resumes the item. A
+            // host that takes no action at the end keeps playing there; see settle().
+            if itemEnded, !Self.isAtEnd(item) { itemEnded = false }
+            if looper != nil || !itemEnded { play() }
+        } else if looper != nil {
+            // A host paused at the item's end or after a failure has stopped, not paused.
+            if itemEnded || item.status == .failed { release() } else { play() }
         }
-        play()
+    }
+
+    /// Marks the current item ended or failed and releases the stream unless the host moves on. A
+    /// queue or looper continues with its next item without pausing, and a host whose
+    /// `actionAtItemEnd` is `.none` keeps playing at the end, so give the host a moment.
+    private func settle() {
+        itemEnded = true
+        let ended = host?.currentItem.map(ObjectIdentifier.init)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, itemEnded, let item = host?.currentItem, ObjectIdentifier(item) == ended else { return }
+            release()
+        }
+    }
+
+    private static func isAtEnd(_ item: AVPlayerItem) -> Bool {
+        let end = item.forwardPlaybackEndTime.isNumeric ? item.forwardPlaybackEndTime : item.duration
+        return end.isNumeric && item.currentTime() >= end
     }
 
     private func play() {

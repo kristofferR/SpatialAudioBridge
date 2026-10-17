@@ -33,7 +33,7 @@ The predicate defaults to true, which suits `APACStream`'s master playlist: it o
 ## Behavior
 
 - The silent stream loops in its own unmuted `AVQueuePlayer` while the host plays, or waits to play, an item the predicate accepts. It starts inside the host's `play()` call, ahead of APAC output.
-- It pauses with the host and re-evaluates when the item or its audio selection changes.
+- It keeps playing while the host pauses, so the route stays in Atmos for the resume, and stops when the item ends or fails. It re-evaluates when the item or its audio selection changes. Pausing it with the host made the route leave Atmos on every pause, and on one AirPlay route the programme stayed silent after resuming until a seek.
 - For other items, it unloads the stream. Leaving it loaded made direct Dolby Digital Plus playback stutter.
 - `isActive` reports whether the silent stream is playing. `error` reports why it failed to load.
 

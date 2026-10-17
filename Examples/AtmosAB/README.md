@@ -6,7 +6,7 @@ APAC playback uses the tested Atmos setup:
 
 - Configure `AVAudioSession` for playback/movie playback, enable `supportsMultichannelContent`, and activate the session.
 - Register the main `AVPlayer` with `MPNowPlayingSession` and make that session active before playback.
-- Attach the library's `AtmosOutputActivator` to the main player. It loops its bundled silent Atmos stream in a separate, unmuted player while APAC plays and pauses it with the main player.
+- Attach the library's `AtmosOutputActivator` to the main player. It loops its bundled silent Atmos stream in a separate, unmuted player once APAC plays and keeps it playing through pauses.
 - Play DDP directly, without the silent stream.
 
 On the tested Apple TV and receiver route, APAC alone did not trigger Atmos. With this setup, Kris confirmed APAC and DDP both trigger Atmos and sound similar. The APAC encoder settings, media and renderer were unchanged. This observation establishes Atmos activation and an informal listening result; it does not establish correct APAC speaker placement. `AVAudioSession.outputNumberOfChannels`, `renderingMode` and `isSpatialAudioEnabled` were unsuitable Atmos detectors on the tested beta.
