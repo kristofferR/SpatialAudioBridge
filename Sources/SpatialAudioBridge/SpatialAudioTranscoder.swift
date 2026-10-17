@@ -16,6 +16,8 @@ private final class WriterCancellation: @unchecked Sendable {
 @available(macOS 26, iOS 26, tvOS 26, *)
 final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
     let handler: @Sendable (APACSegment) throws -> Void
+    /// The encoder's magic cookie, to correct the writer's initialization segment with.
+    private let cookie: Data?
     private let lock = NSLock()
     private var failure: String?
     private var holding = false
@@ -26,7 +28,10 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     private var acceptedEnd = CMTime.negativeInfinity
     private var accepted: Data?
     var error: String? { lock.withLock { failure } }
-    init(_ handler: @escaping @Sendable (APACSegment) throws -> Void) { self.handler = handler }
+    init(cookie: Data? = nil, _ handler: @escaping @Sendable (APACSegment) throws -> Void) {
+        self.cookie = cookie
+        self.handler = handler
+    }
 
     func assetWriter(_ writer: AVAssetWriter, didOutputSegmentData data: Data,
                      segmentType: AVAssetSegmentType, segmentReport: AVAssetSegmentReport?) {
@@ -38,7 +43,7 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
 
     func receive(_ segment: APACSegment) {
         lock.withLock {
-            guard segment.kind == .media else { return deliver(segment) }
+            guard segment.kind == .media else { return deliverInitialization(segment) }
             guard !closed else { return record("APAC fragment arrived after the last one") }
             if let start = segment.startTime, let duration = segment.duration {
                 // AVAssetWriter can repeat its final fragment while finishing, sometimes before
@@ -77,6 +82,15 @@ final class SegmentDelegate: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
             deliver(APACSegment(kind: .media, data: trimmed, startTime: segment.startTime,
                                 duration: CMTimeSubtract(duration, CMTime(value: padding, timescale: 48_000))))
         }
+    }
+
+    /// Call with the lock held.
+    private func deliverInitialization(_ segment: APACSegment) {
+        guard let cookie else { return deliver(segment) }
+        guard let data = replacingAPACConfiguration(in: segment.data, with: cookie) else {
+            return record("Unexpected APAC initialization segment layout")
+        }
+        deliver(APACSegment(kind: .initialization, data: data, startTime: segment.startTime, duration: segment.duration))
     }
 
     /// Call with the lock held.
@@ -360,7 +374,7 @@ public actor SpatialAudioTranscoder {
             writer.outputFileTypeProfile = .mpeg4AppleHLS
             writer.preferredOutputSegmentInterval = CMTime(value: Int64(configuration.syncPacketFrequency * 1024 * periods), timescale: CMTimeScale(rate))
             writer.initialSegmentStartTime = configuration.startTime
-            let delegate = SegmentDelegate(handler)
+            let delegate = try SegmentDelegate(cookie: initializationCookie(), handler)
             self.delegate = delegate
             writer.delegate = delegate
         }
@@ -384,6 +398,22 @@ public actor SpatialAudioTranscoder {
         writer.startSession(atSourceTime: configuration.startTime)
         self.writer = writer
         self.input = input
+    }
+
+    /// The magic cookie for the writer's initialization segment, when its own is wrong. AVAssetWriter
+    /// describes fragmented APAC with one configuration per layout, whatever the content source and
+    /// dynamic range, while its packets follow the settings (#55). Default settings decode with that
+    /// entry, which devices have played, so it is kept for them; disabled dynamic range does not.
+    private func initializationCookie() throws -> Data? {
+        guard configuration.disablesDynamicRangeControl else { return nil }
+        let format = try APACEncoder(configuration: configuration).format
+        return try withExtendedLifetime(format) {
+            var size = 0
+            guard let cookie = CMAudioFormatDescriptionGetMagicCookie(format, sizeOut: &size) else {
+                throw SpatialAudioError.encoding("The APAC encoder has no configuration")
+            }
+            return Data(bytes: cookie, count: size)
+        }
     }
 
     /// Encodes interleaved PCM in the configured layout.

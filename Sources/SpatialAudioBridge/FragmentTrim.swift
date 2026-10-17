@@ -59,6 +59,38 @@ func fragmentContent(_ segment: Data) -> Data {
     return Data(bytes)
 }
 
+/// `initialization` with the APAC sample entry's `dapa` box replaced by `cookie`, the encoder's
+/// magic cookie, which is a complete `dapa` box, and the enclosing box sizes adjusted. Nothing
+/// after the `moov` box refers to offsets inside it, so the rest of the segment is unchanged.
+///
+/// Returns nil for a layout AVAssetWriter does not write, such as a QuickTime sound entry.
+@available(macOS 26, iOS 26, tvOS 26, *)
+func replacingAPACConfiguration(in initialization: Data, with cookie: Data) -> Data? {
+    let cookie = [UInt8](cookie)
+    guard cookie.count >= 12, Int(MP4Box.uint32(cookie, at: 0)) == cookie.count,
+          String(decoding: cookie[4..<8], as: UTF8.self) == "dapa" else { return nil }
+    var bytes = [UInt8](initialization)
+    // Each box and where its children start: after `stsd`'s entry count, and after the fields of
+    // a version 0 audio sample entry.
+    var ancestors: [MP4Box] = []
+    var children = 0..<bytes.count
+    for (type, header) in [("moov", 8), ("trak", 8), ("mdia", 8), ("minf", 8), ("stbl", 8), ("stsd", 16), ("apac", 36)] {
+        guard let box = MP4Box.children(of: bytes, in: children).first(where: { $0.type == type }),
+              box.range.count >= header else { return nil }
+        ancestors.append(box)
+        children = box.range.lowerBound + header..<box.range.upperBound
+    }
+    guard let entry = ancestors.last, MP4Box.uint32(bytes, at: entry.body.lowerBound + 8) >> 16 == 0,
+          let dapa = MP4Box.children(of: bytes, in: children).first(where: { $0.type == "dapa" }) else { return nil }
+    let delta = cookie.count - dapa.range.count
+    bytes.replaceSubrange(dapa.range, with: cookie)
+    for box in ancestors {
+        guard let size = UInt32(exactly: box.range.count + delta) else { return nil }
+        MP4Box.setUInt32(&bytes, size, at: box.range.lowerBound)
+    }
+    return Data(bytes)
+}
+
 /// A minimal reader for the plain 32-bit-sized boxes AVAssetWriter writes in fragments.
 @available(macOS 26, iOS 26, tvOS 26, *)
 private struct MP4Box {

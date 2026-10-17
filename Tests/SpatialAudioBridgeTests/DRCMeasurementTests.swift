@@ -85,11 +85,6 @@ struct DRCMeasurementTests {
                            first: firstPacketInput, beforeFlush: packetsBeforeFlush)
             }
 
-            // Disabled DRC currently produces fragmented output rejected by the native reader.
-            // Keep that experiment explicit; the direct-encoder comparison above remains required.
-            if fragmented && disabled && ProcessInfo.processInfo.environment["SAB_DRC_WRITER_DIAGNOSTICS"] != "1" {
-                continue
-            }
             let trace = DRCFragmentTrace()
             let name = "drc-live\(live)-channels\(channels)-disabled\(disabled)-fragmented\(fragmented).mp4"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-\(name)")
