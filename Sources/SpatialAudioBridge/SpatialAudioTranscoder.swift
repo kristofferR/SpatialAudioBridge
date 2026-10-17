@@ -149,9 +149,9 @@ public actor SpatialAudioTranscoder {
         appending = (.now, frames)
         defer {
             busy = false
-            if let (began, before) = appending {
-                working += .now - began
-                workedFrames += frames - before
+            if let current = appending {
+                working += .now - current.began
+                workedFrames += frames - current.frames
             }
             appending = nil
         }
@@ -176,9 +176,9 @@ public actor SpatialAudioTranscoder {
     /// so this measures conversion, not the host's feeding. Below about 1.2, real-time playback stalls.
     public var conversionSpeed: Double? {
         var (time, converted) = (working, workedFrames)
-        if let (began, before) = appending {
-            time += .now - began
-            converted += frames - before
+        if let current = appending {
+            time += .now - current.began
+            converted += frames - current.frames
         }
         guard time > .zero else { return nil }
         return Double(converted) / 48_000 / (time / .seconds(1))
