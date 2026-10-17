@@ -14,8 +14,9 @@ import Testing
     }
 
     @available(macOS 26, iOS 26, tvOS 26, *)
+    /// Waits up to 10 s: hosted runners can take seconds to start playback.
     private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
-        for _ in 0..<60 where !condition() {
+        for _ in 0..<200 where !condition() {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return condition()
@@ -44,8 +45,9 @@ import Testing
 
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func stopsWhenTheHostItemEnds() async throws {
+        // Two-second items outlast a slow start, so the active state is observable before the end.
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let host = AVPlayer(url: try silence("apac", frames: 4_000))
+        let host = AVPlayer(url: try silence("apac", frames: 16_000))
         host.volume = 0
         activator.attach(to: host)
         host.play()
@@ -58,7 +60,7 @@ import Testing
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func stopsAtTheEndOfAHostThatTakesNoAction() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let host = AVPlayer(url: try silence("apac", frames: 4_000))
+        let host = AVPlayer(url: try silence("apac", frames: 16_000))
         host.volume = 0
         host.actionAtItemEnd = .none
         activator.attach(to: host)
@@ -75,8 +77,8 @@ import Testing
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func keepsPlayingAcrossQueuedItems() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let second = AVPlayerItem(url: try silence("second", frames: 4_000))
-        let host = AVQueuePlayer(items: [AVPlayerItem(url: try silence("first", frames: 4_000)), second])
+        let second = AVPlayerItem(url: try silence("second", frames: 16_000))
+        let host = AVQueuePlayer(items: [AVPlayerItem(url: try silence("first", frames: 16_000)), second])
         host.volume = 0
         activator.attach(to: host)
         host.play()
