@@ -16,10 +16,11 @@ let atmos = AtmosOutputActivator()
 Attach it to whatever drives playback:
 
 ```swift
-// AVPlayer: return true while the item's selected audio is APAC.
-atmos.attach(to: player) { item in
-    item.currentMediaSelection.selectedMediaOption(in: audioGroup)?.displayName == "Spatial Audio"
-}
+// AVPlayer whose items offer only APAC audio, such as APACStream's master playlist.
+atmos.attach(to: player)
+
+// AVPlayer whose items offer APAC beside other audio renditions: names the APAC rendition.
+atmos.attach(to: player, apacRenditions: ["Spatial Audio"])
 
 // SpatialAudioRenderer: follows the synchronizer's rate.
 atmos.attach(to: synchronizer)
@@ -28,7 +29,7 @@ atmos.attach(to: synchronizer)
 atmos.detach()
 ```
 
-The predicate defaults to true, which suits `APACStream`'s master playlist: it offers only the APAC rendition. Pass a predicate when an item also offers other audio. The example above checks the selected rendition's name; `audioGroup` is the item's audible `AVMediaSelectionGroup`.
+The predicate defaults to true, which suits `APACStream`'s master playlist: it offers only the APAC rendition. When an item also offers other audio, pass `apacRenditions`, the `NAME` of the APAC `EXT-X-MEDIA` tag (`APACStream`'s `renditionName`): the activator then plays only while the item's selected audible option has that title. It checks the selection rather than the playing track, which lags a switch, and loads the selection group and titles itself, because their synchronous accessors are deprecated. Match the title, not `displayName`, which can give the rendition's language instead. For other rules, such as matching the item's URL, pass your own `playsAPAC` predicate.
 
 ## Behavior
 

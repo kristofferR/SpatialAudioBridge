@@ -15,6 +15,11 @@ public final class AtmosOutputActivator {
     private weak var synchronizer: AVSampleBufferRenderSynchronizer?
     private var rateObserver: NSObjectProtocol?
     private var playsAPAC: @MainActor (AVPlayerItem) -> Bool = { _ in true }
+    /// The rendition names from `attach(to:apacRenditions:)`; nil accepts any audio selection.
+    private var apacRenditions: Set<String>?
+    /// The current item's audible group and its options named in `apacRenditions`, once loaded.
+    private var apacOptions: (group: AVMediaSelectionGroup, options: [AVMediaSelectionOption])?
+    private var optionsTask: Task<Void, Never>?
     private var observations: [NSKeyValueObservation] = []
     private var itemObservers: [NSObjectProtocol] = []
     /// Whether the current item reached its end or failed, since it became current or last seeked.
@@ -55,9 +60,23 @@ public final class AtmosOutputActivator {
     /// and when the item ends or fails.
     /// Pass a predicate when an item offers APAC and other audio renditions.
     public func attach(to player: AVPlayer, playsAPAC: @escaping @MainActor (AVPlayerItem) -> Bool = { _ in true }) {
+        attach(player, playsAPAC: playsAPAC, renditions: nil)
+    }
+
+    /// Like `attach(to:playsAPAC:)`, for items that offer APAC beside other audio renditions: the
+    /// item counts as APAC only while its selected audible option is titled with one of
+    /// `apacRenditions`. An HLS rendition's title is its `EXT-X-MEDIA` `NAME`, such as
+    /// `APACStream`'s `renditionName`; `displayName` may give the language instead. Items whose
+    /// asset is not an `AVURLAsset`, or has no audible selection group, never count.
+    public func attach(to player: AVPlayer, apacRenditions: Set<String>) {
+        attach(player, playsAPAC: { _ in true }, renditions: apacRenditions)
+    }
+
+    private func attach(_ player: AVPlayer, playsAPAC: @escaping @MainActor (AVPlayerItem) -> Bool, renditions: Set<String>?) {
         detach()
         host = player
         self.playsAPAC = playsAPAC
+        apacRenditions = renditions
         // Host play() changes timeControlStatus synchronously on the main thread, so the stream
         // starts inside that call, ahead of APAC output.
         observations = [
@@ -91,6 +110,7 @@ public final class AtmosOutputActivator {
         rateObserver = nil
         host = nil
         synchronizer = nil
+        apacRenditions = nil
         follow(nil)
     }
 
@@ -98,6 +118,18 @@ public final class AtmosOutputActivator {
         itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
         itemObservers = []
         itemEnded = false
+        optionsTask?.cancel()
+        optionsTask = nil
+        apacOptions = nil
+        if let names = apacRenditions, let asset = item?.asset as? AVURLAsset {
+            // The synchronous selection group and metadata accessors are deprecated; load them once per item.
+            optionsTask = Task { [weak self] in
+                let loaded = await Self.audibleOptions(titled: names, in: asset)
+                guard let self, !Task.isCancelled else { return }
+                apacOptions = loaded
+                update()
+            }
+        }
         if let item {
             let center = NotificationCenter.default
             func observe(_ name: Notification.Name, _ body: @escaping @MainActor @Sendable (AtmosOutputActivator) -> Void) {
@@ -121,7 +153,7 @@ public final class AtmosOutputActivator {
             if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
-        guard let host, let item = host.currentItem, playsAPAC(item) else {
+        guard let host, let item = host.currentItem, playsAPAC(item), selectsAPACRendition(item) else {
             // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
             release()
             return
@@ -148,6 +180,32 @@ public final class AtmosOutputActivator {
             guard let self, itemEnded, let item = host?.currentItem, ObjectIdentifier(item) == ended else { return }
             release()
         }
+    }
+
+    /// Whether the item's selected audible option is one of `apacRenditions`, or true without them.
+    /// Checks the selection rather than the playing track, which lags a switch.
+    private func selectsAPACRendition(_ item: AVPlayerItem) -> Bool {
+        guard apacRenditions != nil else { return true }
+        guard let apacOptions, let selected = item.currentMediaSelection.selectedMediaOption(in: apacOptions.group) else {
+            return false
+        }
+        return apacOptions.options.contains(selected)
+    }
+
+    /// The asset's audible selection group and its options whose common title is in `titles`.
+    nonisolated static func audibleOptions(titled titles: Set<String>, in asset: AVURLAsset) async
+        -> (group: AVMediaSelectionGroup, options: [AVMediaSelectionOption])? {
+        guard let group = try? await asset.loadMediaSelectionGroup(for: .audible) else { return nil }
+        var options: [AVMediaSelectionOption] = []
+        for option in group.options {
+            for title in AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle) {
+                if let value = try? await title.load(.stringValue), titles.contains(value) {
+                    options.append(option)
+                    break
+                }
+            }
+        }
+        return (group, options)
     }
 
     private static func isAtEnd(_ item: AVPlayerItem) -> Bool {
