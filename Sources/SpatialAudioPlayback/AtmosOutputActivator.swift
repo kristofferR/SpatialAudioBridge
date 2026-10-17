@@ -19,6 +19,7 @@ public final class AtmosOutputActivator {
     private var apacRenditions: Set<String>?
     /// The current item's audible group and its options named in `apacRenditions`, once loaded.
     private var apacOptions: (group: AVMediaSelectionGroup, options: [AVMediaSelectionOption])?
+    /// Loads `apacOptions`; nil once they are known.
     private var optionsTask: Task<Void, Never>?
     private var observations: [NSKeyValueObservation] = []
     private var itemObservers: [NSObjectProtocol] = []
@@ -68,6 +69,11 @@ public final class AtmosOutputActivator {
     /// `apacRenditions`. An HLS rendition's title is its `EXT-X-MEDIA` `NAME`, such as
     /// `APACStream`'s `renditionName`; `displayName` may give the language instead. Items whose
     /// asset is not an `AVURLAsset`, or has no audible selection group, never count.
+    ///
+    /// The synchronous selection accessors are deprecated, so the activator loads each item's
+    /// selection group first: the stream starts once the group has loaded from the master playlist,
+    /// which `AVPlayer` needs before it can load any audio, rather than inside the host's `play()`
+    /// call. While a new item's group loads, the stream keeps the state the previous item left.
     public func attach(to player: AVPlayer, apacRenditions: Set<String>) {
         attach(player, playsAPAC: { _ in true }, renditions: apacRenditions)
     }
@@ -127,6 +133,7 @@ public final class AtmosOutputActivator {
                 let loaded = await Self.audibleOptions(titled: names, in: asset)
                 guard let self, !Task.isCancelled else { return }
                 apacOptions = loaded
+                optionsTask = nil
                 update()
             }
         }
@@ -153,8 +160,14 @@ public final class AtmosOutputActivator {
             if synchronizer.rate != 0 || looper != nil { play() }
             return
         }
-        guard let host, let item = host.currentItem, playsAPAC(item), selectsAPACRendition(item) else {
+        guard let host, let item = host.currentItem, playsAPAC(item) else {
             // A prerolled silent stream competes with other E-AC-3 playback; keep none loaded.
+            release()
+            return
+        }
+        // Until the item's renditions are known, keep the previous state, so a queue continues in Atmos.
+        guard optionsTask == nil else { return }
+        guard selectsAPACRendition(item) else {
             release()
             return
         }
