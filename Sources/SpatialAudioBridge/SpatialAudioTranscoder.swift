@@ -197,7 +197,8 @@ public actor SpatialAudioTranscoder {
 
     /// Ends the input and pads the output with silence up to the presentation time `end`, so a
     /// stream can pad a long silent tail a segment at a time before `finish`. Append nothing after.
-    func pad(to end: CMTime) async throws {
+    /// A session with no input yet pads from its `startTime`, for a segment past the track's end.
+    public func pad(to end: CMTime) async throws {
         try beginOperation()
         defer { busy = false }
         do {
@@ -303,6 +304,9 @@ public actor SpatialAudioTranscoder {
             pendingPCM.append(contentsOf: repeatElement(0, count: samples))
             silence -= samples
             try await encodeFullBlocks(rate: rate)
+            // The encoder rarely makes this wait, so let cancel() in between blocks.
+            await Task.yield()
+            try checkActive()
         }
     }
 

@@ -98,6 +98,25 @@ try hls.finish()
 
 To handle fragments in memory, use `.segments(syncPeriodsPerSegment:onSegment:)` as the destination. The callback runs serially on an AVFoundation queue; each `APACSegment` carries the bytes, kind, coded start time and duration. A thrown error ends the session. Segments last a whole number of APAC sync periods, 3.2 s by default, so each starts with a sync packet and can be decoded independently.
 
+### Serve a VOD grid
+
+A host that serves on-demand HLS and restarts conversion at seeks can use `APACSegmentGrid`, the grid `APACStream` uses. Each segment covers two sync periods, so segments from different sessions line up sample for sample:
+
+```swift
+let grid = try APACSegmentGrid(duration: fileDuration, configuration: configuration)
+let playlist = grid.mediaPlaylist(minimumTargetDuration: videoTargetDuration)
+// To convert from segment `index`, read packets from the sync point at or before grid.start(of: index).
+var settings = grid.configuration(from: index)
+settings.inputStartTime = firstPacket.time
+let audio = try SpatialAudioTranscoder(codec: codec, destination: .segments(
+    syncPeriodsPerSegment: APACSegmentGrid.syncPeriodsPerSegment, onSegment: { segment in
+        if let at = grid.index(of: segment), at >= index { store(segment.data, at: at) }
+    }), configuration: settings)
+// At the track's end, pad(to:) a segment at a time if the video runs on, then finish(paddingTo: grid.end).
+```
+
+A session's first fragment carries the encoder priming in place of 42.7 ms of audio, which is right after a seek. A session that continues another session's segments starts one segment `early` (`grid.configuration(from: index, early: true)`) and drops that fragment, or the join loses those 42.7 ms. A segment past the track's end needs a session with no input that pads from its start with `pad(to:)`. `cancel()` also stops a long padding `finish`.
+
 In the multivariant playlist, list `layout.apacCodecString` (`apac.31.04` for 9.1.6, `apac.31.03` for 7.1.4) in the variant's `CODECS` and `layout.channelCount` as the rendition's `CHANNELS`. Do not label this channel-based output as JOC. `APACStream` shows a complete arrangement, including restarts that keep segments on one timeline; see [Architecture](architecture.md#the-segment-grid).
 
 To recognise the APAC rendition in AVFoundation, match its `NAME`, which is the media selection option's `commonMetadata` title, or the playing `AVPlayerItemTrack`'s format description subtype `'apac'`. On macOS 27, `AVMediaSelectionOption.mediaSubTypes` was empty for an HLS APAC rendition.

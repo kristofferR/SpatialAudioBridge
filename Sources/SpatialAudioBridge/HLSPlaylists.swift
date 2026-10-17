@@ -4,15 +4,16 @@ import Foundation
 @available(macOS 26, iOS 26, tvOS 26, *)
 enum HLSPlaylists {
     /// A VOD media playlist of `segments` fixed-length segments, the last one possibly shorter.
-    static func media(totalFrames: Int64, segmentFrames: Int64, rate: Int) -> String {
+    static func media(totalFrames: Int64, segmentFrames: Int64, rate: Int, minimumTargetDuration: Int = 0,
+                      initializationURI: String = "init.mp4", segmentURI: (Int) -> String = { "seg\($0).m4s" }) -> String {
         let count = Int((totalFrames + segmentFrames - 1) / segmentFrames)
-        let target = Int((Double(segmentFrames) / Double(rate)).rounded(.up))
+        let target = max(minimumTargetDuration, Int((Double(segmentFrames) / Double(rate)).rounded(.up)))
         var lines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:\(target)", "#EXT-X-MEDIA-SEQUENCE:0",
-                     "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS", "#EXT-X-MAP:URI=\"init.mp4\""]
+                     "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS", "#EXT-X-MAP:URI=\"\(initializationURI)\""]
         for index in 0..<count {
             let frames = min(segmentFrames, totalFrames - Int64(index) * segmentFrames)
             lines.append(String(format: "#EXTINF:%.6f,", locale: Locale(identifier: "en_US_POSIX"), Double(frames) / Double(rate)))
-            lines.append("seg\(index).m4s")
+            lines.append(segmentURI(index))
         }
         lines.append("#EXT-X-ENDLIST")
         return lines.joined(separator: "\n") + "\n"

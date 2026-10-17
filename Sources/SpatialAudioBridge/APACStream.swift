@@ -71,17 +71,9 @@ public final class APACStream: Sendable {
         guard startTime.isNumeric else {
             throw SpatialAudioError.invalidConfiguration("The start time must be finite")
         }
-        var configuration = options.configuration
-        guard (3...600).contains(configuration.syncPacketFrequency) else {
-            throw SpatialAudioError.invalidConfiguration("The APAC sync interval must be 3 to 600 packets")
-        }
-        // The offline profile would delay every segment by about 20 s of audio.
-        configuration.liveEncoding = true
-        let segmentFrames = Int64(configuration.syncPacketFrequency * 1024 * StreamEngine.periods)
-        let engine = StreamEngine(file: file, track: track, codec: codec, configuration: configuration,
-                                  segmentFrames: segmentFrames,
-                                  priming: Int64(try configuration.encoderPrimingDuration().value),
-                                  totalFrames: Int64((duration.seconds * 48_000).rounded(.up)),
+        let grid = try APACSegmentGrid(duration: duration, configuration: options.configuration)
+        let configuration = grid.configuration
+        let engine = StreamEngine(file: file, track: track, codec: codec, grid: grid,
                                   lookahead: max(1, options.lookahead), keptBehind: max(2, options.keptBehind),
                                   timeout: options.segmentTimeout)
         var master: String?
@@ -108,7 +100,7 @@ public final class APACStream: Sendable {
             master = rewritten
         }
         let token = UUID().uuidString.lowercased()
-        let media = HLSPlaylists.media(totalFrames: engine.totalFrames, segmentFrames: segmentFrames, rate: 48_000)
+        let media = grid.mediaPlaylist()
         let server = try await LoopbackServer { [master] path in
             await Self.respond(to: path, token: token, master: master, media: media, engine: engine, subtitles: subtitles)
         }
@@ -213,16 +205,12 @@ enum StreamError: LocalizedError {
 actor StreamEngine {
     /// Segment requests, restarts and wait times; visible in Console under this subsystem.
     private let log = Logger(subsystem: "SpatialAudioBridge", category: "APACStream")
-    /// Sync periods per segment: 3.2 seconds at the default interval of 75 packets.
-    static let periods = 2
-
-    nonisolated let totalFrames: Int64
+    nonisolated let grid: APACSegmentGrid
     private let file: MatroskaFile
     private let track: MatroskaAudioTrack
     private let codec: SpatialAudioCodec
-    private let configuration: APACConfiguration
-    private let segmentFrames: Int64
-    private let priming: Int64
+    private var segmentFrames: Int64 { grid.segmentFrames }
+    private var totalFrames: Int64 { grid.totalFrames }
     private let lookahead: Int
     private let keptBehind: Int
     private let timeout: Duration
@@ -259,27 +247,20 @@ actor StreamEngine {
     /// segments in order before resuming; this splits them between the two runs.
     static let helperOffset = 5
 
-    init(file: MatroskaFile, track: MatroskaAudioTrack, codec: SpatialAudioCodec, configuration: APACConfiguration,
-         segmentFrames: Int64, priming: Int64, totalFrames: Int64, lookahead: Int, keptBehind: Int, timeout: Duration) {
+    init(file: MatroskaFile, track: MatroskaAudioTrack, codec: SpatialAudioCodec, grid: APACSegmentGrid,
+         lookahead: Int, keptBehind: Int, timeout: Duration) {
         self.file = file
         self.track = track
         self.codec = codec
-        self.configuration = configuration
-        self.segmentFrames = segmentFrames
-        self.priming = priming
-        self.totalFrames = totalFrames
+        self.grid = grid
         self.lookahead = lookahead
         self.keptBehind = keptBehind
         self.timeout = timeout
     }
 
-    var segmentCount: Int { Int((totalFrames + segmentFrames - 1) / segmentFrames) }
+    var segmentCount: Int { grid.segmentCount }
 
-    nonisolated func index(at time: CMTime) -> Int {
-        let seconds = min(max(time.seconds, 0), Double(totalFrames) / 48_000)
-        let frame = Int64((seconds * 48_000).rounded(.down))
-        return Int(min(frame, totalFrames - 1) / segmentFrames)
-    }
+    nonisolated func index(at time: CMTime) -> Int { grid.index(at: time) }
 
     func initialization() async throws -> Data {
         guard !stopped else { throw StreamError.stopped }
@@ -398,23 +379,22 @@ actor StreamEngine {
     /// That is expected right after a seek, but a helper's first segment plays on from the run
     /// before it, so a helper starts one segment `early` and discards that fragment.
     private func launch(from index: Int, early: Bool) -> Run {
-        let start = CMTime(value: Int64(index - (early ? 1 : 0)) * segmentFrames + priming, timescale: 48_000)
+        let settings = grid.configuration(from: index, early: early)
+        let start = settings.startTime
         // The playlist follows the container, which may outlast the track, so a run that reaches the
         // track's end pads with silence to the playlist's. A run in a last segment shorter than the
         // priming still needs one frame to write its fragment.
         let end = max(totalFrames, start.value + 1)
-        let (file, track, codec, configuration, store, segmentFrames) =
-            (self.file, self.track, self.codec, self.configuration, self.store, self.segmentFrames)
+        let (file, track, codec, store, segmentFrames) = (self.file, self.track, self.codec, self.store, self.segmentFrames)
         let id = UUID()
         store.begin(run: id, first: index)
         let task = Task.detached { [weak self] in
             do {
                 func transcoder(from inputStart: CMTime?) throws -> SpatialAudioTranscoder {
-                    var settings = configuration
-                    settings.startTime = start
+                    var settings = settings
                     settings.inputStartTime = inputStart
                     return try SpatialAudioTranscoder(codec: codec, destination: .segments(
-                        syncPeriodsPerSegment: Self.periods,
+                        syncPeriodsPerSegment: APACSegmentGrid.syncPeriodsPerSegment,
                         onSegment: { store.deliver($0, run: id, segmentFrames: segmentFrames) }),
                         configuration: settings)
                 }
@@ -440,7 +420,7 @@ actor StreamEngine {
                 if reachesEnd {
                     // A run started past the track's end has no packets, so it decodes the track's
                     // start to reject an empty or unsupported track as other runs would.
-                    if session == nil { try await Self.validate(track, of: file, codec: codec, layout: configuration.layout) }
+                    if session == nil { try await Self.validate(track, of: file, codec: codec, layout: settings.layout) }
                     let session = try session ?? transcoder(from: nil)
                     // Padding a segment at a time keeps a long silent tail at the lookahead and lets
                     // a helper take over.
