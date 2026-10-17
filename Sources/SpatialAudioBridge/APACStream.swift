@@ -335,7 +335,10 @@ actor StreamEngine {
 
     /// Whether a running conversion will deliver segment `index` sooner than a new run would.
     private func waitsForRun(_ index: Int) -> Bool {
-        [run, helper].contains { run in
+        // A retry must replace a failed primary, even if its helper could reach the segment;
+        // otherwise wait() keeps returning that primary's transport failure.
+        if let run, store.failure(run: run.id) != nil { return false }
+        return [run, helper].contains { run in
             guard let run else { return false }
             return Self.waits(for: index, runStart: run.start, converted: store.highest(run: run.id), ended: store.ended(run: run.id))
         }
@@ -380,8 +383,10 @@ actor StreamEngine {
     /// audio from that video segment's start, a few segments behind the run. That run already
     /// holds what playback reaches next, so it carries on as the helper instead of being replaced.
     private func restart(at index: Int) {
-        let ahead = run.flatMap { run in
-            Self.keepsAhead(index, runStart: run.start, lookahead: lookahead, ended: store.ended(run: run.id)) ? run : nil
+        let ahead: Run? = run.flatMap { run in
+            guard Self.keepsAhead(index, runStart: run.start, lookahead: lookahead, ended: store.ended(run: run.id)),
+                  store.canContinue(run: run.id, from: run.start + 1, lookahead: lookahead) else { return nil }
+            return run
         }
         for run in [run, helper].compactMap({ $0 }) where run.id != ahead?.id {
             run.task.cancel()
@@ -553,7 +558,7 @@ actor StreamEngine {
         guard [run?.id, helper?.id].contains(id) else { return false }
         if store.highest(run: id) >= frontier + lookahead { return true }
         guard let run, id == helper?.id else { return false }
-        return store.highest(run: run.id) < run.start
+        return !store.ended(run: run.id) && store.highest(run: run.id) < run.start
     }
 }
 
@@ -642,6 +647,15 @@ final class SegmentStore: @unchecked Sendable {
     func ended(run: UUID) -> Bool { lock.withLock { ends[run] != nil } }
 
     func failure(run: UUID) -> (any Error)? { lock.withLock { ends[run] ?? nil } }
+
+    /// A retained run must still hold every segment it has passed at the join, within the new
+    /// helper's cache window. It cannot regenerate audio that has already been evicted.
+    func canContinue(run: UUID, from first: Int, lookahead: Int) -> Bool {
+        lock.withLock {
+            guard let progress = runs[run], progress.produced < first + lookahead + 3 else { return false }
+            return progress.produced < first || (first...progress.produced).allSatisfy { segments[$0] != nil }
+        }
+    }
 
     /// Takes `run`'s fragments only from segment `first` on, or after what it has produced, and
     /// measures its conversion speed from now, as for a run starting at the latest seek.

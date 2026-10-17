@@ -229,6 +229,27 @@ private func mediaSegment(_ index: Int) -> APACSegment {
     #expect(store.speed(run: advanced, segmentFrames: 153_600) != nil)
 }
 
+/// Retention needs the audio at the join, not just the run's original start and high-water mark.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func segmentStoreRetainsOnlyRunsWithTheirHandoverAudio() {
+    let store = SegmentStore()
+    let run = UUID()
+    store.begin(run: run, first: 10)
+    #expect(store.canContinue(run: run, from: 11, lookahead: 6), "a fresh run will deliver the join")
+    for index in 10...16 { store.deliver(mediaSegment(index), run: run, segmentFrames: 153_600) }
+    #expect(store.canContinue(run: run, from: 11, lookahead: 6))
+    store.drop(11)
+    #expect(!store.canContinue(run: run, from: 11, lookahead: 6), "the run cannot recreate an evicted join")
+    store.deliver(mediaSegment(11), run: run, segmentFrames: 153_600)
+    for index in 17...19 { store.deliver(mediaSegment(index), run: run, segmentFrames: 153_600) }
+    #expect(store.canContinue(run: run, from: 11, lookahead: 6), "the last segment within the new cache window")
+    store.deliver(mediaSegment(20), run: run, segmentFrames: 153_600)
+    #expect(!store.canContinue(run: run, from: 11, lookahead: 6), "the new cache window would evict converted audio")
+    for index in 21...100 { store.deliver(mediaSegment(index), run: run, segmentFrames: 153_600) }
+    store.keep(around: 94, behind: 20, ahead: 6)
+    #expect(!store.canContinue(run: run, from: 11, lookahead: 6), "an old run has advanced past its join")
+}
+
 /// A helper run's first fragment carries encoder priming, and a retired run may still emit one.
 @available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreTakesEachRunFromItsFirstSegmentUntilRetired() {
