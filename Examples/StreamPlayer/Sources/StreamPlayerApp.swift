@@ -244,9 +244,10 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                 changed = .now
             }
             // AVPlayer gives up and pauses after a wait it cannot satisfy, or fails the item, for
-            // example while the server is unreachable. Reload where it stopped, backing off.
+            // example while the server is unreachable. Reload where it stopped, backing off. A pause
+            // during a wait without a fresh request error is the viewer's, and stays.
             if !ended, abandoned == nil, player.currentItem?.status == .failed
-                || status == .paused && previous == .waitingToPlayAtSpecifiedRate {
+                || status == .paused && previous == .waitingToPlayAtSpecifiedRate && Self.failedRecently(player.currentItem) {
                 // A conversion failure ends the stream for good; reloading cannot recover it.
                 if let failure = await stream?.failure {
                     ended = true
@@ -255,8 +256,10 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                     continue
                 }
                 abandoned = (.now, .now, 0)
+                // Domain and code only: an NSURLError's description can carry the URL and its key.
+                let error = player.currentItem?.error.map { $0 as NSError }
                 log(String(format: "playback stopped at t=%.1f: %@", player.currentTime().seconds,
-                           player.currentItem?.error.map(String.init(describing:)) ?? "gave up waiting"))
+                           error.map { "\($0.domain) \($0.code)" } ?? "gave up waiting"))
             }
             if let lost = abandoned {
                 if status == .playing {
@@ -287,6 +290,14 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
                        atmos?.isActive == true ? "on" : "off", speed, Self.footprintMB(), os_proc_available_memory() / 1_000_000,
                        errors.joined(separator: " | ")))
         }
+    }
+
+    /// Whether a request failed in the last 30 s, as when the server is unreachable: a URL error or
+    /// a media request timeout (−12889), not Jellyfin's routine bandwidth warning.
+    private static func failedRecently(_ item: AVPlayerItem?) -> Bool {
+        let failure = item?.errorLog()?.events.last { $0.errorDomain == NSURLErrorDomain || $0.errorStatusCode == -12889 }
+        guard let date = failure?.date else { return false }
+        return date.timeIntervalSinceNow > -30
     }
 
     private func noteEnd() {
