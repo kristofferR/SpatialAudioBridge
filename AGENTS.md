@@ -33,11 +33,11 @@ Most open-source Apple TV players do not expose compressed audio packets, so the
 - A linked lookahead limiter holds rendered feeds at −0.1 dBFS; 135 of 265 library Atmos tracks exceeded full scale without it, by up to 8.9 dB. It changes nothing away from those peaks and keeps frame counts and timing.
 - The [rendering model](docs/rendering.md) documents the Atmos panner, its 9.1.6 extension and the DTS:X approximation. None of it is a licensed reference renderer.
 
-Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV and receiver have confirmed Atmos activation and channel placement. This does not establish the HDMI payload (MAT or otherwise), measured lip sync, full-film memory use or behavior on other devices and receivers. Keep those distinctions explicit in documentation and reports.
+Real fixtures have passed decoding and Apple APAC round trips, and one Apple TV and receiver have confirmed Atmos activation and channel placement. A whole film has played on that Apple TV without a stall or memory growth. This does not establish the HDMI payload (MAT or otherwise), measured lip sync, Wi-Fi playback or behavior on other devices and receivers. Keep those distinctions explicit in documentation and reports.
 
 ## Next priorities
 
-1. Measure lip sync and memory over a full film on Apple TV, including Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
+1. Measure lip sync on Apple TV and validate Wi-Fi playback; seek recovery is bound by single-threaded APAC encoding.
 2. Validate other Apple TV models and receivers. Emby and Plex are out of scope; see [media servers](docs/media-servers.md#emby-and-plex).
 3. Improve rendering accuracy and supported metadata through focused fixtures and documented behavior.
 4. Build the player integrations in the [integration guide](docs/integration.md#fit-with-existing-players).

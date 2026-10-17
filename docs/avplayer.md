@@ -136,7 +136,8 @@ Apple TV 4K (2nd generation), tvOS 27.2 beta, Jellyfin 12.2 over gigabit Etherne
 | `MatroskaFile.open` and `APACStream.start` | 1.8–2.4 s |
 | Launch to playing | 4.3–6.6 s |
 | Conversion | About 6× real time in steady playback; 0.7 s per 3.2-second segment, 4.5×, while video loads after a seek (9.1.6: 1 s, 3.2×); Debug and Release alike |
-| Memory | No growth: available memory stayed within 2,139–2,174 MB over a 22-minute session, and 2,135–2,171 MB across 9.1.6 sessions of up to 16 minutes |
+| Memory | No growth: the app's physical footprint stayed between 34 and 64 MB over a whole 1 h 59 min film, ending lower than it started |
+| Server outage | With the server unreachable for 4 minutes, playback continued from its buffer for 1–1.3 minutes, then stopped; StreamPlayer's reload resumed it at the same position 21–31 s after the server returned |
 | Seeks | Recovered from every skip, scrub and jump in a scripted test; times above |
 | Receiver | Dolby Atmos with `AtmosOutputActivator`; video and audio played together |
 
