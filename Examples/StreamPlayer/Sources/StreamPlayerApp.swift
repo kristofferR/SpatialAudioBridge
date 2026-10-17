@@ -247,6 +247,13 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
             // example while the server is unreachable. Reload where it stopped, backing off.
             if !ended, abandoned == nil, player.currentItem?.status == .failed
                 || status == .paused && previous == .waitingToPlayAtSpecifiedRate {
+                // A conversion failure ends the stream for good; reloading cannot recover it.
+                if let failure = await stream?.failure {
+                    ended = true
+                    self.status = "\(failure)"
+                    log("stream failed: \(failure)")
+                    continue
+                }
                 abandoned = (.now, .now, 0)
                 log(String(format: "playback stopped at t=%.1f: %@", player.currentTime().seconds,
                            player.currentItem?.error.map(String.init(describing:)) ?? "gave up waiting"))
