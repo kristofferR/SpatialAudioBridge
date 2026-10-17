@@ -43,15 +43,22 @@ import Testing
         host.pause()
     }
 
+    /// Eight-second items outlast the silent stream's start, which can take seconds on a hosted
+    /// runner; tests then seek to just before the end instead of waiting for it.
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    private func nearEnd(_ host: AVPlayer) async {
+        await host.seek(to: CMTime(value: 75, timescale: 10), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func stopsWhenTheHostItemEnds() async throws {
-        // Two-second items outlast a slow start, so the active state is observable before the end.
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let host = AVPlayer(url: try silence("apac", frames: 16_000))
+        let host = AVPlayer(url: try silence("apac", frames: 64_000))
         host.volume = 0
         activator.attach(to: host)
         host.play()
         #expect(await eventually { activator.isActive })
+        await nearEnd(host)
         #expect(await eventually { activator.player.items().isEmpty })
         #expect(!activator.isActive)
         activator.detach()
@@ -60,12 +67,13 @@ import Testing
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func stopsAtTheEndOfAHostThatTakesNoAction() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let host = AVPlayer(url: try silence("apac", frames: 16_000))
+        let host = AVPlayer(url: try silence("apac", frames: 64_000))
         host.volume = 0
         host.actionAtItemEnd = .none
         activator.attach(to: host)
         host.play()
         #expect(await eventually { activator.isActive })
+        await nearEnd(host)
         #expect(await eventually { activator.player.items().isEmpty })
         // Seeking back resumes the item, and the stream with it.
         await host.seek(to: .zero)
@@ -77,15 +85,17 @@ import Testing
     @available(macOS 26, iOS 26, tvOS 26, *)
     @Test func keepsPlayingAcrossQueuedItems() async throws {
         let activator = AtmosOutputActivator(silentAtmosStream: try silence("stream"))
-        let second = AVPlayerItem(url: try silence("second", frames: 16_000))
-        let host = AVQueuePlayer(items: [AVPlayerItem(url: try silence("first", frames: 16_000)), second])
+        let second = AVPlayerItem(url: try silence("second", frames: 64_000))
+        let host = AVQueuePlayer(items: [AVPlayerItem(url: try silence("first", frames: 64_000)), second])
         host.volume = 0
         activator.attach(to: host)
         host.play()
         #expect(await eventually { activator.isActive })
+        await nearEnd(host)
         #expect(await eventually { host.currentItem === second })
         #expect(activator.isActive)
         // The queue ends with no current item.
+        await nearEnd(host)
         #expect(await eventually { activator.player.items().isEmpty })
         activator.detach()
     }
