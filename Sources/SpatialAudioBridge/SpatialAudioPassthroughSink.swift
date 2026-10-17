@@ -174,23 +174,23 @@ public final class SpatialAudioPassthroughSink: Sendable {
             await previous?.value
             try Task.checkCancellation()
             try await renderer.begin(at: time)
+            // Readiness is watched alongside, because an enqueue or the final flush can wait for
+            // capacity that only the clock the host starts on it frees.
+            let watcher = Task {
+                while !Task.isCancelled {
+                    if await renderer.isReadyToPlay { return report.ready() }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            defer { watcher.cancel() }
             var unpacker = IEC61937Unpacker()
-            var ready = false
             var enqueued = false
             for await chunk in bursts {
                 defer { report.consumed(chunk.count) }
                 let stream = try unpacker.unpack(chunk)
-                // In small pieces, so readiness shows before the renderer fills and an enqueue waits
-                // for the clock the host starts on it.
-                for start in stride(from: 0, to: stream.count, by: 4096) {
-                    try await renderer.enqueue(stream[start..<min(stream.count, start + 4096)],
-                                               time: time + unpacker.skippedDuration)
-                    enqueued = true
-                    if !ready, await renderer.isReadyToPlay {
-                        ready = true
-                        report.ready()
-                    }
-                }
+                guard !stream.isEmpty else { continue }
+                try await renderer.enqueue(stream, time: time + unpacker.skippedDuration)
+                enqueued = true
             }
             guard !Task.isCancelled else { return }
             // A timeline that ended before any audio, such as one begun near the end, has nothing to play.
@@ -202,7 +202,7 @@ public final class SpatialAudioPassthroughSink: Sendable {
         } catch is CancellationError {
         } catch {
             // Drop queued APAC, so it cannot play over the host's fallback.
-            try? await renderer.begin(at: time)
+            try? await renderer.begin(at: time.isNumeric ? time : .zero)
             report.failed(error)
         }
     }
