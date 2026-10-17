@@ -373,16 +373,38 @@ actor StreamEngine {
     }
 
     /// Restarts conversion at segment `index`, with a helper converting from a few segments ahead.
+    ///
+    /// After a start or seek to a time inside a video segment, `AVPlayer` may first ask for the
+    /// audio from that video segment's start, a few segments behind the run. That run already
+    /// holds what playback reaches next, so it carries on as the helper instead of being replaced.
     private func restart(at index: Int) {
-        for run in [run, helper].compactMap({ $0 }) {
+        let ahead = run.flatMap { run in
+            Self.keepsAhead(index, runStart: run.start, lookahead: lookahead, ended: store.ended(run: run.id)) ? run : nil
+        }
+        for run in [run, helper].compactMap({ $0 }) where run.id != ahead?.id {
             run.task.cancel()
             store.retire(run: run.id)
         }
         run = launch(from: index, early: false)
         helper = nil
+        plannedHelper = nil
+        if let ahead {
+            // Its first fragment carries the encoder priming in place of audio, so the new run
+            // converts that segment too, and playback joins the kept run after it.
+            store.drop(ahead.start)
+            helper = Run(id: ahead.id, start: ahead.start + 1, task: ahead.task)
+            log.info("seg\(index) restarts behind the run from seg\(ahead.start), which carries on from seg\(ahead.start + 1)")
+            return
+        }
         // The helper stays within the segments the store keeps for the request.
         let offset = min(Self.helperOffset, lookahead)
         plannedHelper = offset >= 2 && index + offset < segmentCount ? index + offset : nil
+    }
+
+    /// Whether a run from `runStart` carries on as the helper of a restart at `index`: one a few
+    /// segments ahead, within what the store keeps for the request, unless it has ended.
+    static func keepsAhead(_ index: Int, runStart: Int, lookahead: Int, ended: Bool) -> Bool {
+        !ended && index < runStart && runStart - index <= lookahead
     }
 
     /// Converts from segment `index`: decoding starts at the last sync before its first presented
@@ -513,14 +535,22 @@ actor StreamEngine {
         return true
     }
 
-    /// Holds a run while it is `lookahead` segments past the frontier.
+    /// Holds a run while it is `lookahead` segments past the frontier, and a helper until the run
+    /// has delivered its first segment, which `AVPlayer` needs within about 3 s.
     private func paceRun(_ id: UUID) async {
-        guard [run?.id, helper?.id].contains(id), store.highest(run: id) >= frontier + lookahead else { return }
+        guard holds(id) else { return }
         store.holding(true, run: id)
-        while [run?.id, helper?.id].contains(id), !Task.isCancelled, store.highest(run: id) >= frontier + lookahead {
+        while !Task.isCancelled, holds(id) {
             try? await Task.sleep(for: .milliseconds(50))
         }
         store.holding(false, run: id)
+    }
+
+    private func holds(_ id: UUID) -> Bool {
+        guard [run?.id, helper?.id].contains(id) else { return false }
+        if store.highest(run: id) >= frontier + lookahead { return true }
+        guard let run, id == helper?.id else { return false }
+        return store.highest(run: run.id) < run.start
     }
 }
 
@@ -609,6 +639,9 @@ final class SegmentStore: @unchecked Sendable {
     func ended(run: UUID) -> Bool { lock.withLock { ends[run] != nil } }
 
     func failure(run: UUID) -> (any Error)? { lock.withLock { ends[run] ?? nil } }
+
+    /// Forgets segment `index`, so the next run to deliver it replaces it.
+    func drop(_ index: Int) { lock.withLock { _ = segments.removeValue(forKey: index) } }
 
     /// Keeps segments near the playback position and drops the rest.
     func keep(around index: Int, behind: Int, ahead: Int) {

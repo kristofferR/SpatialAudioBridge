@@ -165,6 +165,18 @@ import Testing
     #expect(!StreamEngine.waits(for: 16, runStart: 10, converted: 15, ended: true))
 }
 
+/// After a start inside a video segment, AVPlayer may first ask for audio from that segment's
+/// start; the run at the start time carries on as the helper instead of being replaced.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func aRestartShortlyBehindARunKeepsIt() {
+    #expect(StreamEngine.keepsAhead(5, runStart: 10, lookahead: 6, ended: false))
+    #expect(StreamEngine.keepsAhead(4, runStart: 10, lookahead: 6, ended: false))
+    #expect(!StreamEngine.keepsAhead(3, runStart: 10, lookahead: 6, ended: false), "beyond what the store keeps")
+    #expect(!StreamEngine.keepsAhead(5, runStart: 10, lookahead: 6, ended: true))
+    #expect(!StreamEngine.keepsAhead(10, runStart: 10, lookahead: 6, ended: false))
+    #expect(!StreamEngine.keepsAhead(12, runStart: 10, lookahead: 6, ended: false))
+}
+
 @available(macOS 26, iOS 26, tvOS 26, *)
 @Test func segmentStoreRecordsCleanEndsAndFailures() {
     let store = SegmentStore()
@@ -402,6 +414,75 @@ struct APACStreamFixtureTests {
         }
         #expect(energyA > 1e-4, "the fixture has audio at 16 s")
         #expect(dot / sqrt(energyA * energyB) > 0.99, "the helper's segment must start with source audio")
+    }
+
+    /// AVPlayer may first ask for audio a few segments behind the start time. The run at the start
+    /// carries on as the helper, so its segment 11 must play on from the new run's segment 10, and
+    /// segment 10 must come from the new run, without the start run's priming.
+    @available(macOS 26, iOS 26, tvOS 26, *)
+    @Test func aRequestBehindTheStartKeepsTheStartRunAsHelper() async throws {
+        let file = try await open()
+        let stream = try await APACStream.start(file: file, startTime: CMTime(value: 10 * 153_600, timescale: 48_000))
+        let base = stream.audioPlaylistURL.deletingLastPathComponent()
+        let initial = try await get(base.appendingPathComponent("init.mp4"))
+        var served: [Int: Data] = [:]
+        for index in 6...12 { served[index] = try await get(base.appendingPathComponent("seg\(index).m4s")) }
+        await stream.stop()
+        for (index, data) in served {
+            let timing = try fragmentTiming(data)
+            #expect(timing.decodeTime == UInt64(index) * 153_600 && timing.frames == 153_600, "segment \(index)")
+        }
+        // The same segments from one run through the file, as steady playback converts them.
+        final class Collector: @unchecked Sendable {
+            let lock = NSLock()
+            var segments: [Int: Data] = [:]
+        }
+        let collector = Collector()
+        let track = try #require(file.audioTracks.first { $0.codec == .trueHDAtmos })
+        let priming = try APACConfiguration().encoderPrimingDuration()
+        var transcoder: SpatialAudioTranscoder?
+        for try await packet in file.packets(of: track, from: priming) {
+            if packet.time.seconds > 42 { break }
+            if transcoder == nil {
+                var configuration = APACConfiguration(startTime: priming, liveEncoding: true)
+                configuration.inputStartTime = packet.time
+                transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos, destination: .segments(onSegment: { segment in
+                    guard let start = segment.startTime else { return }
+                    collector.lock.withLock { collector.segments[Int(start.value * 48_000 / Int64(start.timescale)) / 153_600] = segment.data }
+                }), configuration: configuration)
+            }
+            try await transcoder?.append(packet.data)
+        }
+        _ = try await transcoder?.finish()
+        let continuous = collector.lock.withLock { collector.segments }
+        // Read from segment 9 on, so neither priming trim at the start nor sequence numbers
+        // differ: both sides decode the same segment 9 first.
+        func renumbered(_ fragments: [Data]) throws -> [Data] {
+            var result: [Data] = []
+            for fragment in fragments {
+                guard let previous = result.last else { result.append(fragment); continue }
+                let at = try #require(fragment.range(of: Data("mfhd".utf8))).upperBound + 4
+                let sequence = try #require(previous.range(of: Data("mfhd".utf8))).upperBound + 4
+                var next = fragment
+                let number = previous[sequence..<sequence + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) } + 1
+                next.replaceSubrange(at..<at + 4, with: withUnsafeBytes(of: number.bigEndian) { Data($0) })
+                result.append(next)
+            }
+            return result
+        }
+        let reference = try [9, 10, 11].map { try #require(continuous[$0]) }
+        let a = try await decodedMono([initial] + reference)
+        let b = try await decodedMono([initial] + (try renumbered([continuous[9]!, served[10]!, served[11]!])))
+        try #require(a.count == b.count)
+        // Both joins: into the new run's segment 10, and on into the kept run's segment 11.
+        for join in [153_600 - Int(priming.value), 2 * 153_600 - Int(priming.value)] {
+            var dot = 0.0, energyA = 0.0, energyB = 0.0
+            for i in join..<join + 4096 {
+                dot += Double(a[i]) * Double(b[i]); energyA += Double(a[i] * a[i]); energyB += Double(b[i] * b[i])
+            }
+            #expect(energyA > 1e-4, "the fixture has audio at \(join)")
+            #expect(dot / sqrt(energyA * energyB) > 0.99, "audio at the join \(join) must follow the source")
+        }
     }
 
     /// A paused player stops requesting; conversion must wait instead of running past what it keeps.

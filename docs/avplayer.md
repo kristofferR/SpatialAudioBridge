@@ -88,7 +88,7 @@ The APAC rendition starts at media time 0, so the video variants must too, as Je
 
 After a seek, `AVPlayer` asks for audio from the start of the video segment before the target, so the time to resume depends on the video. With Jellyfin's stream-copy remux of a title with 10.4-second keyframe intervals, that meant up to 20 s of audio before the target: short skips resumed after 6–7.5 s and scrubs and long jumps after 5.5–12.5 s. At 9.1.6, long jumps took 9–11 s with the helper run and 11–14 s before it, and on a remux with keyframes under a second apart, 5–8 s. Skips within already converted audio resumed after 1–1.5 s.
 
-Pass the intended start position as `startTime`, so the first segment is ready when `AVPlayer` asks for it, and seek exactly (`toleranceBefore: .zero`) before playing.
+Pass the intended start position as `startTime`, so the first segment is ready when `AVPlayer` asks for it, and seek exactly (`toleranceBefore: .zero`) before playing. `AVPlayer` may first ask for audio from the start of the video segment around that position instead; the stream then converts from there and keeps the segments it converted at `startTime`, so no host needs to start earlier.
 
 ## Options
 
