@@ -1,6 +1,6 @@
 # Reviewed expected output of SAB's C interface. Regenerate with scripts/compare-baselines.sh.
 # Excerpt cut with ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg developers.
-source fixture:helicopter.thd stream - start - duration -
+source fixture:atmos.thd stream - start - duration -
 input-sha256 79dd2aec46408f81f2a53da17dc5d43f24fe25bec9b61ee79b36c6e22cefcbf4
 codec truehd
 layout 7.1.4

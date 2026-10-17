@@ -63,7 +63,7 @@ enum SpatialAudioError: Error {
     case decoding(String), unsupported(String), discontinuity(String)
 }
 
-// usage: unpack <bursts> <attach offset> <output>
+// usage: unpack <bursts> <attach offset> <output> <truehd|dtsx>
 let arguments = CommandLine.arguments
 let bursts = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
 var unpacker = IEC61937Unpacker()
@@ -76,7 +76,10 @@ while offset < bursts.count {
     size = size * 13 % 9_973 + 1
 }
 // FFmpeg's muxer writes only whole MAT frames, so a TrueHD stream's last units can be cut off.
-do { try unpacker.finish() } catch { FileHandle.standardError.write(Data("finish: \(error)\n".utf8)) }
+do { try unpacker.finish() } catch {
+    guard arguments[4] == "truehd" else { throw error }
+    FileHandle.standardError.write(Data("finish: \(error)\n".utf8))
+}
 try output.write(to: URL(fileURLWithPath: arguments[3]))
 print(String(format: "%.9f", unpacker.skippedDuration.seconds))
 SWIFT
@@ -85,7 +88,7 @@ SWIFT
     "$swiftc" -O -parse-as-library -emit-module -emit-library -static -module-name CoreMedia CoreMedia.swift
     "$swiftc" -O -I . -L . -lCoreMedia -o unpack main.swift "$root/Sources/SpatialAudioBridge/IEC61937Unpacker.swift"
 )
-skipped="$("$work/swift/unpack" "$work/bursts.spdif" "$attach" "$work/unpacked.$format")"
+skipped="$("$work/swift/unpack" "$work/bursts.spdif" "$attach" "$work/unpacked.$format" "$codec")"
 
 raw_bytes="$(stat -c %s "$stream")"
 unpacked_bytes="$(stat -c %s "$work/unpacked.$format")"
@@ -96,6 +99,10 @@ if [[ "$start" -ge 0 ]] && cmp -s -i "$start:0" -n "$unpacked_bytes" "$stream" "
     echo "content: byte-identical to the raw stream's bytes $start to $((start + unpacked_bytes)); $((raw_bytes - start - unpacked_bytes)) final bytes not delivered"
 else
     echo "FAIL: the unpacked stream is not part of the raw stream"
+    exit 1
+fi
+if [[ "$codec" == dtsx && $((start + unpacked_bytes)) -ne "$raw_bytes" ]]; then
+    echo "FAIL: DTS unpacking did not reach the end of the raw stream"
     exit 1
 fi
 # Render the raw stream up to the same end, so the renders' frame counts differ only by the start.
@@ -109,7 +116,7 @@ raw_frames="$(baseline "$work/raw.$format" "$work/raw.f32le")"
 unpacked_frames="$(baseline "$work/unpacked.$format" "$work/unpacked.f32le")"
 offset=$((raw_frames - unpacked_frames))
 cargo run --quiet --release --locked --manifest-path "$root/Rust/SpatialAudioCore/Cargo.toml" \
-    --example pcm_diff -- "$work/raw.f32le" "$work/unpacked.f32le" 12 "$offset"
+    --example pcm_diff -- "$codec" "$work/raw.f32le" "$work/unpacked.f32le" 12 "$offset"
 # Where the bursts carry the first unpacked frame. Each DTS-HD burst spans its frame. FFmpeg spaces
 # TrueHD access units in MAT frames by their input timing, which runs ahead of their presentation
 # by the decoder buffer's varying delay, so that position is the input timing since the first unit.

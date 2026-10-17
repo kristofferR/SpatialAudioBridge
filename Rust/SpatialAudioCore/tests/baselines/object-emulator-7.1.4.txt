@@ -1,6 +1,6 @@
 # Reviewed expected output of SAB's C interface. Regenerate with scripts/compare-baselines.sh.
 # Excerpt cut with ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg developers.
-source fixture:dts-object-emulator.dts stream - start - duration -
+source fixture:dtsx.dts stream - start - duration -
 input-sha256 718cb0dc98f67dcf6f04778fb64ff8862fc625bb782353a6ff9d828fb05fbd69
 codec dtsx
 layout 7.1.4
