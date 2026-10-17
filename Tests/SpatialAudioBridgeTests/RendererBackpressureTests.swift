@@ -398,3 +398,18 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     let empty = await progress.next()
     #expect(empty == SpatialAudioRendererProgress(timelineStart: start, submittedEnd: start, isFinal: true))
 }
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererReportsTheAudioQueuedAheadOfTheClock() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
+    #expect(await renderer.queuedAhead == .zero)
+    let frames = 72_000
+    try await renderer.play([PCMBlock(samples: [Float](repeating: 0, count: frames * 12), frames: frames,
+                                      sampleRate: 48_000, channels: 12)], final: true, generation: 0)
+    // The stopped clock is at zero; the final packet's padding is queued too.
+    let ahead = await renderer.queuedAhead.seconds
+    #expect(ahead >= 1.5 && ahead < 1.5 + 1024.0 / 48_000)
+}

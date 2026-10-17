@@ -51,7 +51,8 @@ public final class APACStream: Sendable {
     let engine: StreamEngine
 
     /// Starts serving `track` (by default the first convertible default track) and converts the
-    /// segment containing `startTime`, failing early when the track cannot be converted.
+    /// segment containing `startTime`, failing early when the track cannot be converted. Waiting
+    /// for that segment takes at most `options.segmentTimeout`.
     ///
     /// `videoMaster` is a multivariant playlist whose variants supply the video, such as a media
     /// server's HLS remux; it is fetched once with `videoHeaders`, and its own audio is replaced.
@@ -138,6 +139,13 @@ public final class APACStream: Sendable {
     /// about 1.2, playback will stall.
     public var conversionSpeed: Double? {
         get async { await engine.conversionSpeed }
+    }
+
+    /// The error that ended the stream, such as a decoding failure mid-film, which AVPlayer reports
+    /// only as a failed item. Nil while the stream can play; a transport failure that a new
+    /// conversion run may recover from does not end it.
+    public var failure: (any Error)? {
+        get async { await engine.endingFailure }
     }
 
     /// Stops conversion and the server. Create a new stream to play again.
@@ -308,6 +316,11 @@ actor StreamEngine {
         stopped = true
         for run in [run, helper].compactMap({ $0 }) { run.task.cancel() }
         (run, helper) = (nil, nil)
+    }
+
+    var endingFailure: (any Error)? {
+        try? checkFailure()
+        return failure
     }
 
     var conversionSpeed: Double? {

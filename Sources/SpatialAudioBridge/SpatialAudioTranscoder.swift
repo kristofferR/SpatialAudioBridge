@@ -116,6 +116,11 @@ public actor SpatialAudioTranscoder {
     private var laced = 0
     /// Whether the decoder holds input to flush.
     private var hasInput = false
+    /// Time spent in finished `append` calls and the frames they encoded, for `conversionSpeed`.
+    private var working = Duration.zero
+    private var workedFrames: Int64 = 0
+    /// When the `append` in progress began, and the frames encoded before it.
+    private var appending: (began: ContinuousClock.Instant, frames: Int64)?
 
     /// Validates `configuration` and prepares the decoder. The encoder starts with the first
     /// decoded audio, once the input's sample rate is known.
@@ -141,7 +146,15 @@ public actor SpatialAudioTranscoder {
     /// because decoded samples alone cannot span it. Frames laced into one block may share a time.
     public func append(_ data: Data, time: CMTime? = nil) async throws {
         try beginOperation()
-        defer { busy = false }
+        appending = (.now, frames)
+        defer {
+            busy = false
+            if let current = appending {
+                working += .now - current.began
+                workedFrames += frames - current.frames
+            }
+            appending = nil
+        }
         hasInput = true
         do {
             if let time { try follow(time) }
@@ -156,6 +169,19 @@ public actor SpatialAudioTranscoder {
                 offset += count
             }
         } catch { fail(); throw error }
+    }
+
+    /// Audio converted per second spent in ``append(_:time:)``, including a call in progress, as a
+    /// multiple of real time; nil before any. Time between calls and padding at the end do not count,
+    /// so this measures conversion, not the host's feeding. Below about 1.2, real-time playback stalls.
+    public var conversionSpeed: Double? {
+        var (time, converted) = (working, workedFrames)
+        if let current = appending {
+            time += .now - current.began
+            converted += frames - current.frames
+        }
+        guard time > .zero else { return nil }
+        return Double(converted) / 48_000 / (time / .seconds(1))
     }
 
     /// Flushes the decoder and encoder and completes the file or final segment. Output that would
