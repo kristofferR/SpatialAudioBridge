@@ -53,3 +53,30 @@ struct Mutation {
         return ranges
     }
 }
+
+/// The pinned TrueHD decoder's public Atmos test vectors, valid seeds that reach spatial decoding.
+/// `SAB_TRUEHD_VECTORS` names the `truehd/tests/assets` directory of its Cargo checkout; the Core
+/// workflow sets it from `cargo metadata`. Tests that need the vectors are skipped without it.
+enum PublicVectors {
+    static let directory = ProcessInfo.processInfo.environment["SAB_TRUEHD_VECTORS"]
+
+    /// Object audio (0.1 s, 140 access units) and trim metadata (0.3 s, 400 units), each from a major sync.
+    static func atmos() throws -> [[UInt8]] {
+        guard let directory else { throw CocoaError(.fileNoSuchFile) }
+        return try ["fba_atmos_obj.mlp", "fba_atmos_dimtrim.mlp"].map {
+            try [UInt8](Data(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent($0)))
+        }
+    }
+
+    /// Splits a TrueHD stream at the 12-bit access unit lengths, in 16-bit words.
+    static func accessUnits(_ stream: [UInt8]) -> [[UInt8]] {
+        var units: [[UInt8]] = [], offset = 0
+        while offset + 2 <= stream.count {
+            let length = ((Int(stream[offset]) << 8 | Int(stream[offset + 1])) & 0x0FFF) * 2
+            guard length > 0, offset + length <= stream.count else { break }
+            units.append(Array(stream[offset..<(offset + length)]))
+            offset += length
+        }
+        return units
+    }
+}
