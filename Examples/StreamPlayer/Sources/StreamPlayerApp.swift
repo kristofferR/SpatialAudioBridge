@@ -51,6 +51,16 @@ private final class PlaybackSynchronizer: AVSampleBufferRenderSynchronizer, @unc
 
     func start() async {
         let environment = ProcessInfo.processInfo.environment
+        // Experiment: plays a URL natively, without the library, as a lip-sync reference.
+        if let native = environment["SAB_NATIVE_URL"].flatMap(URL.init(string:)) {
+            try? AtmosOutputActivator.configureAudioSession()
+            player.replaceCurrentItem(with: AVPlayerItem(url: native))
+            player.play()
+            status = "native"
+            log("native playback of \(native.lastPathComponent)")
+            monitor = Task { [weak self] in await self?.report() }
+            return
+        }
         guard let source = environment["SAB_SOURCE_URL"].flatMap(URL.init(string:)) else {
             status = "Set SAB_SOURCE_URL"
             return
