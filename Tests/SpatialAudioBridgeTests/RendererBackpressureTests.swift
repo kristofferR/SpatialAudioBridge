@@ -366,3 +366,35 @@ func rendererEndsEmptyAndShortStreams(frames: Int) async throws {
     try await renderer.begin(at: .zero)
     try await renderer.enqueue(Data(), time: .zero)
 }
+
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test func rendererReportsHowFarSubmittedAudioReaches() async throws {
+    let output = ControlledRendererOutput()
+    let renderer = try SpatialAudioRenderer(codec: .trueHDAtmos,
+        synchronizer: AVSampleBufferRenderSynchronizer(), output: output,
+        makeDecoder: { CompletedRendererDecoder() })
+    var progress = await renderer.progress().makeAsyncIterator()
+    // 1.5 s of audio ends exactly there, without the final packet's padding.
+    let frames = 72_000
+    try await renderer.play([PCMBlock(samples: [Float](repeating: 0, count: frames * 12), frames: frames,
+                                      sampleRate: 48_000, channels: 12)], generation: 0)
+    try await renderer.endOfStream()
+    let ended = await progress.next()
+    #expect(ended == SpatialAudioRendererProgress(timelineStart: .zero,
+        submittedEnd: CMTime(value: Int64(frames), timescale: 48_000), isFinal: true))
+    // A timeline that ends without audio reports its start.
+    let start = CMTime(value: 10, timescale: 1)
+    try await renderer.begin(at: start)
+    let began = await progress.next()
+    #expect(began == SpatialAudioRendererProgress(timelineStart: start, submittedEnd: start, isFinal: false))
+    // A cancelled reader ends only its own stream; a new one starts from the latest value.
+    let cancelled = Task { [renderer] in for await _ in await renderer.progress() {} }
+    cancelled.cancel()
+    await cancelled.value
+    progress = await renderer.progress().makeAsyncIterator()
+    let restarted = await progress.next()
+    #expect(restarted == began)
+    try await renderer.endOfStream()
+    let empty = await progress.next()
+    #expect(empty == SpatialAudioRendererProgress(timelineStart: start, submittedEnd: start, isFinal: true))
+}
