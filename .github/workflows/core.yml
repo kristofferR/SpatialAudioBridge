@@ -81,7 +81,24 @@ jobs:
           set -o pipefail
           swift build -Xswiftc -warnings-as-errors
           # A pseudo-terminal keeps the test output line-buffered, so a hung test shows where it stopped.
-          script -q /dev/null swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
+          (script -q /dev/null swift test -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/package-tests.log") &
+          tests=$!
+          # A hung run is sampled and stopped instead of holding the runner until the job times out.
+          (
+            sleep 900
+            mkdir -p "$RUNNER_TEMP/hang"
+            for pid in $(pgrep -f SpatialAudioBridgePackageTests); do
+              sample "$pid" 5 -file "$RUNNER_TEMP/hang/sample-$pid.txt" >/dev/null 2>&1
+            done
+            echo "Package tests still running after 15 minutes; thread samples are in the package-test-output artifact."
+            pkill -f SpatialAudioBridgePackageTests
+          ) &
+          watchdog=$!
+          status=0
+          wait "$tests" || status=$?
+          pkill -P "$watchdog" 2>/dev/null || true
+          kill "$watchdog" 2>/dev/null || true
+          exit "$status"
       - name: Preserve test log and DRC outputs
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,6 +107,7 @@ jobs:
           path: |
             ${{ runner.temp }}/package-tests.log
             ${{ runner.temp }}/drc-outputs
+            ${{ runner.temp }}/hang
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
