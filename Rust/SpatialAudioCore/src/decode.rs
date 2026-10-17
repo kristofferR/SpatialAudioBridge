@@ -19,6 +19,38 @@ pub struct Pcm {
     pub channels: usize,
 }
 
+/// Why a session stopped. Every error ends the session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Damaged, truncated or misframed input.
+    Malformed(String),
+    /// Well-formed content this renderer does not render, such as TrueHD without Atmos.
+    Unsupported(String),
+}
+impl Error {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Malformed(message) | Self::Unsupported(message) => message,
+        }
+    }
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+impl std::error::Error for Error {}
+impl From<String> for Error {
+    fn from(message: String) -> Self {
+        Self::Malformed(message)
+    }
+}
+impl From<&str> for Error {
+    fn from(message: &str) -> Self {
+        Self::Malformed(message.into())
+    }
+}
+
 /// Concealment accepted by this decoder session, measured in source sample frames, not channels.
 /// Includes input before any host-side seek trimming; excludes encoder priming and padding.
 #[repr(C)]
@@ -45,7 +77,7 @@ impl Core {
             Source::Dts(_) => RecoveryStatistics::default(),
         }
     }
-    pub fn new(codec: u32, layout: Layout) -> Result<Self, String> {
+    pub fn new(codec: u32, layout: Layout) -> Result<Self, Error> {
         let source = match codec {
             1 => Source::TrueHd(Box::new(TrueHd::new(layout))),
             2 => Source::Dts(Box::new(Dts::new(layout))),
@@ -58,7 +90,7 @@ impl Core {
     }
     /// Decodes without peak limiting for measurements of the rendered speaker feeds.
     /// Samples can exceed full scale; use `new` for playback.
-    pub fn new_unlimited(codec: u32, layout: Layout) -> Result<Self, String> {
+    pub fn new_unlimited(codec: u32, layout: Layout) -> Result<Self, Error> {
         let mut core = Self::new(codec, layout)?;
         core.limiter = None;
         Ok(core)
@@ -77,7 +109,7 @@ impl Core {
         data: &[u8],
         end: bool,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         let limiter = &mut self.limiter;
         let mut limited = |pcm: Pcm| match limiter {
             Some(limiter) => limiter.push(pcm, output),
@@ -161,14 +193,14 @@ impl TrueHd {
         data: &[u8],
         end: bool,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         self.bytes += data.len() as u64;
         self.extractor.push_bytes(data);
         while let Some(frame) = self.extractor.next() {
             let frame = match frame {
                 Ok(f) => f,
                 Err(ExtractError::InsufficientData) => break,
-                Err(e) => return Err(format!("TrueHD framing: {e}")),
+                Err(e) => return Err(format!("TrueHD framing: {e}").into()),
             };
             if frame.offset != self.consumed {
                 return Err(
@@ -199,7 +231,9 @@ impl TrueHd {
             if let Some(sync) = &au.major_sync_info
                 && sync.substreams < 4
             {
-                return Err("This TrueHD stream has no Atmos presentation".into());
+                return Err(Error::Unsupported(
+                    "This TrueHD stream has no Atmos presentation".into(),
+                ));
             }
             if self.normalise_dialogue
                 && let Some(extra) = au
@@ -220,7 +254,9 @@ impl TrueHd {
                 continue;
             }
             if self.decoded.sampling_frequency != 48_000 {
-                return Err("The initial Atmos renderer supports 48 kHz tracks".into());
+                return Err(Error::Unsupported(
+                    "The initial Atmos renderer supports 48 kHz tracks".into(),
+                ));
             }
             let frames = self.decoded.sample_length;
             // A changed dialogue level ramps over one access unit.
@@ -262,12 +298,12 @@ impl TrueHd {
         restarting: Option<String>,
         error: String,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         if let Some(first) = restarting {
-            return Err(first);
+            return Err(first.into());
         }
         if self.unit.is_none() {
-            return Err(error);
+            return Err(error.into());
         }
         self.parser.reset_for_next_major_sync();
         self.decoder.reset_for_next_major_sync();
@@ -276,14 +312,11 @@ impl TrueHd {
     }
 
     /// Writes silence for one lost access unit.
-    fn conceal(
-        &mut self,
-        output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    fn conceal(&mut self, output: &mut impl FnMut(Pcm) -> Result<(), String>) -> Result<(), Error> {
         if let Some((error, count)) = &mut self.lost {
             *count += 1;
             if *count > MAX_SYNC_INTERVAL {
-                return Err(error.clone());
+                return Err(error.clone().into());
             }
         }
         let (frames, channels) = self.unit.unwrap_or_default();
@@ -308,7 +341,7 @@ impl TrueHd {
         frames: usize,
         metadata: bool,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         let oamd = if metadata {
             self.decoded.oamd.as_slice()
         } else {
@@ -320,6 +353,7 @@ impl TrueHd {
                 // a few access units in. Hold the audio until then so no samples are lost.
                 self.held_frames += frames;
                 if self.held_frames > MAX_HELD_FRAMES {
+                    // Damage can hide it, and a later sync point may carry it.
                     return Err("Atmos presentation has no object metadata within 0.5 s".into());
                 }
                 self.held.push(input);
@@ -347,7 +381,8 @@ impl TrueHd {
             frames,
             rate: 48_000,
             channels: self.renderer.panner.count(),
-        })
+        })?;
+        Ok(())
     }
 }
 
@@ -356,7 +391,7 @@ fn set_initial_state(
     renderer: &mut Renderer,
     metadata: &ObjectAudioMetadataPayload,
     channels: usize,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let mut first = Vec::with_capacity(channels);
     for_each_block(renderer, metadata, channels, |event| {
         if event.block == 0 {
@@ -373,7 +408,7 @@ fn schedule_oamd(
     renderer: &mut Renderer,
     metadata: &ObjectAudioMetadataPayload,
     channels: usize,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let mut events = Vec::new();
     for_each_block(renderer, metadata, channels, |event| {
         events.push(event.event)
@@ -397,16 +432,22 @@ fn for_each_block(
     metadata: &ObjectAudioMetadataPayload,
     channels: usize,
     mut visit: impl FnMut(BlockEvent),
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let program = &metadata.program_assignment;
     if program.num_isf_objects != 0 || program.bed_assignment.len() > 1 {
-        return Err("Atmos ISF and multiple bed instances are not yet supported".into());
+        return Err(Error::Unsupported(
+            "Atmos ISF and multiple bed instances are not yet supported".into(),
+        ));
     }
     if program.b_bed_chan_distribute {
-        return Err("Atmos bed channel distribution is not yet supported".into());
+        return Err(Error::Unsupported(
+            "Atmos bed channel distribution is not yet supported".into(),
+        ));
     }
     if metadata.bed_object_element.is_some() {
-        return Err("Atmos bed downmix metadata is not yet supported".into());
+        return Err(Error::Unsupported(
+            "Atmos bed downmix metadata is not yet supported".into(),
+        ));
     }
     let trim = metadata.trim_element.as_ref();
     // `warp_mode` 1 doubles Y before rendering (TS 103 420 table 32). It is the Dolby Atmos
@@ -414,7 +455,7 @@ fn for_each_block(
     // behind the room's midpoint plays at a constant level in them. 7.1.4 and 9.1.6 have side
     // and back surrounds, so positions stay as transmitted.
     if trim.is_some_and(|trim| trim.warp_mode > 1) {
-        return Err("Reserved Atmos warp mode".into());
+        return Err(Error::Unsupported("Reserved Atmos warp mode".into()));
     }
     let element = metadata
         .object_element
@@ -467,10 +508,12 @@ fn for_each_block(
                 }
                 let info = &block.object_render_info;
                 if info.b_object_distance_specified {
-                    return Err("Atmos objects outside the room are not yet supported".into());
+                    return Err(Error::Unsupported(
+                        "Atmos objects outside the room are not yet supported".into(),
+                    ));
                 }
                 if info.zone_constraints_idx > 5 {
-                    return Err("Reserved Atmos zone constraint".into());
+                    return Err(Error::Unsupported("Reserved Atmos zone constraint".into()));
                 }
                 let object = renderer.panner.preprocess(Object {
                     // From DAMF coordinates to TS 103 448 room coordinates.
@@ -585,7 +628,7 @@ impl Dts {
         data: &[u8],
         end: bool,
         output: &mut impl FnMut(Pcm) -> Result<(), String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         self.buffer.extend_from_slice(data);
         loop {
             if self.buffer.len() < 18 {
@@ -598,9 +641,13 @@ impl Dts {
                 break;
             }
             if self.buffer[core_len..core_len + 4] != [0x64, 0x58, 0x20, 0x25] {
-                return Err(
-                    "DTS:X requires the complete DTS-HD extension after each core frame".into(),
-                );
+                let message = "DTS:X requires the complete DTS-HD extension after each core frame";
+                // Once DTS:X has decoded, a missing extension is damage, not a core-only track.
+                return Err(if self.seen {
+                    message.into()
+                } else {
+                    Error::Unsupported(message.into())
+                });
             }
             let exss = &self.buffer[core_len..];
             let Some(exss_len) = dca::exss_substream_size(exss) else {
@@ -642,7 +689,7 @@ impl Dts {
                         channels,
                     }
                 }
-                Err(e) => return Err(format!("DTS-HD decoding: {e:?}")),
+                Err(e) => return Err(format!("DTS-HD decoding: {e:?}").into()),
             };
             self.buffer.drain(..core_len + exss_len);
             output(pcm)?;
@@ -655,14 +702,17 @@ impl Dts {
         }
         Ok(())
     }
-    fn render(&mut self, frame: &dca::HdFrame) -> Result<Pcm, String> {
+    fn render(&mut self, frame: &dca::HdFrame) -> Result<Pcm, Error> {
         if !frame.lossless || !(frame.x_present || frame.x_imax) {
-            return Err("This stream is not lossless DTS:X".into());
+            return Err(Error::Unsupported(
+                "This stream is not lossless DTS:X".into(),
+            ));
         }
         if let Some(e) = frame.x_decode_error {
-            return Err(format!("DTS:X extension decoding: {e}"));
+            return Err(format!("DTS:X extension decoding: {e}").into());
         }
-        let presentation = dca::XPresentation::detect(frame).ok_or("Unknown DTS:X presentation")?;
+        let presentation = dca::XPresentation::detect(frame)
+            .ok_or_else(|| Error::Unsupported("Unknown DTS:X presentation".into()))?;
         let metadata = dca::XMetadata::parse(&frame.x_payload, presentation.feed_count())
             .map_err(|e| format!("DTS:X spatial metadata: {e:?}"))?;
         self.render_spatial(frame, presentation, metadata)
@@ -673,18 +723,20 @@ impl Dts {
         frame: &dca::HdFrame,
         presentation: dca::XPresentation,
         metadata: dca::XMetadata,
-    ) -> Result<Pcm, String> {
+    ) -> Result<Pcm, Error> {
         if dca::XPresentation::detect(frame) != Some(presentation) {
             return Err("DTS:X PCM does not match its presentation".into());
         }
         if frame.sample_rate != 48_000 {
-            return Err("The DTS:X renderer supports 48 kHz tracks".into());
+            return Err(Error::Unsupported(
+                "The DTS:X renderer supports 48 kHz tracks".into(),
+            ));
         }
         if self
             .presentation
             .is_some_and(|previous| previous != presentation)
         {
-            return Err("DTS:X presentation changed; begin a new session".into());
+            return Err("DTS:X presentation changed mid-stream".into());
         }
         if metadata.source_count() != presentation.feed_count() {
             return Err("DTS:X PCM / metadata feed count mismatch".into());
@@ -712,7 +764,11 @@ impl Dts {
                 {
                     self.renderer.panner.speaker(dts_spatial_speaker(channel))
                 }
-                _ => return Err("DTS:X source role does not match its presentation".into()),
+                _ => {
+                    return Err(Error::Unsupported(
+                        "DTS:X source role does not match its presentation".into(),
+                    ));
+                }
             };
             gains.push(gain);
         }
@@ -720,9 +776,9 @@ impl Dts {
         let mut plan = dca::FoldPlan::from_metadata(&metadata);
         self.fold_renderer.apply(&mut plan, &metadata, frames);
         if plan.has_unknown() {
-            return Err(
+            return Err(Error::Unsupported(
                 "DTS:X has an unknown bed fold; refusing to duplicate its spatial audio".into(),
-            );
+            ));
         }
         let mut input = Vec::new();
         use Speaker::*;
@@ -740,7 +796,11 @@ impl Dts {
                     5 => Lfe,
                     7 => Lb,
                     8 => Rb,
-                    _ => return Err(format!("DTS bed speaker {id} is not yet supported")),
+                    _ => {
+                        return Err(Error::Unsupported(format!(
+                            "DTS bed speaker {id} is not yet supported"
+                        )));
+                    }
                 };
                 let index = input.len();
                 self.renderer
@@ -889,7 +949,7 @@ mod metadata_tests {
     fn block(metadata: &mut ObjectAudioMetadataPayload) -> &mut ObjectInfoBlock {
         &mut metadata.object_element.as_mut().unwrap().object_data[0][0]
     }
-    fn render(metadata: &ObjectAudioMetadataPayload) -> Result<Vec<f32>, String> {
+    fn render(metadata: &ObjectAudioMetadataPayload) -> Result<Vec<f32>, Error> {
         let mut renderer = Renderer::new(Layout::NineOneSix);
         schedule_oamd(&mut renderer, metadata, 1)?;
         Ok(renderer.render(&[vec![1.]], 1))
@@ -1011,7 +1071,9 @@ mod metadata_tests {
         for (name, set) in cases {
             let mut metadata = point();
             set(&mut block(&mut metadata).object_render_info);
-            assert!(render(&metadata).unwrap_err().contains(name));
+            let error = render(&metadata).unwrap_err();
+            assert!(error.message().contains(name), "{error}");
+            assert!(matches!(error, Error::Unsupported(_)), "{error}");
             block(&mut metadata).b_object_not_active = true;
             assert!(render(&metadata).unwrap().iter().all(|g| *g == 0.));
         }
@@ -1036,7 +1098,9 @@ mod metadata_tests {
         for (name, set) in cases {
             let mut metadata = point();
             set(&mut metadata);
-            assert!(render(&metadata).unwrap_err().contains(name));
+            let error = render(&metadata).unwrap_err();
+            assert!(error.message().contains(name), "{error}");
+            assert!(matches!(error, Error::Unsupported(_)), "{error}");
         }
     }
 
@@ -1173,7 +1237,10 @@ mod dts_tests {
                 .render(&frame)
                 .err()
                 .expect("damaged metadata must fail");
-            assert!(error.starts_with("DTS:X spatial metadata:"), "{error}");
+            assert!(
+                error.message().starts_with("DTS:X spatial metadata:"),
+                "{error}"
+            );
             assert_eq!(frame.samples, original_bed);
             assert_eq!(frame.x_samples, original_feeds);
             frame.x_payload = IMAX_COMPONENT_PAYLOAD.to_vec();
@@ -1352,7 +1419,8 @@ mod dts_tests {
                 )
                 .err()
                 .unwrap();
-            assert!(error.contains(expected), "{error}");
+            assert!(error.message().contains(expected), "{error}");
+            assert!(matches!(error, Error::Unsupported(_)), "{error}");
         }
     }
 
@@ -1376,6 +1444,9 @@ mod dts_tests {
             )
             .err()
             .unwrap();
-        assert!(error.contains("new session"));
+        assert_eq!(
+            error,
+            Error::Malformed("DTS:X presentation changed mid-stream".into())
+        );
     }
 }

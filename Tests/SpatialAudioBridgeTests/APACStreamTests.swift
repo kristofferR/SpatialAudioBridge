@@ -90,7 +90,11 @@ import Testing
     let transcoder = try SpatialAudioTranscoder(codec: .trueHDAtmos,
                                                 destination: .segments(syncPeriodsPerSegment: 2, onSegment: { _ in }))
     try await transcoder.append(Data([0]), time: .zero)
-    await #expect(throws: SpatialAudioError.self) { try await transcoder.append(Data([0]), time: CMTime(seconds: 5, preferredTimescale: 1)) }
+    await #expect {
+        try await transcoder.append(Data([0]), time: CMTime(seconds: 5, preferredTimescale: 1))
+    } throws: { error in
+        if case SpatialAudioError.discontinuity = error { true } else { false }
+    }
     // The failure ends the session.
     await #expect(throws: SpatialAudioError.self) { try await transcoder.append(Data([0])) }
 }

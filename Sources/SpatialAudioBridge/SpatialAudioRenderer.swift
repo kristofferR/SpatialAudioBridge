@@ -320,7 +320,7 @@ public actor SpatialAudioRenderer {
         var pcm: [Float] = []
         for block in blocks {
             guard block.sampleRate == 48_000, block.channels == configuration.layout.channelCount else {
-                throw SpatialAudioError.encoding("Audio format changed; call begin(at:) at a discontinuity")
+                throw SpatialAudioError.discontinuity("Audio format changed; call begin(at:) again")
             }
             var samples = block.samples[...]
             if let remaining = discarding {

@@ -172,9 +172,14 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     case invalidConfiguration(String)
     /// The call does not fit the session's state, such as appending after `finish()`.
     case invalidState(String)
-    /// The input is malformed, truncated or uses unsupported metadata, such as Atmos ISF or an
-    /// unknown DTS:X profile.
+    /// The input is malformed or truncated. It may play from a later sync point or another source.
     case decoding(String)
+    /// The track is well formed but will never render, such as TrueHD without Atmos, DTS-HD MA
+    /// without DTS:X, Atmos ISF or an unknown DTS:X profile. Fall back for this track for good.
+    case unsupported(String)
+    /// The timeline or format changed, such as a timestamp jump or an IEC 61937 pause burst. Start
+    /// a new session at the next sync point.
+    case discontinuity(String)
     case encoding(String)
     /// The media source could not be read or is not a supported container.
     case source(String)
@@ -183,7 +188,8 @@ public enum SpatialAudioError: Error, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .invalidConfiguration(let message), .invalidState(let message),
-             .decoding(let message), .encoding(let message), .source(let message): message
+             .decoding(let message), .unsupported(let message), .discontinuity(let message),
+             .encoding(let message), .source(let message): message
         case .coreMedia(let code): "CoreMedia error \(code)"
         }
     }

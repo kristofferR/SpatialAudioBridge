@@ -1,5 +1,5 @@
 use crate::{
-    decode::{Core, Pcm, RecoveryStatistics},
+    decode::{Core, Error, Pcm, RecoveryStatistics},
     render::Layout,
 };
 use std::{
@@ -12,19 +12,27 @@ pub type PcmCallback = unsafe extern "C" fn(*mut c_void, *const f32, u32, u32, u
 pub struct Handle {
     decoder: Core,
     error: String,
+    /// The `sab_push` result that reported `error`.
+    code: i32,
     ended: bool,
 }
+
+/// `sab_push` results: malformed input or misuse, and unsupported content.
+const MALFORMED: i32 = -1;
+const UNSUPPORTED: i32 = -2;
 
 /// Creates a single-threaded session: codec 1=TrueHD Atmos, 2=DTS:X; layout 12=7.1.4, 16=9.1.6.
 #[unsafe(no_mangle)]
 pub extern "C" fn sab_create(codec: u32, channels: u32) -> *mut Handle {
     catch_unwind(|| {
         Layout::parse(channels)
-            .and_then(|l| Core::new(codec, l))
+            .ok()
+            .and_then(|l| Core::new(codec, l).ok())
             .map(|decoder| {
                 Box::into_raw(Box::new(Handle {
                     decoder,
                     error: String::new(),
+                    code: 0,
                     ended: false,
                 }))
             })
@@ -58,14 +66,18 @@ pub unsafe extern "C" fn sab_push(
     context: *mut c_void,
 ) -> i32 {
     let Some(handle) = (unsafe { handle.as_mut() }) else {
-        return -1;
+        return MALFORMED;
     };
-    if handle.ended || !handle.error.is_empty() {
-        return -1;
+    if !handle.error.is_empty() {
+        return handle.code;
+    }
+    if handle.ended {
+        return MALFORMED;
     }
     if length > 65536 || (length != 0 && data.is_null()) || callback.is_none() {
         handle.error = "Invalid input buffer or PCM callback".into();
-        return -1;
+        handle.code = MALFORMED;
+        return MALFORMED;
     }
     let bytes = if length == 0 {
         &[]
@@ -100,12 +112,17 @@ pub unsafe extern "C" fn sab_push(
             0
         }
         Ok(Err(e)) => {
-            handle.error = e;
-            -1
+            handle.code = match e {
+                Error::Malformed(_) => MALFORMED,
+                Error::Unsupported(_) => UNSUPPORTED,
+            };
+            handle.error = e.message().into();
+            handle.code
         }
         Err(_) => {
             handle.error = "Decoder panic; the session has been stopped".into();
-            -1
+            handle.code = MALFORMED;
+            MALFORMED
         }
     }
 }
@@ -176,7 +193,10 @@ mod tests {
             assert_eq!(sab_recovery_statistics(handle, ptr::null_mut()), -1);
             assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
             assert_eq!(snapshot, RecoveryStatistics::default());
-            assert_eq!(sab_push(handle, ptr::null(), 0, 0, None, ptr::null_mut()), -1);
+            assert_eq!(
+                sab_push(handle, ptr::null(), 0, 0, None, ptr::null_mut()),
+                -1
+            );
             assert_eq!(sab_recovery_statistics(handle, &mut snapshot), 0);
             assert_eq!(snapshot, RecoveryStatistics::default());
             sab_destroy(handle);

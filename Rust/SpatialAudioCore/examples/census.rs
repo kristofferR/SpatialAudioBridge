@@ -74,7 +74,7 @@ impl Render {
             Ok(())
         });
         if let Err(e) = result {
-            self.error = Some((e, self.frames as f64 / RATE));
+            self.error = Some((e.to_string(), self.frames as f64 / RATE));
         }
     }
 }
