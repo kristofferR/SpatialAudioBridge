@@ -323,3 +323,73 @@ private final class MemoryByteSource: MediaByteSource, @unchecked Sendable {
         #expect(source.bytesRead <= (1 + 3 * 2) * (bytes.count + 4 << 20), "seed \(seed)")
     }
 }
+
+/// A file with one TrueHD track holding `units`, one access unit per block at its time in milliseconds.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private func trueHDMatroska(_ units: [[UInt8]]) -> Data {
+    let blocks = units.enumerated().map { index, unit in
+        MKV.element(EBML.simpleBlock, MKV.blockBody(track: 1, milliseconds: Int16(index * 40 / 48), flags: 0x80, payload: Data(unit)))
+    }
+    let info = MKV.element(EBML.info, [MKV.uint(EBML.timestampScale, 1_000_000)])
+    let tracks = MKV.element(EBML.tracks, [MKV.element(EBML.trackEntry, [
+        MKV.uint(EBML.trackNumber, 1), MKV.uint(EBML.trackType, 2), MKV.string(EBML.codecID, "A_TRUEHD"),
+        MKV.element(EBML.audio, [MKV.float(EBML.samplingFrequency, 48000), MKV.uint(EBML.channels, 8)]),
+    ])])
+    let cluster = MKV.element(EBML.cluster, [MKV.uint(EBML.timestamp, 0)] + blocks)
+    // `MKV.id` returns a slice, so rebase the file to start at index zero as a read file does.
+    return Data([UInt8](MKV.element(EBML.header, [MKV.string(EBML.docType, "matroska")]) + MKV.element(EBML.segment, [info, tracks, cluster])))
+}
+
+/// Reads a file's first audio track into a transcoder writing APAC segments, as a host's stream would.
+@available(macOS 26, iOS 26, tvOS 26, *)
+private func convertFirstTrack(_ source: MemoryByteSource) async throws -> (stream: Data, report: APACConversionReport, segments: [APACSegment])? {
+    let file = try await MatroskaFile.open(source)
+    guard let track = file.audioTracks.first, let codec = track.codec else { return nil }
+    let collector = SegmentCollector()
+    let transcoder = try SpatialAudioTranscoder(codec: codec, destination: .segments(syncPeriodsPerSegment: 1, onSegment: { collector.append($0) }),
+                                                configuration: APACConfiguration(liveEncoding: true))
+    var stream = Data()
+    do {
+        for try await packet in file.packets(of: track) {
+            stream += packet.data
+            try await transcoder.append(packet.data, time: packet.time)
+        }
+        return (stream, try await transcoder.finish(), collector.snapshot())
+    } catch {
+        await transcoder.cancel()
+        throw error
+    }
+}
+
+/// The pinned decoder's public Atmos vectors, muxed into a file, read back as the original stream
+/// and convert to APAC segments with every source frame. Mutated, the file converts or fails with a
+/// `SpatialAudioError`, with a finite peak and without reading far past the file.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test(.enabled(if: PublicVectors.directory != nil), .timeLimit(.minutes(3)))
+func mutatedPublicAtmosMatroskaConvertsOrFailsWithinBounds() async throws {
+    let streams = try PublicVectors.atmos()
+    let bases = streams.map { trueHDMatroska(PublicVectors.accessUnits($0)) }
+    for (stream, base) in zip(streams, bases) {
+        let converted = try await convertFirstTrack(MemoryByteSource(base))
+        let (read, report, segments) = try #require(converted)
+        #expect(read == Data(stream))
+        #expect(report.sampleFrames == Int64(PublicVectors.accessUnits(stream).count * 40))
+        #expect(report.peakPCM.isFinite && report.recovery.concealedFrames == 0)
+        #expect(segments.first?.kind == .initialization && segments.contains(where: { $0.kind == .media }))
+    }
+    for seed in Mutation.seeds(base: 0x4D4B_5641) {
+        var random = Mutation(seed: seed)
+        let bytes = random.mutate([UInt8](bases[random.below(bases.count)]))
+        let source = MemoryByteSource(Data(bytes))
+        do {
+            if let converted = try await convertFirstTrack(source) {
+                #expect(converted.stream.count <= bytes.count, "seed \(seed)")
+                #expect(converted.report.peakPCM.isFinite, "seed \(seed)")
+            }
+        } catch is SpatialAudioError {
+        } catch {
+            Issue.record("seed \(seed): unexpected \(error)")
+        }
+        #expect(source.bytesRead <= 3 * (bytes.count + 4 << 20), "seed \(seed)")
+    }
+}

@@ -191,3 +191,55 @@ func ffmpegBurstsUnpackToTheOriginalStream() throws {
         #expect(produced <= input.count, "seed \(seed)")
     }
 }
+
+/// The pinned decoder's public Atmos vectors in MAT bursts unpack to the original stream and decode
+/// to every access unit's 40 frames. Mutated before or after framing, split anywhere and decoded as
+/// they unpack, they yield well-formed finite PCM or throw a `SpatialAudioError`, within the
+/// unpacker's buffering bound.
+@available(macOS 26, iOS 26, tvOS 26, *)
+@Test(.enabled(if: PublicVectors.directory != nil), .timeLimit(.minutes(2)))
+func mutatedPublicAtmosBurstsDecodeOrFailWithinBounds() throws {
+    let streams = try PublicVectors.atmos()
+    for stream in streams {
+        let units = PublicVectors.accessUnits(stream)
+        #expect(units.joined().count == stream.count)
+        let (output, unpacker) = try unpackInChunks(matBursts(units, littleEndian: true))
+        #expect(output == Data(stream))
+        try unpacker.finish()
+        let decoder = try Decoder(codec: .trueHDAtmos, layout: .sevenOneFour)
+        let blocks = try output.withUnsafeBytes { try decoder.decode($0, end: true) }
+        #expect(blocks.reduce(0) { $0 + $1.frames } == units.count * 40)
+        #expect(decoder.isSpatial)
+    }
+    for seed in Mutation.seeds(base: 0x7E57_0A75) {
+        var random = Mutation(seed: seed)
+        let stream = streams[random.below(streams.count)], littleEndian = random.below(2) == 0
+        // Most of a MAT frame is padding, so mutate the stream itself as often as its framing.
+        let input = random.below(2) == 0
+            ? matBursts([random.mutate(stream)], littleEndian: littleEndian)
+            : random.mutate(matBursts(PublicVectors.accessUnits(stream), littleEndian: littleEndian))
+        let layout: SpatialAudioLayout = random.below(2) == 0 ? .sevenOneFour : .nineOneSix
+        func check(_ blocks: [PCMBlock]) {
+            for block in blocks {
+                #expect(block.sampleRate == 48_000 && block.channels == layout.channelCount
+                        && block.samples.count == block.frames * block.channels, "seed \(seed)")
+                let finite = block.samples.allSatisfy(\.isFinite)
+                #expect(finite, "seed \(seed)")
+            }
+        }
+        var unpacker = IEC61937Unpacker()
+        do {
+            let decoder = try Decoder(codec: .trueHDAtmos, layout: layout)
+            for range in random.chunks(input.count) {
+                let unpacked = try unpacker.unpack(Data(input[range]))
+                #expect(unpacker.bufferedBytes <= 2 * 20_000 + 65_543 + 8_190, "seed \(seed)")
+                if !unpacked.isEmpty { check(try unpacked.withUnsafeBytes { try decoder.decode($0, end: false) }) }
+            }
+            try? unpacker.finish()
+            check(try decoder.decode(UnsafeRawBufferPointer(start: nil, count: 0), end: true))
+        } catch is SpatialAudioError {
+        } catch {
+            Issue.record("seed \(seed): unexpected \(error)")
+        }
+    }
+}
