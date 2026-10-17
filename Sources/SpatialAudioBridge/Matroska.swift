@@ -358,12 +358,7 @@ final class PacketReader {
     }
 
     static func isSyncPoint(_ data: Data, codec: SpatialAudioCodec?) -> Bool {
-        let bytes = [UInt8](data.prefix(8))
-        switch codec {
-        case .trueHDAtmos: return bytes.count == 8 && bytes[4...7] == [0xF8, 0x72, 0x6F, 0xBA]
-        case .dtsX: return bytes.starts(with: [0x7F, 0xFE, 0x80, 0x01])
-        case nil: return true
-        }
+        codec?.isSyncPoint(data) ?? true
     }
 
     /// Splits a block body into frames for no (0), Xiph (1), fixed-size (2) or EBML (3) lacing.

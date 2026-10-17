@@ -24,6 +24,8 @@ void sab_set_dialogue_normalisation(SABHandle *handle, int32_t enabled);
    SAB_MALFORMED for damaged input or misuse and SAB_UNSUPPORTED for content the core does not render. */
 int32_t sab_push(SABHandle *handle, const uint8_t *data, size_t length, int32_t end, SABPCMCallback callback, void *context);
 size_t sab_error(const SABHandle *handle, char *buffer, size_t capacity);
+/* 1 once the stream has proven spatial: TrueHD with object metadata or a rendered DTS:X frame. */
+int32_t sab_is_spatial(const SABHandle *handle);
 /* Copies a cumulative snapshot, also after end/error; a new session resets it. Returns -1 on
    null pointers, zero on success. Serialize with session calls; do not reenter from callback. */
 int32_t sab_recovery_statistics(const SABHandle *handle, SABRecoveryStatistics *output);

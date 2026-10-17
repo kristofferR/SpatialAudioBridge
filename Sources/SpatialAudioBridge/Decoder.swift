@@ -27,6 +27,9 @@ final class Decoder: @unchecked Sendable {
     }
     deinit { sab_destroy(handle) }
 
+    /// Whether the stream has proven spatial: Atmos object metadata or a rendered DTS:X frame.
+    var isSpatial: Bool { sab_is_spatial(handle) != 0 }
+
     var recoveryStatistics: SpatialAudioRecoveryStatistics {
         var snapshot = SABRecoveryStatistics()
         // The owned handle and stack output are always valid.
